@@ -1,0 +1,329 @@
+import type { BoardDefinition, PinDefinition, SupportLevel } from '../types';
+import { ARDUINO_UNO } from './unoDefinition';
+import { pinRow, gpio, analog, gnd, p5v, p3v3, vin, reset, type PinSpec } from './pinHelpers';
+
+interface HeaderBoardSpec {
+  id: string;
+  name: string;
+  family: string;
+  processor: string;
+  widthMm: number;
+  heightMm: number;
+  left: (PinSpec | null)[];
+  right: (PinSpec | null)[];
+  supportLevel: SupportLevel;
+  logicVoltage: number;
+  color?: string;
+  usb?: 'micro' | 'usb-c' | 'mini' | 'none';
+  compilerTarget?: BoardDefinition['compilerTarget'];
+  simulationAdapterId?: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/** Generic dual-row module (DevKit style): pins run down the left and right edges. */
+function headerBoard(spec: HeaderBoardSpec): BoardDefinition {
+  const marginTop = (spec.heightMm - (Math.max(spec.left.length, spec.right.length) - 1) * 2.54) / 2;
+  const pins: PinDefinition[] = [
+    ...pinRow(spec.left, 1.8, marginTop, false),
+    ...pinRow(spec.right, spec.widthMm - 1.8, marginTop, false),
+  ];
+  return {
+    id: spec.id,
+    name: spec.name,
+    family: spec.family,
+    processor: spec.processor,
+    widthMm: spec.widthMm,
+    heightMm: spec.heightMm,
+    artwork: { kind: 'builtin', builtinId: 'generic-module' },
+    pins,
+    compilerTarget: spec.compilerTarget,
+    simulationAdapterId: spec.simulationAdapterId,
+    supportLevel: spec.supportLevel,
+    isBoard: true,
+    description: spec.description,
+    metadata: {
+      logicVoltage: spec.logicVoltage,
+      color: spec.color ?? '#0b3d2e',
+      usb: spec.usb ?? 'micro',
+      ...spec.metadata,
+    },
+  };
+}
+
+const g3 = (id: string, label: string, extra: Partial<PinSpec> = {}) =>
+  gpio(id, label, ['digital-in', 'digital-out', 'pwm'], 3.3, extra);
+const a3 = (id: string, label: string) => analog(id, label, 3.3);
+
+export const ARDUINO_NANO = headerBoard({
+  id: 'board.arduino-nano',
+  name: 'Arduino Nano',
+  family: 'Arduino AVR',
+  processor: 'ATmega328P',
+  widthMm: 18,
+  heightMm: 43.2,
+  supportLevel: 'compile',
+  logicVoltage: 5,
+  color: '#0b3d5e',
+  usb: 'mini',
+  compilerTarget: { fqbn: 'arduino:avr:nano', mcu: 'atmega328p', fCpuHz: 16_000_000 },
+  description:
+    'Nano-compatible ATmega328P board. Code compiles for this board (arduino:avr:nano); full-canvas simulation currently runs on the Uno profile.',
+  left: [
+    gpio('D1', 'TX1', ['digital-in', 'digital-out', 'uart-tx']),
+    gpio('D0', 'RX0', ['digital-in', 'digital-out', 'uart-rx']),
+    reset('RESET'),
+    gnd('GND1'),
+    gpio('D2', 'D2', ['digital-in', 'digital-out', 'interrupt']),
+    gpio('D3', 'D3', ['digital-in', 'digital-out', 'pwm', 'interrupt']),
+    gpio('D4', 'D4'),
+    gpio('D5', 'D5', ['digital-in', 'digital-out', 'pwm']),
+    gpio('D6', 'D6', ['digital-in', 'digital-out', 'pwm']),
+    gpio('D7', 'D7'),
+    gpio('D8', 'D8'),
+    gpio('D9', 'D9', ['digital-in', 'digital-out', 'pwm']),
+    gpio('D10', 'D10', ['digital-in', 'digital-out', 'pwm', 'spi-ss']),
+    gpio('D11', 'D11', ['digital-in', 'digital-out', 'pwm', 'spi-mosi']),
+    gpio('D12', 'D12', ['digital-in', 'digital-out', 'spi-miso']),
+  ],
+  right: [
+    vin('VIN'),
+    gnd('GND2'),
+    reset('RESET2', 'RESET'),
+    p5v('5V'),
+    analog('A7', 'A7'),
+    analog('A6', 'A6'),
+    analog('A5', 'A5'),
+    analog('A4', 'A4'),
+    analog('A3', 'A3'),
+    analog('A2', 'A2'),
+    analog('A1', 'A1'),
+    analog('A0', 'A0'),
+    { id: 'AREF', label: 'AREF', type: 'aref' as const, caps: [] },
+    p3v3('3V3'),
+    gpio('D13', 'D13', ['digital-in', 'digital-out', 'spi-sck']),
+  ],
+});
+
+export const ESP32_DEVKIT = headerBoard({
+  id: 'board.esp32-devkit',
+  name: 'ESP32 DevKit V1',
+  family: 'Espressif',
+  processor: 'ESP32-WROOM-32',
+  widthMm: 28.5,
+  heightMm: 52,
+  supportLevel: 'validation',
+  logicVoltage: 3.3,
+  color: '#12262e',
+  description:
+    '3.3 V logic Wi-Fi/BT board. Wiring and electrical validation are supported; firmware simulation for the Xtensa core is not implemented, so it is honestly labeled validation-level.',
+  left: [
+    { id: 'EN', label: 'EN', type: 'reset' as const, caps: [] },
+    a3('VP', 'VP'), a3('VN', 'VN'), a3('D34', 'D34'), a3('D35', 'D35'),
+    g3('D32', 'D32'), g3('D33', 'D33'), g3('D25', 'D25'), g3('D26', 'D26'), g3('D27', 'D27'),
+    g3('D14', 'D14'), g3('D12', 'D12'), gnd('GND1'), g3('D13', 'D13'),
+    p5v('VIN_5V', '5V'),
+  ],
+  right: [
+    p3v3('3V3'), gnd('GND2'),
+    g3('D15', 'D15'), g3('D2', 'D2'), g3('D4', 'D4'),
+    g3('RX2', 'RX2', { caps: ['digital-in', 'digital-out', 'uart-rx'] }),
+    g3('TX2', 'TX2', { caps: ['digital-in', 'digital-out', 'uart-tx'] }),
+    g3('D5', 'D5'), g3('D18', 'D18', { caps: ['digital-in', 'digital-out', 'spi-sck'] }),
+    g3('D19', 'D19', { caps: ['digital-in', 'digital-out', 'spi-miso'] }),
+    g3('D21', 'D21', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }),
+    g3('RX0', 'RX0', { caps: ['digital-in', 'digital-out', 'uart-rx'] }),
+    g3('TX0', 'TX0', { caps: ['digital-in', 'digital-out', 'uart-tx'] }),
+    g3('D22', 'D22', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }),
+    g3('D23', 'D23', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }),
+  ],
+});
+
+export const PICO = headerBoard({
+  id: 'board.raspberry-pi-pico',
+  name: 'Raspberry Pi Pico',
+  family: 'Raspberry Pi',
+  processor: 'RP2040',
+  widthMm: 21,
+  heightMm: 51,
+  supportLevel: 'validation',
+  logicVoltage: 3.3,
+  color: '#1a4232',
+  description:
+    'RP2040 board with 3.3 V logic. Wiring and validation supported; RP2040 simulation is not implemented yet.',
+  left: [
+    g3('GP0', 'GP0', { caps: ['digital-in', 'digital-out', 'uart-tx', 'i2c-sda', 'pwm'] }),
+    g3('GP1', 'GP1', { caps: ['digital-in', 'digital-out', 'uart-rx', 'i2c-scl', 'pwm'] }),
+    gnd('GND1'),
+    g3('GP2', 'GP2'), g3('GP3', 'GP3'), g3('GP4', 'GP4'), g3('GP5', 'GP5'),
+    gnd('GND2'),
+    g3('GP6', 'GP6'), g3('GP7', 'GP7'), g3('GP8', 'GP8'), g3('GP9', 'GP9'),
+    gnd('GND3'),
+    g3('GP10', 'GP10'), g3('GP11', 'GP11'), g3('GP12', 'GP12'), g3('GP13', 'GP13'),
+    gnd('GND4'),
+    g3('GP14', 'GP14'), g3('GP15', 'GP15'),
+  ],
+  right: [
+    { ...p5v('VBUS', 'VBUS'), voltage: 5 },
+    vin('VSYS', 'VSYS'),
+    gnd('GND5'),
+    { id: 'EN3V3', label: '3V3_EN', type: 'digital' as const, caps: ['digital-in' as const], voltage: 3.3 },
+    p3v3('3V3'),
+    { id: 'ADC_VREF', label: 'ADC_VREF', type: 'aref' as const, caps: [] },
+    a3('GP28', 'GP28'),
+    gnd('AGND', 'AGND'),
+    a3('GP27', 'GP27'), a3('GP26', 'GP26'),
+    { id: 'RUN', label: 'RUN', type: 'reset' as const, caps: ['digital-in' as const] },
+    g3('GP22', 'GP22'),
+    gnd('GND6'),
+    g3('GP21', 'GP21', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }),
+    g3('GP20', 'GP20', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }),
+    g3('GP19', 'GP19', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }),
+    g3('GP18', 'GP18', { caps: ['digital-in', 'digital-out', 'spi-sck'] }),
+    gnd('GND7'),
+    g3('GP17', 'GP17'), g3('GP16', 'GP16', { caps: ['digital-in', 'digital-out', 'spi-miso'] }),
+  ],
+});
+
+function simpleWiringBoard(
+  id: string,
+  name: string,
+  family: string,
+  processor: string,
+  widthMm: number,
+  heightMm: number,
+  logicVoltage: number,
+  left: (PinSpec | null)[],
+  right: (PinSpec | null)[],
+  supportLevel: SupportLevel = 'wiring',
+  extra: Partial<HeaderBoardSpec> = {},
+): BoardDefinition {
+  return headerBoard({
+    id, name, family, processor, widthMm, heightMm, left, right, supportLevel, logicVoltage,
+    description:
+      extra.description ??
+      `${name} — visual and wiring support with pin metadata. Firmware simulation is not implemented for this board; the support badge reflects that honestly.`,
+    ...extra,
+  });
+}
+
+const seqPins = (prefix: string, from: number, to: number, v: number): PinSpec[] => {
+  const out: PinSpec[] = [];
+  for (let i = from; i <= to; i++) out.push(g3(`${prefix}${i}`, `${prefix}${i}`));
+  return out.map((p) => ({ ...p, voltage: v }));
+};
+
+export const BOARD_DEFINITIONS: BoardDefinition[] = [
+  ARDUINO_UNO,
+  ARDUINO_NANO,
+  simpleWiringBoard(
+    'board.arduino-mega2560', 'Arduino Mega 2560', 'Arduino AVR', 'ATmega2560', 101.5, 53.3, 5,
+    [gpio('D22', '22'), gpio('D24', '24'), gpio('D26', '26'), gpio('D28', '28'), gpio('D30', '30'), gpio('D32', '32'), gpio('D34', '34'), gpio('D36', '36'), gpio('D38', '38'), gpio('D40', '40'), gpio('D42', '42'), gpio('D44', '44'), gpio('D46', '46'), gpio('D48', '48'), gpio('D50', '50'), gpio('D52', '52'), gnd('GNDL'), p5v('5VL')],
+    [gpio('D23', '23'), gpio('D25', '25'), gpio('D27', '27'), gpio('D29', '29'), gpio('D31', '31'), gpio('D33', '33'), gpio('D35', '35'), gpio('D37', '37'), gpio('D39', '39'), gpio('D41', '41'), gpio('D43', '43'), gpio('D45', '45'), gpio('D47', '47'), gpio('D49', '49'), gpio('D51', '51'), gpio('D53', '53'), gnd('GNDR'), vin('VINR')],
+    'wiring',
+    { color: '#0b3d5e', description: 'Mega 2560 (subset of the double header shown). Wiring support; AVR simulation of the ATmega2560 is not implemented yet.' },
+  ),
+  simpleWiringBoard(
+    'board.arduino-leonardo', 'Arduino Leonardo', 'Arduino AVR', 'ATmega32U4', 68.6, 53.3, 5,
+    [gpio('D0', 'RX0', ['digital-in', 'digital-out', 'uart-rx']), gpio('D1', 'TX1', ['digital-in', 'digital-out', 'uart-tx']), gpio('D2', 'D2'), gpio('D3', 'D3'), gpio('D4', 'D4'), gpio('D5', 'D5'), gpio('D6', 'D6'), gpio('D7', 'D7'), gpio('D8', 'D8'), gpio('D9', 'D9'), gpio('D10', 'D10'), gpio('D11', 'D11'), gpio('D12', 'D12'), gpio('D13', 'D13')],
+    [p5v('5V'), p3v3('3V3'), gnd('GND1'), gnd('GND2'), vin('VIN'), analog('A0', 'A0'), analog('A1', 'A1'), analog('A2', 'A2'), analog('A3', 'A3'), analog('A4', 'A4'), analog('A5', 'A5'), reset('RESET')],
+    'wiring', { color: '#0b3d5e' },
+  ),
+  simpleWiringBoard(
+    'board.arduino-due', 'Arduino Due', 'Arduino ARM', 'AT91SAM3X8E', 101.5, 53.3, 3.3,
+    [...seqPins('D', 22, 39, 3.3).slice(0, 16), gnd('GNDL'), p3v3('3V3L')],
+    [...seqPins('D', 40, 53, 3.3), gnd('GNDR'), p5v('5VR'), vin('VINR'), reset('RESET')],
+    'wiring', { color: '#0b3d5e', description: 'Due — 3.3 V logic ARM board. Wiring + validation (3.3 V rules apply). No simulation.' },
+  ),
+  simpleWiringBoard(
+    'board.arduino-uno-r4', 'Arduino Uno R4 Minima', 'Arduino Renesas', 'RA4M1 (Cortex-M4)', 68.6, 53.4, 5,
+    [gpio('D0', 'RX0', ['digital-in', 'digital-out', 'uart-rx']), gpio('D1', 'TX1', ['digital-in', 'digital-out', 'uart-tx']), gpio('D2', 'D2'), gpio('D3', 'D3'), gpio('D4', 'D4'), gpio('D5', 'D5'), gpio('D6', 'D6'), gpio('D7', 'D7'), gpio('D8', 'D8'), gpio('D9', 'D9'), gpio('D10', 'D10'), gpio('D11', 'D11'), gpio('D12', 'D12'), gpio('D13', 'D13')],
+    [p5v('5V'), p3v3('3V3'), gnd('GND1'), gnd('GND2'), vin('VIN'), analog('A0', 'A0'), analog('A1', 'A1'), analog('A2', 'A2'), analog('A3', 'A3'), analog('A4', 'A4'), analog('A5', 'A5'), reset('RESET')],
+    'wiring', { color: '#0b3d5e' },
+  ),
+  simpleWiringBoard(
+    'board.nano-33-ble', 'Arduino Nano 33 BLE', 'Arduino mbed', 'nRF52840', 18, 45, 3.3,
+    [g3('TX1', 'TX1', { caps: ['digital-in', 'digital-out', 'uart-tx'] }), g3('RX0', 'RX0', { caps: ['digital-in', 'digital-out', 'uart-rx'] }), reset('RST1', 'RST'), gnd('GND1'), g3('D2', 'D2'), g3('D3', 'D3'), g3('D4', 'D4'), g3('D5', 'D5'), g3('D6', 'D6'), g3('D7', 'D7'), g3('D8', 'D8'), g3('D9', 'D9'), g3('D10', 'D10'), g3('D11', 'D11'), g3('D12', 'D12')],
+    [vin('VIN'), gnd('GND2'), reset('RST2', 'RST'), p3v3('3V3'), a3('A7', 'A7'), a3('A6', 'A6'), a3('A5', 'A5'), a3('A4', 'A4'), a3('A3', 'A3'), a3('A2', 'A2'), a3('A1', 'A1'), a3('A0', 'A0'), { id: 'AREF', label: 'AREF', type: 'aref' as const, caps: [] }, g3('D13', 'D13')],
+    'wiring', { color: '#0b3d2e', usb: 'micro' },
+  ),
+  ESP32_DEVKIT,
+  simpleWiringBoard(
+    'board.esp32-s3', 'ESP32-S3 DevKitC', 'Espressif', 'ESP32-S3', 25.5, 63, 3.3,
+    [p3v3('3V3'), ...seqPins('GPIO', 4, 18, 3.3), gnd('GND1')],
+    [{ ...g3('GPIO1', 'GPIO1') }, { ...g3('GPIO2', 'GPIO2') }, ...seqPins('GPIO', 38, 48, 3.3), g3('TX0', 'TX0'), g3('RX0', 'RX0'), p5v('VIN_5V', '5V'), gnd('GND2')],
+    'validation', { color: '#12262e', usb: 'usb-c' },
+  ),
+  simpleWiringBoard(
+    'board.esp32-c3', 'ESP32-C3 DevKitM', 'Espressif', 'ESP32-C3 (RISC-V)', 25.4, 52, 3.3,
+    [p3v3('3V3'), ...seqPins('GPIO', 0, 7, 3.3), gnd('GND1')],
+    [g3('GPIO8', 'GPIO8'), g3('GPIO9', 'GPIO9'), g3('GPIO10', 'GPIO10'), g3('GPIO18', 'GPIO18'), g3('GPIO19', 'GPIO19'), g3('TX0', 'TX0'), g3('RX0', 'RX0'), p5v('VIN_5V', '5V'), gnd('GND2')],
+    'validation', { color: '#12262e', usb: 'usb-c' },
+  ),
+  simpleWiringBoard(
+    'board.esp8266-nodemcu', 'ESP8266 NodeMCU', 'Espressif', 'ESP8266', 25.6, 48.5, 3.3,
+    [{ id: 'A0', label: 'A0', type: 'analog' as const, caps: ['analog-in' as const], voltage: 3.3 }, gnd('GND1'), g3('D0', 'D0'), g3('D1', 'D1', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('D2', 'D2', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('D3', 'D3'), g3('D4', 'D4'), p3v3('3V3_1')],
+    [g3('D5', 'D5', { caps: ['digital-in', 'digital-out', 'spi-sck'] }), g3('D6', 'D6', { caps: ['digital-in', 'digital-out', 'spi-miso'] }), g3('D7', 'D7', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }), g3('D8', 'D8'), g3('RX', 'RX', { caps: ['digital-in', 'uart-rx'] }), g3('TX', 'TX', { caps: ['digital-out', 'uart-tx'] }), gnd('GND2'), p5v('VIN_5V', 'VIN')],
+    'wiring', { color: '#1a1a24' },
+  ),
+  simpleWiringBoard(
+    'board.esp32-cam', 'ESP32-CAM', 'Espressif', 'ESP32 + OV2640', 27, 40.5, 3.3,
+    [p5v('5V'), gnd('GND1'), g3('IO12', 'IO12'), g3('IO13', 'IO13'), g3('IO15', 'IO15'), g3('IO14', 'IO14'), g3('IO2', 'IO2'), g3('IO4', 'IO4')],
+    [p3v3('3V3'), g3('IO16', 'IO16'), g3('IO0', 'IO0'), gnd('GND2'), { id: 'VOR', label: 'VOR', type: 'nc' as const, caps: [] }, g3('U0R', 'U0R', { caps: ['digital-in', 'uart-rx'] }), g3('U0T', 'U0T', { caps: ['digital-out', 'uart-tx'] }), gnd('GND3')],
+    'visual-only', { usb: 'none', color: '#12262e', description: 'ESP32-CAM — visual reference with pin metadata. Camera behavior is not modeled.' },
+  ),
+  PICO,
+  { ...PICO, id: 'board.raspberry-pi-pico-w', name: 'Raspberry Pi Pico W', description: 'Pico W (wireless). Wiring and validation supported; no RP2040 or Wi-Fi simulation.', metadata: { ...PICO.metadata } },
+  simpleWiringBoard(
+    'board.rpi-zero-gpio', 'Raspberry Pi Zero GPIO Header', 'Raspberry Pi', 'BCM2835 (header only)', 65, 30, 3.3,
+    [p3v3('3V3_1'), g3('GPIO2', 'GPIO2', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('GPIO3', 'GPIO3', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('GPIO4', 'GPIO4'), gnd('GND1'), g3('GPIO17', 'GPIO17'), g3('GPIO27', 'GPIO27'), g3('GPIO22', 'GPIO22'), p3v3('3V3_2'), g3('GPIO10', 'GPIO10', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }), g3('GPIO9', 'GPIO9', { caps: ['digital-in', 'digital-out', 'spi-miso'] }), g3('GPIO11', 'GPIO11', { caps: ['digital-in', 'digital-out', 'spi-sck'] }), gnd('GND2')],
+    [p5v('5V_1'), p5v('5V_2'), gnd('GND3'), g3('GPIO14', 'GPIO14 TXD', { caps: ['digital-out', 'uart-tx'] }), g3('GPIO15', 'GPIO15 RXD', { caps: ['digital-in', 'uart-rx'] }), g3('GPIO18', 'GPIO18'), gnd('GND4'), g3('GPIO23', 'GPIO23'), g3('GPIO24', 'GPIO24'), gnd('GND5'), g3('GPIO25', 'GPIO25'), g3('GPIO8', 'GPIO8'), g3('GPIO7', 'GPIO7')],
+    'wiring', { usb: 'none', color: '#0b3d2e', description: 'Raspberry Pi GPIO header (subset of the 40-pin J8). Wiring/validation only — Linux boards are not simulated.' },
+  ),
+  simpleWiringBoard(
+    'board.rpi4-gpio', 'Raspberry Pi 4/5 GPIO Header', 'Raspberry Pi', 'BCM2711/BCM2712 (header only)', 85, 20, 3.3,
+    [p3v3('3V3_1'), g3('GPIO2', 'GPIO2', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('GPIO3', 'GPIO3', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('GPIO4', 'GPIO4'), gnd('GND1'), g3('GPIO17', 'GPIO17'), g3('GPIO27', 'GPIO27'), g3('GPIO22', 'GPIO22')],
+    [p5v('5V_1'), p5v('5V_2'), gnd('GND2'), g3('GPIO14', 'GPIO14 TXD', { caps: ['digital-out', 'uart-tx'] }), g3('GPIO15', 'GPIO15 RXD', { caps: ['digital-in', 'uart-rx'] }), g3('GPIO18', 'GPIO18'), gnd('GND3'), g3('GPIO23', 'GPIO23')],
+    'wiring', { usb: 'none', color: '#0b3d2e' },
+  ),
+  simpleWiringBoard(
+    'board.teensy41', 'Teensy 4.1', 'PJRC', 'IMXRT1062 (Cortex-M7)', 18, 61, 3.3,
+    [gnd('GND1'), ...seqPins('D', 0, 12, 3.3), p3v3('3V3_1')],
+    [p5v('VIN_5V', 'VIN'), gnd('GND2'), p3v3('3V3_2'), ...seqPins('D', 13, 23, 3.3), gnd('GND3')],
+    'wiring', { color: '#0b3d2e' },
+  ),
+  simpleWiringBoard(
+    'board.microbit', 'BBC micro:bit', 'BBC', 'nRF52833', 52, 43, 3.3,
+    [a3('P0', 'P0'), a3('P1', 'P1'), a3('P2', 'P2')],
+    [p3v3('3V'), gnd('GND')],
+    'visual-only', { usb: 'micro', color: '#1a1a24', description: 'micro:bit edge connector (large pads P0-P2, 3V, GND). Visual reference with pin metadata.' },
+  ),
+  simpleWiringBoard(
+    'board.stm32-nucleo', 'STM32 Nucleo-64', 'STMicroelectronics', 'STM32F401RE', 70, 82.5, 3.3,
+    [g3('PA0', 'PA0'), g3('PA1', 'PA1'), g3('PA4', 'PA4'), g3('PB0', 'PB0'), g3('PC1', 'PC1'), g3('PC0', 'PC0'), g3('PA5', 'PA5 (LED)'), g3('PA6', 'PA6'), g3('PA7', 'PA7'), g3('PB6', 'PB6'), g3('PC7', 'PC7'), g3('PA9', 'PA9'), g3('PA8', 'PA8'), g3('PB10', 'PB10'), g3('PB4', 'PB4'), g3('PB5', 'PB5'), g3('PB3', 'PB3'), g3('PA10', 'PA10'), g3('PA2', 'PA2 TX'), g3('PA3', 'PA3 RX')],
+    [p3v3('3V3'), p5v('5V'), gnd('GND1'), gnd('GND2'), vin('VIN'), reset('NRST'), { id: 'AVDD', label: 'AVDD', type: 'power-3v3' as const, caps: ['power' as const], voltage: 3.3 }],
+    'wiring', { usb: 'mini', color: '#dbe4ea' },
+  ),
+  simpleWiringBoard(
+    'board.adafruit-feather', 'Adafruit Feather M0', 'Adafruit', 'SAMD21 (Cortex-M0+)', 22.9, 51, 3.3,
+    [reset('RST'), p3v3('3V3'), { id: 'AREF', label: 'AREF', type: 'aref' as const, caps: [] }, gnd('GND1'), a3('A0', 'A0'), a3('A1', 'A1'), a3('A2', 'A2'), a3('A3', 'A3'), a3('A4', 'A4'), a3('A5', 'A5'), g3('SCK', 'SCK', { caps: ['digital-in', 'digital-out', 'spi-sck'] }), g3('MOSI', 'MOSI', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }), g3('MISO', 'MISO', { caps: ['digital-in', 'digital-out', 'spi-miso'] }), g3('RX', 'RX', { caps: ['digital-in', 'uart-rx'] }), g3('TX', 'TX', { caps: ['digital-out', 'uart-tx'] })],
+    [{ id: 'VBAT', label: 'BAT', type: 'power-vin' as const, caps: ['power' as const], voltage: 3.7 }, { id: 'EN', label: 'EN', type: 'digital' as const, caps: ['digital-in' as const], voltage: 3.3 }, { ...p5v('VUSB', 'USB') }, g3('D13', 'D13'), g3('D12', 'D12'), g3('D11', 'D11'), g3('D10', 'D10'), g3('D9', 'D9'), g3('D6', 'D6'), g3('D5', 'D5'), g3('SCL', 'SCL', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('SDA', 'SDA', { caps: ['digital-in', 'digital-out', 'i2c-sda'] })],
+    'wiring', { color: '#12262e' },
+  ),
+  simpleWiringBoard(
+    'board.adafruit-qtpy', 'Adafruit QT Py', 'Adafruit', 'SAMD21 (Cortex-M0+)', 17.8, 22.9, 3.3,
+    [a3('A0', 'A0'), a3('A1', 'A1'), a3('A2', 'A2'), a3('A3', 'A3'), g3('SDA', 'SDA', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('SCL', 'SCL', { caps: ['digital-in', 'digital-out', 'i2c-scl'] })],
+    [p5v('VUSB', '5V'), gnd('GND'), p3v3('3V3'), g3('TX', 'TX', { caps: ['digital-out', 'uart-tx'] }), g3('RX', 'RX', { caps: ['digital-in', 'uart-rx'] }), g3('SCK', 'SCK', { caps: ['digital-in', 'digital-out', 'spi-sck'] })],
+    'wiring', { usb: 'usb-c', color: '#1a1a24' },
+  ),
+  simpleWiringBoard(
+    'board.seeed-xiao', 'Seeed Studio XIAO', 'Seeed Studio', 'SAMD21 (Cortex-M0+)', 17.5, 21, 3.3,
+    [a3('A0', 'A0/D0'), a3('A1', 'A1/D1'), a3('A2', 'A2/D2'), a3('A3', 'A3/D3'), g3('SDA', 'SDA', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('SCL', 'SCL', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('TX', 'TX', { caps: ['digital-out', 'uart-tx'] })],
+    [p5v('VUSB', '5V'), gnd('GND'), p3v3('3V3'), a3('A10', 'A10/MOSI'), a3('A9', 'A9/MISO'), a3('A8', 'A8/SCK'), g3('RX', 'RX', { caps: ['digital-in', 'uart-rx'] })],
+    'wiring', { usb: 'usb-c', color: '#1a1a24' },
+  ),
+];
+
+export function getBoardDefinition(id: string): BoardDefinition | undefined {
+  return BOARD_DEFINITIONS.find((b) => b.id === id);
+}
