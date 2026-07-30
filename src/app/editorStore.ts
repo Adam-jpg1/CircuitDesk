@@ -135,7 +135,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }
         await saveProject(project);
         set({ saveState: 'saved' });
-      } catch {
+      } catch (err) {
+        console.error('[CircuitDesk] autosave failed:', err);
         set({ saveState: 'unsaved' });
       }
     }, 700);
@@ -194,6 +195,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           view: { x: 0, y: 0, zoom: 1 },
         });
       } catch (err) {
+        console.error('[CircuitDesk] project load failed:', err);
         set({
           loading: false,
           loadError: err instanceof Error ? err.message : 'Failed to load project.',

@@ -11,7 +11,6 @@ import {
   AVRUSART,
   AVRADC,
   adcConfig,
-  atmega328Channels,
   portBConfig,
   portCConfig,
   portDConfig,

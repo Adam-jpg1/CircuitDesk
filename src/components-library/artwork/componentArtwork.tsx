@@ -127,7 +127,7 @@ function ToggleArt({ def, visual }: ArtProps) {
     <g>
       <rect x={0.5 * MM} y={5 * MM} width={W - 1 * MM} height={6.5 * MM} rx="3" fill="#3a434d" stroke="#20262d" />
       <circle cx={W / 2} cy={8.2 * MM} r={2.6 * MM} fill="#20262d" />
-      <line x1={W / 2} y1={8.2 * MM} x2={W / 2} y2={(on ? 2.2 : 13.5) * MM === 13.5 * MM ? 12.2 * MM : 2.8 * MM} stroke="#b9c1c9" strokeWidth={2.2 * MM} strokeLinecap="round" />
+      <line x1={W / 2} y1={8.2 * MM} x2={W / 2} y2={(on ? 2.8 : 12.2) * MM} stroke="#b9c1c9" strokeWidth={2.2 * MM} strokeLinecap="round" />
       {['no', 'com', 'nc'].map((_, i) => (
         <line key={i} x1={(1.2 + i * 2.8) * MM} y1={11.5 * MM} x2={(1.2 + i * 2.8) * MM} y2={13 * MM} stroke="#9aa4ad" strokeWidth="2" />
       ))}

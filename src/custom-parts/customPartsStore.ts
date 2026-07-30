@@ -19,7 +19,8 @@ export const useCustomPartsStore = create<CustomPartsState>((set, get) => ({
       const parts = await dbListCustomParts();
       setLibraryCustomParts(parts);
       set({ parts, loaded: true });
-    } catch {
+    } catch (err) {
+      console.error('[CircuitDesk] failed to load custom part library:', err);
       set({ loaded: true });
     }
   },

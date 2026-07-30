@@ -1,5 +1,7 @@
 # CircuitDesk
 
+**Public Beta · v0.9.0**
+
 **CircuitDesk is a realistic electronics project workspace for planning, wiring, coding, validating, simulating, testing, and documenting hardware projects before physically assembling them.**
 
 It is a desktop-first engineering application — not a mockup. The default Blink project compiles with a real
@@ -92,9 +94,13 @@ npm run build          # production build
 npm run test:pipeline  # compiles Blink via the API, executes it on AVR8js,
                        # asserts real 500ms timing, serial output, and that
                        # editing delay() changes behavior
-npm run test:ui        # Playwright smoke test: dashboard → create project →
-                       # editor → compile+run → serial output → persistence
-                       # → no "Maximum update depth exceeded"
+npm run test:sim       # simulator behavior QA: button → digital input, pot →
+                       # real ADC (0/1023), PWM duty measurement, servo pulse
+                       # width → angle, ultrasonic echo protocol
+npm run test:ui        # quick Playwright smoke test
+npm run test:qa        # full beta QA: create → edit → undo/redo → compiler
+                       # errors → compile+run → sim controls → persistence →
+                       # export → all 9 import formats → graceful failures
 ```
 
 ## Honest limitations (by design, clearly labeled in-app)
