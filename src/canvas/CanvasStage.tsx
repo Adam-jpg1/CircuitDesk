@@ -8,8 +8,7 @@ import { pinAbsolute, partBounds, partSize, wirePath, snap, type Pt } from './ge
 import { ComponentArtwork } from '../components-library/artwork/componentArtwork';
 import { UnoArtwork } from '../boards/artwork/UnoArtwork';
 import { GenericModuleArtwork } from '../boards/artwork/GenericModuleArtwork';
-import type { CircuitProject, ComponentInstance, Connection, PartDefinition, PinDefinition } from '../types';
-import { MM } from '../boards/pinHelpers';
+import type { CircuitProject, ComponentInstance, PartDefinition, PinDefinition } from '../types';
 
 const WIRE_COLORS = ['#e03131', '#212529', '#2f9e44', '#1971c2', '#e8590c', '#7048e8', '#f08c00', '#c2255c'];
 

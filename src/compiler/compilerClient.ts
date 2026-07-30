@@ -5,7 +5,8 @@ export async function fetchCompilerHealth(): Promise<CompilerHealth> {
     const res = await fetch('/api/compiler/health');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as CompilerHealth;
-  } catch {
+  } catch (err) {
+    console.error('[CircuitDesk] compiler health check failed:', err);
     return {
       available: false,
       toolchain: 'none',
@@ -30,6 +31,7 @@ export async function compileProjectCode(project: CircuitProject, syntaxOnly = f
     });
     return (await res.json()) as CompileResult;
   } catch (err) {
+    console.error('[CircuitDesk] compile request failed:', err);
     return {
       success: false,
       toolchain: 'none',

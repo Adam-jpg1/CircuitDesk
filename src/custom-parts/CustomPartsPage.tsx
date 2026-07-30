@@ -164,14 +164,19 @@ function CustomBoardEditor({ existing, onClose }: { existing: CustomDefinition |
       description: notes || undefined,
       isBoard: true,
     };
-    await useCustomPartsStore.getState().add({
-      kind: 'board',
-      definition,
-      createdAt: existing?.createdAt ?? new Date().toISOString(),
-      source: existing?.source ?? 'creator',
-    });
-    toast(`Saved “${definition.name}”`, 'success');
-    onClose();
+    try {
+      await useCustomPartsStore.getState().add({
+        kind: 'board',
+        definition,
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
+        source: existing?.source ?? 'creator',
+      });
+      toast(`Saved “${definition.name}”`, 'success');
+      onClose();
+    } catch (err) {
+      console.error('[CircuitDesk] failed to save custom part:', err);
+      toast('Could not save the part to local storage. See the browser console for details.', 'error');
+    }
   };
 
   return (

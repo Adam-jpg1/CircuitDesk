@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { navigate } from '../ui/primitives';
 import { BackIcon, LogoIcon } from '../ui/icons';
 import { fetchCompilerHealth } from '../compiler/compilerClient';
+import { APP_VERSION_LABEL } from '../version';
 import type { CompilerHealth } from '../types';
 
 export function AboutPage() {
@@ -18,7 +19,7 @@ export function AboutPage() {
       </header>
       <div className="dash-body">
         <div className="doc-page">
-          <h2 style={{ marginTop: 0 }}>CircuitDesk</h2>
+          <h2 style={{ marginTop: 0 }}>CircuitDesk <span className="badge compile">{APP_VERSION_LABEL}</span></h2>
           <p>
             CircuitDesk is a realistic electronics project workspace for planning, wiring, coding, validating,
             simulating, testing, and documenting hardware projects before physically assembling them.

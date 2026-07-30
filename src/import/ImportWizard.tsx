@@ -47,6 +47,7 @@ export function ImportWizard() {
       if (r.layers) setLayerVisibility(Object.fromEntries(r.layers.map((l) => [l.name, l.visible])));
       setStep(1);
     } catch (err) {
+      console.error('[CircuitDesk] import parse failed:', err);
       setParseError(err instanceof ImportError || err instanceof Error ? err.message : 'Import failed.');
       setStep(1);
       setResult(null);
@@ -56,7 +57,8 @@ export function ImportWizard() {
   }, []);
 
   const doImport = useCallback(async () => {
-    if (!result || importing) return;
+    // 'existing-project' has its own flow (importIntoExisting in the last step)
+    if (!result || importing || options.target === 'existing-project') return;
     setImporting(true);
     try {
       const effectiveResult = result.layers
@@ -70,16 +72,13 @@ export function ImportWizard() {
         navigate(`#/editor/${project.id}`);
         return;
       }
-      if (options.target === 'existing-project') {
-        // handled by ExistingProjectPicker below
-        return;
-      }
       const custom = buildCustomDefinition(effectiveResult, options, pins);
       await useCustomPartsStore.getState().add(custom);
       toast(`Saved “${custom.definition.name}” to your ${custom.kind === 'board' ? 'custom board' : 'custom component'} library`, 'success');
       navigate('#/custom-parts');
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Import failed', 'error');
+      console.error('[CircuitDesk] import failed:', err);
+      toast(err instanceof Error ? err.message : 'Import failed — the file could not be converted.', 'error');
     } finally {
       setImporting(false);
     }
@@ -335,7 +334,7 @@ function MappingStep(props: {
 
           <div className="dash-section-title">Pins ({pins.length})</div>
           <PinPlacementEditor
-            svg={result.svg ?? (result.layers ? undefined : undefined)}
+            svg={result.svg}
             widthMm={options.widthMm}
             heightMm={options.heightMm}
             pins={pins}
@@ -465,6 +464,7 @@ function ImportStep({ result, pins, options, setOptions, importing, onBack, onIm
 
   const importIntoExisting = async () => {
     if (!existingId) return;
+    try {
     const project = await loadProject(existingId);
     if (!project) {
       toast('Selected project could not be loaded.', 'error');
@@ -479,6 +479,10 @@ function ImportStep({ result, pins, options, setOptions, importing, onBack, onIm
     await saveProject(project);
     toast(`Imported “${custom.definition.name}” into ${project.name}`, 'success');
     navigate(`#/editor/${project.id}`);
+    } catch (err) {
+      console.error('[CircuitDesk] import into existing project failed:', err);
+      toast('Import failed — the target project was not modified. See the browser console for details.', 'error');
+    }
   };
 
   return (
