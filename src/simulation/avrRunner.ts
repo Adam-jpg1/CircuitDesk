@@ -2,6 +2,10 @@
 // the compiler backend) runs instruction-by-instruction; GPIO, timers (incl.
 // PWM), UART and ADC are the emulator's own peripherals. Nothing in here
 // scans source code — all behavior comes from executing the program.
+//
+// Pin numbering is driven by a per-board AvrBoardProfile (boards/pinMaps.ts):
+// only boards with a registered profile can run here — there is no implicit
+// Uno fallback for other boards.
 
 import {
   CPU,
@@ -21,26 +25,17 @@ import {
   PinState,
 } from 'avr8js';
 import { parseIntelHex } from './intelHex';
+import { AVR_BOARD_PROFILES, type AvrBoardProfile } from '../boards/pinMaps';
 
 export const F_CPU = 16_000_000;
 
-export interface ArduinoPinRef {
-  port: 'B' | 'C' | 'D';
-  index: number;
-}
+/** Default profile (ATmega328P / Uno pinout) for direct test usage. */
+export const DEFAULT_AVR_PROFILE: AvrBoardProfile = AVR_BOARD_PROFILES['board.arduino-uno'];
 
-/** Arduino Uno digital pin number → AVR port/bit. */
-export function unoPin(pin: number): ArduinoPinRef | undefined {
-  if (pin >= 0 && pin <= 7) return { port: 'D', index: pin };
-  if (pin >= 8 && pin <= 13) return { port: 'B', index: pin - 8 };
-  if (pin >= 14 && pin <= 19) return { port: 'C', index: pin - 14 }; // A0-A5
-  return undefined;
-}
-
-/** Board pin id (e.g. "D13", "A0", "SDA") → Arduino pin number. */
+/** @deprecated board-aware resolution lives in boards/pinMaps.ts (arduinoPinNumber). */
 export function boardPinToArduino(pinId: string): number | undefined {
   if (/^D\d+$/.test(pinId)) return Number(pinId.slice(1));
-  if (/^A[0-5]$/.test(pinId)) return 14 + Number(pinId.slice(1));
+  if (/^A[0-7]$/.test(pinId)) return 14 + Number(pinId.slice(1));
   if (pinId === 'SDA') return 18;
   if (pinId === 'SCL') return 19;
   return undefined;
@@ -86,7 +81,10 @@ export class AVRRunner {
   private trackers: DutyTracker[] = [];
   private serialRxQueue: number[] = [];
 
-  constructor(hex: string) {
+  readonly profile: AvrBoardProfile;
+
+  constructor(hex: string, profile: AvrBoardProfile = DEFAULT_AVR_PROFILE) {
+    this.profile = profile;
     parseIntelHex(hex, this.program);
     this.cpu = new CPU(new Uint16Array(this.program.buffer));
     this.timer0 = new AVRTimer(this.cpu, timer0Config);
@@ -125,12 +123,11 @@ export class AVRRunner {
   }
 
   private portChanged(name: 'B' | 'C' | 'D'): void {
-    const base = name === 'D' ? 0 : name === 'B' ? 8 : 14;
-    const count = name === 'B' ? 6 : name === 'C' ? 6 : 8;
     const port = this.portOf(name);
-    for (let i = 0; i < count; i++) {
-      const pin = base + i;
-      const state = port.pinState(i);
+    for (const [pinStr, ref] of Object.entries(this.profile.portMap)) {
+      if (ref.port !== name) continue;
+      const pin = Number(pinStr);
+      const state = port.pinState(ref.index);
       const high = state === PinState.High;
       const tracker = this.trackers[pin];
       if (high !== tracker.lastState) {
@@ -150,9 +147,16 @@ export class AVRRunner {
   }
 
   pinState(pin: number): PinState | undefined {
-    const ref = unoPin(pin);
+    const ref = this.profile.portMap[pin];
     if (!ref) return undefined;
-    return this.portOf(ref.port).pinState(ref.index);
+    return this.portOf(ref.port as 'B' | 'C' | 'D').pinState(ref.index);
+  }
+
+  /** String pin level for engine-agnostic consumers (no avr8js enum leak). */
+  digitalPinLevel(pin: number): 'high' | 'low' | 'input' | 'input-pullup' | undefined {
+    const s = this.pinState(pin);
+    if (s === undefined) return undefined;
+    return s === PinState.High ? 'high' : s === PinState.Low ? 'low' : s === PinState.InputPullUp ? 'input-pullup' : 'input';
   }
 
   isOutput(pin: number): boolean {
@@ -161,9 +165,14 @@ export class AVRRunner {
   }
 
   setDigitalInput(pin: number, value: boolean): void {
-    const ref = unoPin(pin);
+    const ref = this.profile.portMap[pin];
     if (!ref) return;
-    this.portOf(ref.port).setPin(ref.index, value);
+    this.portOf(ref.port as 'B' | 'C' | 'D').setPin(ref.index, value);
+  }
+
+  /** ADC channel for an Arduino pin number on this board's profile. */
+  adcChannelForPin(pin: number): number | undefined {
+    return this.profile.portMap[pin]?.adcChannel;
   }
 
   setAnalogVolts(channel: number, volts: number): void {

@@ -3,7 +3,8 @@ import { useEditorStore } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
 import { resolveDefinition } from '../project/partsRegistry';
 import { analyzeCodePins } from '../compiler/codeAnalysis';
-import { boardPinToArduino } from '../simulation/avrRunner';
+import { arduinoPinNumber } from '../boards/pinMaps';
+import { describeSupport } from '../project/support';
 import { SupportBadge } from '../ui/primitives';
 import { revealCodeLocation } from './CodePanel';
 import type { ComponentInstance, Connection, PartDefinition } from '../types';
@@ -65,7 +66,7 @@ function InstanceInspector({ inst }: { inst: ComponentInstance }) {
       <div className="inspector-section">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
           <strong style={{ fontSize: 13.5 }}>{def.name}</strong>
-          <SupportBadge level={def.supportLevel} />
+          <SupportBadge level={def.supportLevel} title={describeSupport(def)} />
         </div>
         {def.isBoard && (
           <div style={{ color: 'var(--text-2)', marginTop: 4, fontSize: 11.5 }}>
@@ -147,7 +148,7 @@ function InstanceInspector({ inst }: { inst: ComponentInstance }) {
           <tbody>
             {def.pins.slice(0, 64).map((pin) => {
               const conns = connectionsByPin.get(pin.id) ?? [];
-              const arduinoPin = def.isBoard ? boardPinToArduino(pin.id) : undefined;
+              const arduinoPin = def.isBoard ? arduinoPinNumber(def, pin.id) : undefined;
               const refs = arduinoPin !== undefined ? codeUsage.refs.filter((r) => r.pin === arduinoPin) : [];
               return (
                 <tr key={pin.id} className={conns.length > 0 ? 'connected' : ''}>

@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useEditorStore } from '../app/editorStore';
-import { runTest } from '../testing/testRunner';
 import { compileAction } from '../app/actions';
 import { uid, type TestAssertion, type TestCase, type TestInputEvent, type TestResult } from '../types';
 import { Modal, toast } from '../ui/primitives';
@@ -35,6 +34,7 @@ export function TestsPanel() {
     if (!hex || !project) return;
     setRunning(test.id);
     try {
+      const { runTest } = await import('../testing/testRunner');
       const result = await runTest(project, hex, test);
       testResultsCache.set(test.id, result);
       setResults(new Map(testResultsCache));
@@ -46,6 +46,7 @@ export function TestsPanel() {
   async function runAll() {
     const hex = await ensureFirmware();
     if (!hex || !project) return;
+    const { runTest } = await import('../testing/testRunner');
     for (const test of project.tests) {
       setRunning(test.id);
       const result = await runTest(project, hex, test);

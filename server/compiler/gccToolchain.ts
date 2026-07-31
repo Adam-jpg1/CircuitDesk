@@ -71,19 +71,25 @@ export async function detectGccToolchain(): Promise<GccAvailability> {
 }
 
 function baseFlags(target: BoardTarget, coreRoot: string): string[] {
-  return [
+  // Per-target MCU, variant and board define — no target ever borrows the
+  // Uno's flags. The allowlist in types.ts is the only source of targets.
+  const flags = [
     `-mmcu=${target.mcu}`,
     `-DF_CPU=${target.fCpuHz}L`,
     '-DARDUINO=10819',
-    '-DARDUINO_AVR_UNO',
+    `-D${target.boardDefine ?? 'ARDUINO_AVR'}`,
     '-DARDUINO_ARCH_AVR',
     `-I${path.join(coreRoot, 'cores/arduino')}`,
-    `-I${path.join(coreRoot, 'variants/standard')}`,
+    `-I${path.join(coreRoot, `variants/${target.variant ?? 'standard'}`)}`,
     '-Os',
     '-ffunction-sections',
     '-fdata-sections',
     '-flto',
   ];
+  if (target.usbVid && target.usbPid) {
+    flags.push(`-DUSB_VID=${target.usbVid}`, `-DUSB_PID=${target.usbPid}`, '-DUSB_MANUFACTURER="Unknown"', '-DUSB_PRODUCT="USB IO Board"');
+  }
+  return flags;
 }
 
 const CPP_ONLY_FLAGS = ['-fno-exceptions', '-fno-threadsafe-statics', '-std=gnu++11'];
@@ -126,7 +132,7 @@ export class BuildTimeoutError extends Error {
  * cached archive, keeping compiles fast.
  */
 export async function ensureCoreArchive(target: BoardTarget, coreRoot: string): Promise<string> {
-  const cacheDir = path.join(CACHE_ROOT, `core-${target.mcu}-f${target.fCpuHz}`);
+  const cacheDir = path.join(CACHE_ROOT, `core-${target.mcu}-${target.variant ?? 'standard'}-f${target.fCpuHz}`);
   const archive = path.join(cacheDir, 'core.a');
   if (await exists(archive)) return archive;
   await mkdir(cacheDir, { recursive: true });

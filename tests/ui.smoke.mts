@@ -2,7 +2,9 @@
 import { chromium } from 'playwright';
 
 const errors: string[] = [];
-const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
+const browser = await chromium.launch(
+  process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : { executablePath: '/opt/pw-browsers/chromium' },
+);
 const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
 page.on('console', (msg) => {
   if (msg.type() === 'error') errors.push(msg.text());

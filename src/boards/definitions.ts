@@ -1,4 +1,6 @@
 import type { BoardDefinition, PinDefinition, SupportLevel } from '../types';
+import { BOARD_CAPABILITIES } from './capabilities';
+import { deriveBoardSupportLevel } from '../project/support';
 import { ARDUINO_UNO } from './unoDefinition';
 import { pinRow, gpio, analog, gnd, p5v, p3v3, vin, reset, type PinSpec } from './pinHelpers';
 
@@ -15,8 +17,6 @@ interface HeaderBoardSpec {
   logicVoltage: number;
   color?: string;
   usb?: 'micro' | 'usb-c' | 'mini' | 'none';
-  compilerTarget?: BoardDefinition['compilerTarget'];
-  simulationAdapterId?: string;
   description?: string;
   metadata?: Record<string, unknown>;
 }
@@ -37,8 +37,6 @@ function headerBoard(spec: HeaderBoardSpec): BoardDefinition {
     heightMm: spec.heightMm,
     artwork: { kind: 'builtin', builtinId: 'generic-module' },
     pins,
-    compilerTarget: spec.compilerTarget,
-    simulationAdapterId: spec.simulationAdapterId,
     supportLevel: spec.supportLevel,
     isBoard: true,
     description: spec.description,
@@ -66,9 +64,8 @@ export const ARDUINO_NANO = headerBoard({
   logicVoltage: 5,
   color: '#0b3d5e',
   usb: 'mini',
-  compilerTarget: { fqbn: 'arduino:avr:nano', mcu: 'atmega328p', fCpuHz: 16_000_000 },
   description:
-    'Nano-compatible ATmega328P board. Code compiles for this board (arduino:avr:nano); full-canvas simulation currently runs on the Uno profile.',
+    'Nano-compatible ATmega328P board. Fully simulated with its own pin profile (A6/A7 are ADC-only, as on real hardware) and compiled as arduino:avr:nano.',
   left: [
     gpio('D1', 'TX1', ['digital-in', 'digital-out', 'uart-tx']),
     gpio('D0', 'RX0', ['digital-in', 'digital-out', 'uart-rx']),
@@ -150,7 +147,7 @@ export const PICO = headerBoard({
   logicVoltage: 3.3,
   color: '#1a4232',
   description:
-    'RP2040 board with 3.3 V logic. Wiring and validation supported; RP2040 simulation is not implemented yet.',
+    'RP2040 board with 3.3 V logic and GP0-GP28 pins (GP26-28 are the ADC channels). Compiles for the real RP2040 target — never through the AVR toolchain. Instruction-level RP2040 simulation is not implemented yet.',
   left: [
     g3('GP0', 'GP0', { caps: ['digital-in', 'digital-out', 'uart-tx', 'i2c-sda', 'pwm'] }),
     g3('GP1', 'GP1', { caps: ['digital-in', 'digital-out', 'uart-rx', 'i2c-scl', 'pwm'] }),
@@ -213,7 +210,7 @@ const seqPins = (prefix: string, from: number, to: number, v: number): PinSpec[]
   return out.map((p) => ({ ...p, voltage: v }));
 };
 
-export const BOARD_DEFINITIONS: BoardDefinition[] = [
+const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   ARDUINO_UNO,
   ARDUINO_NANO,
   simpleWiringBoard(
@@ -324,6 +321,58 @@ export const BOARD_DEFINITIONS: BoardDefinition[] = [
   ),
 ];
 
+/**
+ * Merges the canonical capability table (architecture, aliases, compiler,
+ * simulation, pin capability upgrades) over the raw visual definitions and
+ * derives the support badge from capabilities. Deprecated per-board fields
+ * are stripped so no subsystem can read stale Uno-era assumptions.
+ */
+function applyCapabilities(raw: BoardDefinition): BoardDefinition {
+  const caps = BOARD_CAPABILITIES[raw.id];
+  if (!caps) {
+    return { ...raw, architecture: raw.architecture ?? 'other' };
+  }
+  const pins = caps.extraPinCaps
+    ? raw.pins.map((p) => {
+        const extra = caps.extraPinCaps!.filter((e) => e.pattern.test(p.id)).flatMap((e) => e.add);
+        if (extra.length === 0) return p;
+        return { ...p, capabilities: [...new Set([...p.capabilities, ...extra])] };
+      })
+    : raw.pins;
+  const def: BoardDefinition = {
+    ...raw,
+    pins,
+    architecture: caps.architecture,
+    aliases: caps.aliases,
+    compiler: caps.compiler ?? { provider: 'none', supported: false },
+    simulation:
+      caps.simulation ?? { engine: 'none', supported: false, supportedApis: [], supportedPeripherals: [] },
+    supportLevel: deriveBoardSupportLevel(
+      { compiler: caps.compiler, simulation: caps.simulation },
+      raw.supportLevel,
+    ),
+    metadata: {
+      ...raw.metadata,
+      ...(caps.analogPinBase !== undefined ? { analogPinBase: caps.analogPinBase } : {}),
+      ...(caps.variant ? { variant: caps.variant } : {}),
+      ...(caps.limitation ? { limitation: caps.limitation } : {}),
+    },
+  };
+  delete def.compilerTarget;
+  delete def.simulationAdapterId;
+  return def;
+}
+
+export const BOARD_DEFINITIONS: BoardDefinition[] = RAW_BOARD_DEFINITIONS.map(applyCapabilities);
+
 export function getBoardDefinition(id: string): BoardDefinition | undefined {
   return BOARD_DEFINITIONS.find((b) => b.id === id);
+}
+
+/** Resolve a board by canonical id or any registered alias (case-insensitive). */
+export function findBoardByIdOrAlias(idOrAlias: string): BoardDefinition | undefined {
+  const needle = idOrAlias.trim().toLowerCase();
+  return BOARD_DEFINITIONS.find(
+    (b) => b.id.toLowerCase() === needle || (b.aliases ?? []).some((a) => a.toLowerCase() === needle),
+  );
 }

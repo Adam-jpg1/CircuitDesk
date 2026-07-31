@@ -2,7 +2,9 @@
 // (accelerated — no realtime pacing), applies input events at their scheduled
 // times, and evaluates assertions against real firmware behavior.
 
-import { AVRRunner, F_CPU } from '../simulation/avrRunner';
+import { AVRRunner, DEFAULT_AVR_PROFILE, F_CPU } from '../simulation/avrRunner';
+import { AVR_BOARD_PROFILES } from '../boards/pinMaps';
+import { resolveDefinition } from '../project/partsRegistry';
 import { CircuitBinding, emptyControls } from '../simulation/circuitSim';
 import type { CircuitProject, TestAssertion, TestCase, TestResult, TestAssertionResult } from '../types';
 
@@ -16,9 +18,23 @@ interface PinEventLog {
 
 export async function runTest(project: CircuitProject, hex: string, test: TestCase): Promise<TestResult> {
   const started = performance.now();
+  const boardInst = project.boardInstances.find((b) => {
+    const def = resolveDefinition(b.definitionId, project);
+    return def?.isBoard && def.simulation?.supported === true;
+  });
+  const profile = boardInst ? AVR_BOARD_PROFILES[resolveDefinition(boardInst.definitionId, project)!.id] : undefined;
+  if (!profile) {
+    return {
+      testId: test.id,
+      status: 'error',
+      durationMs: 0,
+      assertionResults: [],
+      message: 'This project has no simulated board — tests require a board with genuine simulation support (e.g. Arduino Uno or Nano).',
+    };
+  }
   let runner: AVRRunner;
   try {
-    runner = new AVRRunner(hex);
+    runner = new AVRRunner(hex, profile ?? DEFAULT_AVR_PROFILE);
   } catch (err) {
     return {
       testId: test.id,

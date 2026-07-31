@@ -138,5 +138,84 @@ async function runProject(
   );
 }
 
+// ---- 6. Arduino Nano: genuine simulation on its OWN board profile ----
+{
+  const { AVR_BOARD_PROFILES } = await import('../src/boards/pinMaps');
+  const nanoProfile = AVR_BOARD_PROFILES['board.arduino-nano'];
+  const mkInst = (definitionId: string, extra: Record<string, unknown> = {}) => ({
+    id: 'i_' + definitionId.replace(/\W/g, '') + Math.random().toString(36).slice(2, 6),
+    definitionId, x: 0, y: 0, rotation: 0, properties: extra, simulationState: {},
+  });
+  const mkWire = (a: { id: string }, ap: string, b: { id: string }, bp: string) => ({
+    id: 'w' + Math.random().toString(36).slice(2, 8),
+    sourceComponentId: a.id, sourcePinId: ap, targetComponentId: b.id, targetPinId: bp,
+    netId: '', color: '#000', points: [], routing: 'smooth' as const,
+  });
+
+  const nano = mkInst('board.arduino-nano');
+  const resistor = mkInst('comp.resistor', { resistance: 220 });
+  const led = mkInst('comp.led', { color: 'red' });
+  const button = mkInst('comp.push-button');
+  const pot = mkInst('comp.potentiometer', { resistance: 10000 });
+  const base = template('tpl.blink'); // reuse structure, replace circuit entirely
+  const nanoProject: CircuitProject = {
+    ...base,
+    boardInstances: [nano],
+    componentInstances: [resistor, led, button, pot],
+    connections: [
+      mkWire(nano, 'D13', resistor, 'p1'),
+      mkWire(resistor, 'p2', led, 'anode'),
+      mkWire(led, 'cathode', nano, 'GND1'),
+      mkWire(nano, 'D2', button, '1a'),
+      mkWire(button, '2a', nano, 'GND2'),
+      mkWire(pot, 't1', nano, 'GND1'),
+      mkWire(pot, 't2', nano, '5V'),
+      mkWire(pot, 'wiper', nano, 'A6'),
+    ],
+  };
+  const nanoCode = `void setup() { pinMode(13, OUTPUT); pinMode(2, INPUT_PULLUP); Serial.begin(9600); }
+void loop() {
+  digitalWrite(13, digitalRead(2) == LOW ? HIGH : LOW);
+  Serial.print("A6="); Serial.println(analogRead(A6));
+  delay(100);
+}`;
+  const res = await fetch('http://localhost:3411/api/compiler/compile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ boardId: 'board.arduino-nano', fqbn: 'arduino:avr:nano', files: [{ name: 'sketch.ino', content: nanoCode }] }),
+  });
+  const json = (await res.json()) as { success: boolean; firmware?: { data: string }; error?: string; toolchain?: string };
+  check(json.success === true, `Nano sketch compiles as arduino:avr:nano (eightanaloginputs variant, ${json.toolchain})`);
+  if (json.success && json.firmware) {
+    // digital input released → D13 LOW
+    const runner1 = new AVRRunner(json.firmware.data, nanoProfile);
+    let serial1 = '';
+    runner1.onSerialByte = (b) => (serial1 += String.fromCharCode(b));
+    const binding1 = new CircuitBinding(nanoProject, runner1);
+    check(binding1.boardDef?.id === 'board.arduino-nano', 'Nano binding uses the Nano definition (not the Uno)');
+    const controls1 = emptyControls();
+    controls1.potPositions.set(pot.id, 0.75);
+    for (let i = 0; i < 400; i++) {
+      runner1.runToCycles(runner1.cpu.cycles + F_CPU / 1000);
+      binding1.update(controls1);
+    }
+    check(runner1.snapshot().states[13] === 'low', 'Nano GPIO output: D13 LOW while button released');
+    const a6vals = [...serial1.matchAll(/A6=(\d+)/g)].map((m) => Number(m[1]));
+    check(a6vals.length > 0 && Math.abs((a6vals.at(-1) ?? 0) - 767) < 40,
+      `Nano ADC-only A6 (channel 6) reads pot at 75% ≈767 (got ${a6vals.at(-1)})`);
+
+    // press button → firmware drives D13 HIGH → LED visual on
+    controls1.pressedButtons.add(button.id);
+    for (let i = 0; i < 300; i++) {
+      runner1.runToCycles(runner1.cpu.cycles + F_CPU / 1000);
+      binding1.update(controls1);
+    }
+    check(runner1.snapshot().states[13] === 'high', 'Nano GPIO input: button press → firmware drives D13 HIGH');
+    const { visuals } = binding1.update(controls1);
+    check(Boolean(visuals.get(led.id)?.ledOn), 'Nano LED visual driven by executed firmware');
+    check(serial1.includes('A6='), 'Nano serial output works on emulated USART');
+  }
+}
+
 console.log(failures === 0 ? '\nAll simulator behavior checks passed.' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

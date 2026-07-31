@@ -3,6 +3,8 @@ import { useEditorStore, type BottomTab } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
 import { simulationController } from '../simulation/simulationController';
 import { fetchCompilerHealth } from '../compiler/compilerClient';
+import { resolveDefinition } from '../project/partsRegistry';
+import { buildPinStatesModel } from '../simulation/pinStatesModel';
 import { CodePanel } from './CodePanel';
 import { TestsPanel } from './TestsPanel';
 import { ErrorIcon, InfoIcon, WarnIcon } from '../ui/icons';
@@ -191,24 +193,55 @@ function ValidationPanel() {
   );
 }
 
-const PIN_LABELS = ['D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'];
-
 function PinsPanel() {
   const snapshot = useSimulationStore((s) => s.pinSnapshot);
   const status = useSimulationStore((s) => s.status);
+  const project = useEditorStore((s) => s.project);
+
+  // The panel is generated from the selected board's own definition —
+  // never from a hard-coded Uno pin list.
+  const model = useMemo(() => {
+    const inst = project?.boardInstances[0];
+    const def = inst ? resolveDefinition(inst.definitionId, project) : undefined;
+    return buildPinStatesModel(def?.isBoard ? def : null);
+  }, [project]);
+
+  if (model.kind === 'no-board') {
+    return <div className="empty-state">Place a board on the canvas to see its pins.</div>;
+  }
+  if (model.kind === 'not-simulated') {
+    return (
+      <div className="empty-state">
+        <p>Live pin states require simulation support for {model.boardName}.</p>
+        <p style={{ fontSize: 11.5 }}>
+          This board's badge describes what is supported. Its pins are still real connection points for wiring
+          and validation — CircuitDesk just doesn't pretend to show live activity it can't simulate.
+        </p>
+      </div>
+    );
+  }
   if (!snapshot || status === 'stopped') {
-    return <div className="empty-state">Run the simulation to see live pin states from the emulator.</div>;
+    return <div className="empty-state">Run the simulation to see live pin states from the emulator ({model.boardName}).</div>;
   }
   return (
     <div className="pins-grid">
-      {PIN_LABELS.map((label, pin) => {
-        const state = snapshot.states[pin];
-        const duty = snapshot.duty[pin];
+      {model.rows.map((row) => {
+        if (row.pin === undefined) {
+          return (
+            <div className="pin-chip" key={row.label} title="ADC-only input — no digital pin state">
+              <span className="pin-dot input" />
+              <span style={{ minWidth: 26 }}>{row.label}</span>
+              <span style={{ color: 'var(--text-2)' }}>ADC</span>
+            </div>
+          );
+        }
+        const state = snapshot.states[row.pin];
+        const duty = snapshot.duty[row.pin];
         const isPwm = state === 'high' || state === 'low' ? duty > 0.02 && duty < 0.98 : false;
         return (
-          <div className="pin-chip" key={label} title={`${snapshot.toggles[pin]} transitions since start`}>
+          <div className="pin-chip" key={row.label} title={`${snapshot.toggles[row.pin]} transitions since start`}>
             <span className={`pin-dot ${state === 'high' ? 'high' : state === 'low' ? 'low' : state === 'input-pullup' ? 'pullup' : 'input'}`} />
-            <span style={{ minWidth: 26 }}>{label}</span>
+            <span style={{ minWidth: 26 }}>{row.label}</span>
             <span style={{ color: 'var(--text-2)' }}>
               {state === 'input-pullup' ? 'IN·PU' : state.toUpperCase().slice(0, 5)}
               {isPwm ? ` ${(duty * 100).toFixed(0)}%` : ''}
