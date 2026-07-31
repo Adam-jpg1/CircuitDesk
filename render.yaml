@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: circuitdesk-compiler
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Optional: extra CORS origins (comma-separated), e.g. Vercel preview URLs.
+      - key: CORS_EXTRA_ORIGINS
+        value: ""

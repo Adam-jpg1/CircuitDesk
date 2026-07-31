@@ -15,7 +15,8 @@
     "test:pipeline": "tsx tests/pipeline.e2e.mts",
     "test:ui": "tsx tests/ui.smoke.mts",
     "test:sim": "tsx tests/sim.behaviors.mts",
-    "test:qa": "tsx tests/qa.beta.mts"
+    "test:qa": "tsx tests/qa.beta.mts",
+    "start:backend": "tsx server/index.ts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
