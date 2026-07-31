@@ -8,6 +8,7 @@ import { SUPPORTED_TARGETS, findTarget, type CompileRequest } from './compiler/t
 import { detectGccToolchain, ensureCoreArchive } from './compiler/gccToolchain.js';
 import { detectArduinoCli } from './compiler/arduinoCli.js';
 import { rateLimit } from './rateLimit.js';
+import { CompileGate, CompilerBusyError } from './compileGate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -107,13 +108,25 @@ app.get('/api/compiler/capabilities', async (_req, res) => {
 
 const compileLimiter = rateLimit({ windowMs: 5 * 60_000, max: 60, name: 'compile' });
 
-/** One compile at a time keeps resource usage bounded on small machines. */
-let compileQueue: Promise<unknown> = Promise.resolve();
+/** One compile at a time, with a short queue; see server/compileGate.ts. */
+const compileGate = new CompileGate();
 
-function enqueue<T>(fn: () => Promise<T>): Promise<T> {
-  const next = compileQueue.then(fn, fn);
-  compileQueue = next.catch(() => undefined);
-  return next;
+/** Refuses a build cleanly when the queue is full instead of piling up. */
+function rejectIfBusy(err: unknown, res: express.Response, what: string): boolean {
+  if (!(err instanceof CompilerBusyError)) return false;
+  res.set('Retry-After', String(err.retryAfterSeconds));
+  res.status(503).json({
+    success: false,
+    toolchain: 'none',
+    toolchainVersion: '',
+    stdout: '',
+    stderr: '',
+    diagnostics: [],
+    durationMs: 0,
+    error: `${what} refused: ${err.message}`,
+    errorCode: 'BUSY',
+  });
+  return true;
 }
 
 app.post('/api/compiler/compile', compileLimiter, async (req, res) => {
@@ -122,7 +135,13 @@ app.post('/api/compiler/compile', compileLimiter, async (req, res) => {
     res.status(400).json({ success: false, error: 'Malformed compile request.', errorCode: 'MALFORMED_PROJECT' });
     return;
   }
-  const result = await enqueue(() => compileProject(body, false));
+  let result;
+  try {
+    result = await compileGate.run(() => compileProject(body, false));
+  } catch (err) {
+    if (rejectIfBusy(err, res, 'Compile')) return;
+    throw err;
+  }
   res.status(result.errorCode === 'MALFORMED_PROJECT' ? 400 : 200).json(result);
 });
 
@@ -132,7 +151,13 @@ app.post('/api/compiler/validate', compileLimiter, async (req, res) => {
     res.status(400).json({ success: false, error: 'Malformed validate request.', errorCode: 'MALFORMED_PROJECT' });
     return;
   }
-  const result = await enqueue(() => compileProject(body, true));
+  let result;
+  try {
+    result = await compileGate.run(() => compileProject(body, true));
+  } catch (err) {
+    if (rejectIfBusy(err, res, 'Validate')) return;
+    throw err;
+  }
   res.status(200).json(result);
 });
 
