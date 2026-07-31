@@ -416,7 +416,61 @@ function BatteryArt({ def }: ArtProps) {
   );
 }
 
+
+/**
+ * SSD1306 panel drawn straight from the device's display RAM — one rect per
+ * lit pixel, nothing pre-rendered. A dark panel means firmware wrote nothing.
+ */
+function OledArt({ def, visual }: ArtProps) {
+  const w = def.widthMm * MM;
+  const h = def.heightMm * MM;
+  const display = visual?.display;
+  const glass = { x: w * 0.08, y: h * 0.3, w: w * 0.84, h: h * 0.5 };
+  const px = glass.w / 128;
+  const py = glass.h / 64;
+  const lit: JSX.Element[] = [];
+  if (display?.on && display.pixels) {
+    const ram = display.pixels;
+    for (let page = 0; page < 8; page++) {
+      for (let x = 0; x < 128; x++) {
+        const bits = ram[page * 128 + x];
+        if (!bits) continue;
+        for (let bit = 0; bit < 8; bit++) {
+          if ((bits >> bit) & 1) {
+            lit.push(
+              <rect
+                key={`${x}-${page}-${bit}`}
+                x={glass.x + x * px}
+                y={glass.y + (page * 8 + bit) * py}
+                width={Math.max(px, 0.6)}
+                height={Math.max(py, 0.6)}
+                fill="#8bdcff"
+              />,
+            );
+          }
+        }
+      }
+    }
+  }
+  return (
+    <g>
+      <rect width={w} height={h} rx="3" fill="#12161b" stroke="#2b323a" />
+      <rect x={glass.x} y={glass.y} width={glass.w} height={glass.h} fill="#05070a" stroke="#1d242c" />
+      {lit}
+      {!display?.on && (
+        <text x={w / 2} y={h * 0.58} fontSize="5" fill="#3d454e" textAnchor="middle" fontFamily="monospace">
+          OLED
+        </text>
+      )}
+      <text x={w / 2} y={h * 0.94} fontSize="4" fill="#6d7681" textAnchor="middle" fontFamily="monospace">
+        SSD1306 I2C
+      </text>
+    </g>
+  );
+}
+
 const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
+  oled: (p) => <OledArt {...p} />,
   led: (p) => <LedArt {...p} />,
   'rgb-led': (p) => <RgbLedArt {...p} />,
   resistor: (p) => <ResistorArt {...p} />,

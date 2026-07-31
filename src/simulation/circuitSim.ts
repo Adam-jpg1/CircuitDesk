@@ -8,6 +8,7 @@ import type { BoardDefinition, CircuitProject, ComponentInstance } from '../type
 import { buildCircuitGraph, splitNode, type CircuitGraph } from '../circuit/nets';
 import type { AVRRunner } from './avrRunner';
 import { arduinoPinNumber, avrProfileFor } from '../boards/pinMaps';
+import { Ssd1306Device, SSD1306_ADDRESSES } from './devices/ssd1306';
 
 export interface NetLevel {
   volts: number | null;
@@ -17,7 +18,16 @@ export interface NetLevel {
   conflict: boolean;
 }
 
+export interface DisplayVisual {
+  /** SSD1306 GDDRAM (1 bit per pixel, page-major), or null when dark. */
+  pixels: Uint8Array | null;
+  on: boolean;
+  revision: number;
+}
+
 export interface ComponentVisualState {
+  /** Populated for display devices driven by real bus traffic. */
+  display?: DisplayVisual;
   ledOn?: boolean;
   brightness?: number;
   rgb?: [number, number, number];
@@ -95,6 +105,7 @@ export class CircuitBinding {
     this.indexNets();
     this.buildEdges();
     if (runner) this.setupUltrasonic(runner);
+    if (runner) this.setupI2cDevices(runner);
   }
 
   private indexNets(): void {
@@ -224,6 +235,76 @@ export class CircuitBinding {
         }
       }
     };
+  }
+
+
+  /**
+   * Attaches I2C device models for parts that are genuinely wired to the
+   * board's I2C bus. A display with SDA/SCL on the wrong pins, or with no
+   * power, is not attached at all — so firmware addressing it gets a NACK,
+   * exactly as it would on a breadboard.
+   */
+  private setupI2cDevices(runner: AVRRunner): void {
+    const board = this.boardDef;
+    if (!board) {
+      runner.i2cBus.sync([]);
+      return;
+    }
+    // Board-side SDA/SCL as emulator pin numbers (A4/A5 on Uno, D20/D21 on
+    // Mega, D2/D3 on Leonardo — taken from the board's own metadata).
+    const i2cPinIds = (board.metadata.i2cPins as string[] | undefined) ?? [];
+    const busPins = new Set<number>();
+    for (const pinId of i2cPinIds) {
+      const n = arduinoPinNumber(board, pinId);
+      if (n !== undefined) busPins.add(n);
+    }
+    const sdaId = i2cPinIds[0];
+    const sclId = i2cPinIds[1];
+    const sdaPin = sdaId ? arduinoPinNumber(board, sdaId) : undefined;
+    const sclPin = sclId ? arduinoPinNumber(board, sclId) : undefined;
+
+    const netHasPin = (netId: string | undefined, pin: number | undefined): boolean =>
+      netId !== undefined && pin !== undefined && (this.netBoardPins.get(netId) ?? []).includes(pin);
+
+    /**
+     * True when some OTHER instance drives this net with a pin of one of the
+     * given types. A module's own VCC/GND pins are typed as power/ground, so
+     * membership in supplyNets alone would let an unconnected board claim it
+     * is powered — the device must be fed from outside itself.
+     */
+    const netFedBy = (netId: string | undefined, instanceId: string, types: string[]): boolean => {
+      if (netId === undefined) return false;
+      const net = this.graph.nets.find((n) => n.id === netId);
+      if (!net) return false;
+      for (const node of net.nodes) {
+        const [otherId, pinId] = splitNode(node);
+        if (otherId === instanceId) continue;
+        const otherDef = this.graph.definitions.get(otherId);
+        const pin = otherDef?.pins.find((p) => p.id === pinId);
+        if (pin && types.includes(pin.type)) return true;
+      }
+      return false;
+    };
+
+    const wanted: { instanceId: string; create: () => Ssd1306Device }[] = [];
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (def?.id !== 'comp.oled') continue;
+      const sdaNet = this.netOfInstancePin(inst.id, 'sda');
+      const sclNet = this.netOfInstancePin(inst.id, 'scl');
+      const vccNet = this.netOfInstancePin(inst.id, 'vcc');
+      const gndNet = this.netOfInstancePin(inst.id, 'gnd');
+      const wiredToBus = netHasPin(sdaNet, sdaPin) && netHasPin(sclNet, sclPin);
+      const powered = netFedBy(vccNet, inst.id, ['power-5v', 'power-3v3', 'power-vin']);
+      const grounded = netFedBy(gndNet, inst.id, ['ground']);
+      if (!wiredToBus || !powered || !grounded) continue;
+      const address = Number(inst.properties.i2cAddress ?? SSD1306_ADDRESSES[0]);
+      wanted.push({
+        instanceId: inst.id,
+        create: () => new Ssd1306Device(inst.id, address),
+      });
+    }
+    runner.i2cBus.sync(wanted);
   }
 
   private controlsRef: SimControls | null = null;
@@ -422,6 +503,19 @@ export class CircuitBinding {
           const cm = controls.sensorValues.get(inst.id) ?? 100;
           inst.simulationState.distanceCm = cm;
           visuals.set(inst.id, { value: cm });
+          break;
+        }
+        case 'sim.ssd1306': {
+          const device = runner?.i2cBus.deviceFor(inst.id);
+          if (device instanceof Ssd1306Device) {
+            visuals.set(inst.id, {
+              display: { pixels: device.ram, on: device.isOn, revision: device.revision },
+              value: device.litPixels,
+            });
+          } else {
+            // Not wired to the bus (or no simulation running): stays dark.
+            visuals.set(inst.id, { display: { pixels: null, on: false, revision: 0 } });
+          }
           break;
         }
         default: {

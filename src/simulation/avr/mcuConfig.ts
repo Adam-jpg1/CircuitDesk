@@ -24,6 +24,7 @@ import {
   timer1Config,
   timer2Config,
   usart0Config,
+  twiConfig,
   type CPU,
   type AVRTimerConfig,
   type ADCConfig,
@@ -34,9 +35,15 @@ import type { AvrPortName } from '../../boards/pinMaps';
 
 /** avr8js does not export its USART config type by name; mirror the shipped one. */
 type UsartConfig = typeof usart0Config;
+type TwiConfig = typeof twiConfig;
 
 export interface AvrMcuConfig {
   timers: AVRTimerConfig[];
+  /**
+   * Hardware I2C (TWI). The register block sits at 0xB8-0xBD on every AVR we
+   * support; only the interrupt vector differs per chip.
+   */
+  twi: TwiConfig;
   /** The hardware UART this board's emulated serial stream comes from. */
   usart: UsartConfig;
   adc: ADCConfig;
@@ -67,6 +74,7 @@ const ATMEGA328P: AvrMcuConfig = {
   timers: [timer0Config, timer1Config, timer2Config],
   usart: usart0Config,
   adc: adcConfig,
+  twi: twiConfig,
 };
 
 // --------------------------------------------------------------- ATmega2560
@@ -230,10 +238,14 @@ const mega2560Adc: ADCConfig = {
   ],
 };
 
+/** ATmega2560: TWI is vector 40 -> word address (40-1)*2 = 0x4E. */
+const mega2560Twi: TwiConfig = { ...twiConfig, twiInterrupt: 0x4e };
+
 const ATMEGA2560: AvrMcuConfig = {
   timers: [mega2560Timer0, mega2560Timer1, mega2560Timer2, mega2560Timer3, mega2560Timer4, mega2560Timer5],
   usart: mega2560Usart0,
   adc: mega2560Adc,
+  twi: mega2560Twi,
 };
 
 // --------------------------------------------------------------- ATmega32U4
@@ -371,10 +383,14 @@ function installAtmega32u4Extras(cpu: CPU): void {
   };
 }
 
+/** ATmega32U4: TWI is vector 37 -> word address (37-1)*2 = 0x48. */
+const atmega32u4Twi: TwiConfig = { ...twiConfig, twiInterrupt: 0x48 };
+
 const ATMEGA32U4: AvrMcuConfig = {
   timers: [atmega32u4Timer0, atmega32u4Timer1, atmega32u4Timer3],
   usart: atmega32u4Usart1,
   adc: atmega32u4Adc,
+  twi: atmega32u4Twi,
   installExtras: installAtmega32u4Extras,
 };
 
