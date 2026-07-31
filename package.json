@@ -18,7 +18,8 @@
     "test:qa": "tsx tests/qa.beta.mts",
     "start:backend": "tsx server/index.ts",
     "test:boards": "tsx tests/boards.profile.mts",
-    "test:mega": "tsx tests/mega.runtime.mts"
+    "test:mega": "tsx tests/mega.runtime.mts",
+    "test:leonardo": "tsx tests/leonardo.runtime.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

@@ -59,14 +59,14 @@ function projectWith(boardDefId: string): CircuitProject {
   check(ok, 'every Simulated badge has adapter + pin profile; every Compile badge has a real toolchain target');
   const simulated = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'simulated').map((b) => b.id).sort();
   check(
-    JSON.stringify(simulated) === JSON.stringify(['board.arduino-mega2560', 'board.arduino-nano', 'board.arduino-uno']),
+    JSON.stringify(simulated) ===
+      JSON.stringify(['board.arduino-leonardo', 'board.arduino-mega2560', 'board.arduino-nano', 'board.arduino-uno']),
     `only boards with passing runtime tests are Simulated (got: ${simulated.join(', ')})`,
   );
   const compileOnly = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'compile').map((b) => b.id).sort();
   check(
-    JSON.stringify(compileOnly) ===
-      JSON.stringify(['board.arduino-leonardo', 'board.raspberry-pi-pico', 'board.raspberry-pi-pico-w']),
-    `compile tier is Leonardo, Pico, Pico W (got: ${compileOnly.join(', ')})`,
+    JSON.stringify(compileOnly) === JSON.stringify(['board.raspberry-pi-pico', 'board.raspberry-pi-pico-w']),
+    `compile tier is Pico and Pico W (got: ${compileOnly.join(', ')})`,
   );
 }
 
@@ -182,7 +182,16 @@ function projectWith(boardDefId: string): CircuitProject {
     'Pin States (Mega): includes Mega-only pins D53 and A8-A15',
   );
   const leo = getBoardDefinition('board.arduino-leonardo')!;
-  check(buildPinStatesModel(leo).kind === 'not-simulated', 'Pin States (Leonardo, compile-only): no fake live pin activity');
+  const leoModel = buildPinStatesModel(leo);
+  const leoLabels = leoModel.kind === 'pins' ? leoModel.rows.map((r) => r.label) : [];
+  check(
+    leoModel.kind === 'pins' && leoLabels.length === 23,
+    `Pin States (Leonardo): its own 23 header pins D0-D16 + A0-A5 (got ${leoLabels.length})`,
+  );
+  check(
+    leoLabels.includes('D16') && !leoLabels.includes('A6') && !leoLabels.includes('D53'),
+    'Pin States (Leonardo): ICSP SPI pins present, no A6-A11 and no Mega pins',
+  );
 }
 
 // ---------- 7. Server capability endpoint + no-fallback compile responses ----------
@@ -257,6 +266,42 @@ function projectWith(boardDefId: string): CircuitProject {
   check(
     mega.pins.find((p) => p.id === 'D18')?.capabilities.includes('interrupt') === true,
     'D18-D21 keep their real hardware interrupt capability metadata',
+  );
+
+  // ---- Leonardo: native USB and Timer4 must never be claimed ----
+  const leonardo = getBoardDefinition('board.arduino-leonardo')!;
+  const leoApis = leonardo.simulation!.supportedApis;
+  check(!leoApis.includes('external interrupts'), 'Leonardo does not claim external interrupts');
+  check(
+    !leoApis.some((a) => /^Serial \(/.test(a)) && leoApis.some((a) => /^Serial1 /.test(a)),
+    'Leonardo claims Serial1 (USART1) and never the native-USB "Serial"',
+  );
+  check(
+    leoApis.some((a) => /analogWrite \(PWM on D3, D5, D9, D10, D11\)/.test(a)),
+    'Leonardo claims PWM only on the Timer0/1/3 pins, not on the Timer4 pins D6/D13',
+  );
+  check(
+    leoApis.some((a) => /analogRead \(A0-A5\)/.test(a)),
+    'Leonardo claims analogRead only on A0-A5',
+  );
+  const leoLimitation = String(leonardo.metadata.limitation ?? '');
+  check(
+    /native USB/i.test(leoLimitation) && /Timer4/.test(leoLimitation) && /while \(!Serial\)/.test(leoLimitation),
+    'Leonardo limitation text names native USB, Timer4 and the "while (!Serial)" stall',
+  );
+  check(describeSupport(leonardo).includes(leoLimitation), 'the Leonardo badge tooltip states its limitations');
+  const leoProfile = AVR_BOARD_PROFILES['board.arduino-leonardo'];
+  check(leoProfile.mcu === 'atmega32u4' && leoProfile.ramEnd === 0x0aff, 'Leonardo runs its own ATmega32U4 profile');
+  check(
+    AVR_BOARD_PROFILES['board.arduino-uno'].mcu === 'atmega328p' &&
+      AVR_BOARD_PROFILES['board.arduino-nano'].mcu === 'atmega328p' &&
+      AVR_BOARD_PROFILES['board.arduino-mega2560'].mcu === 'atmega2560',
+    'Uno, Nano and Mega keep their own MCU profiles',
+  );
+  // Physical PWM metadata still describes the real board (7 pins carry ~).
+  check(
+    (leonardo.metadata.pwmPins as string[]).includes('D13'),
+    'Leonardo keeps D13 in its real hardware PWM pin metadata',
   );
 }
 
