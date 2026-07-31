@@ -50,6 +50,10 @@ export async function compileProjectCode(
       durationMs: typeof raw.durationMs === 'number' ? raw.durationMs : 0,
       error: raw.error ?? (res.ok ? undefined : `Compiler service returned HTTP ${res.status}.`),
       errorCode: raw.errorCode,
+      // Stamped from the requested target so cached firmware always carries the
+      // board it was built for; execution paths refuse a mismatch.
+      boardId: target.boardId,
+      fqbn: target.fqbn,
     };
   } catch (err) {
     console.error('[CircuitDesk] compile request failed:', err);
@@ -64,6 +68,8 @@ export async function compileProjectCode(
       error:
         'Could not reach the compiler server. Make sure the CircuitDesk backend is running (npm run dev starts both).',
       errorCode: 'TOOLCHAIN_MISSING',
+      boardId: target.boardId,
+      fqbn: target.fqbn,
     };
   }
 }

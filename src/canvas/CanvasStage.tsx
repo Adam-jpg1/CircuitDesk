@@ -8,6 +8,7 @@ import { pinAbsolute, partBounds, partSize, wirePath, snap, type Pt } from './ge
 import { ComponentArtwork } from '../components-library/artwork/componentArtwork';
 import { UnoArtwork } from '../boards/artwork/UnoArtwork';
 import { GenericModuleArtwork } from '../boards/artwork/GenericModuleArtwork';
+import { MegaArtwork } from '../boards/artwork/MegaArtwork';
 import type { CircuitProject, ComponentInstance, PartDefinition, PinDefinition } from '../types';
 
 const WIRE_COLORS = ['#e03131', '#212529', '#2f9e44', '#1971c2', '#e8590c', '#7048e8', '#f08c00', '#c2255c'];
@@ -584,7 +585,13 @@ const PartView = memo(function PartView({
       style={{ cursor: 'move' }}
     >
       {def.isBoard ? (
-        def.artwork.builtinId === 'arduino-uno' ? <UnoArtwork def={def} /> : <GenericModuleArtwork def={def} />
+        def.artwork.builtinId === 'arduino-uno' ? (
+          <UnoArtwork def={def} />
+        ) : def.artwork.builtinId === 'arduino-mega' ? (
+          <MegaArtwork def={def} />
+        ) : (
+          <GenericModuleArtwork def={def} />
+        )
       ) : (
         <ComponentArtwork def={def} instance={inst} visual={visual} />
       )}

@@ -8,7 +8,7 @@
 
 import type { AVRRunner } from './avrRunner';
 import { CircuitBinding, emptyControls, type SimControls } from './circuitSim';
-import { getSimulatorAdapter } from './adapters';
+import { getSimulatorAdapter, assertFirmwareMatchesBoard } from './adapters';
 import { resolveDefinition } from '../project/partsRegistry';
 import { useSimulationStore } from './simulationStore';
 import type { BoardDefinition, CircuitProject } from '../types';
@@ -35,14 +35,16 @@ class SimulationController {
   private lastPublishWall = 0;
   private serialDecoder = new TextDecoder();
   private hex: string | null = null;
+  private compiledForBoardId: string | null = null;
   private project: CircuitProject | null = null;
   private executedRecently = 0;
   private wallRecently = 0;
   private starting = false;
 
-  loadFirmware(hex: string, project: CircuitProject): void {
+  loadFirmware(hex: string, project: CircuitProject, compiledForBoardId: string): void {
     this.stop();
     this.hex = hex;
+    this.compiledForBoardId = compiledForBoardId;
     this.project = project;
   }
 
@@ -50,12 +52,36 @@ class SimulationController {
     return this.hex !== null;
   }
 
-  /** Re-bind the circuit (e.g. after wiring changes) without recompiling. */
+  /**
+   * Re-bind the circuit (e.g. after wiring changes) without recompiling.
+   *
+   * If the board itself changed, the running firmware no longer belongs to
+   * this project: the simulation is stopped instead of continuing to publish
+   * the old board's pin states under the new board's name.
+   */
   refreshCircuit(project: CircuitProject): void {
     this.project = project;
-    if (this.runner) {
-      this.binding = new CircuitBinding(project, this.runner);
+    if (!this.runner) return;
+    const board = findSimulatedBoard(project);
+    if (!board) {
+      this.stop();
+      useSimulationStore
+        .getState()
+        .setStatus('error', 'The simulated board was removed from the canvas, so the simulation was stopped.');
+      return;
     }
+    if (this.compiledForBoardId && board.id !== this.compiledForBoardId) {
+      this.stop();
+      useSimulationStore
+        .getState()
+        .setStatus(
+          'error',
+          `The board on the canvas changed to ${board.name}, but the loaded firmware was compiled for "${this.compiledForBoardId}". ` +
+            'The simulation was stopped — recompile for this board.',
+        );
+      return;
+    }
+    this.binding = new CircuitBinding(project, this.runner);
   }
 
   start(): void {
@@ -103,6 +129,7 @@ class SimulationController {
     }
     const adapter = getSimulatorAdapter(boardDef)!;
     try {
+      assertFirmwareMatchesBoard(this.compiledForBoardId ?? '', boardDef);
       return await adapter.createRunner(this.hex!, boardDef);
     } catch (err) {
       console.error('[CircuitDesk] simulator init failed:', err);
@@ -238,7 +265,7 @@ class SimulationController {
     store.publishFrame({
       simTimeMs: 0,
       speedFactor: 1,
-      pinSnapshot: { states: Array(20).fill('input'), duty: Array(20).fill(0), pulseWidthUs: Array(20).fill(0), toggles: Array(20).fill(0) },
+      pinSnapshot: { states: [], duty: [], pulseWidthUs: [], toggles: [] },
       visuals: {},
     });
   }

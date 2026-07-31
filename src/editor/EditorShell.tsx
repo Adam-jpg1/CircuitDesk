@@ -31,15 +31,17 @@ export function EditorShell({ projectId }: { projectId: string }) {
     };
   }, []);
 
-  // keep the live simulation's circuit binding in sync with wiring edits
+  // keep the live simulation's circuit binding in sync with wiring edits, and
+  // let the controller stop the run when the board itself is swapped
   const connections = project?.connections;
   const componentInstances = project?.componentInstances;
+  const boardInstances = project?.boardInstances;
   useEffect(() => {
     const p = useEditorStore.getState().project;
     if (p && useSimulationStore.getState().status !== 'stopped') {
       simulationController.refreshCircuit(p);
     }
-  }, [connections, componentInstances]);
+  }, [connections, componentInstances, boardInstances]);
 
   useKeyboardShortcuts();
 

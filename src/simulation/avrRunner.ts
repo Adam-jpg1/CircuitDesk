@@ -1,36 +1,28 @@
-// Real ATmega328P execution using avr8js. Compiled firmware (Intel HEX from
-// the compiler backend) runs instruction-by-instruction; GPIO, timers (incl.
+// Real AVR execution using avr8js. Compiled firmware (Intel HEX from the
+// compiler backend) runs instruction-by-instruction; GPIO, timers (incl.
 // PWM), UART and ADC are the emulator's own peripherals. Nothing in here
 // scans source code — all behavior comes from executing the program.
 //
-// Pin numbering is driven by a per-board AvrBoardProfile (boards/pinMaps.ts):
-// only boards with a registered profile can run here — there is no implicit
-// Uno fallback for other boards.
+// Everything MCU-specific comes from the board's AvrBoardProfile
+// (boards/pinMaps.ts) plus its peripheral configuration
+// (simulation/avr/mcuConfig.ts): ports, SRAM size, flash size, pin numbering,
+// timers, USART and ADC. Only boards with a registered profile can run here —
+// there is no implicit Uno fallback for any other board.
 
-import {
-  CPU,
-  avrInstruction,
-  AVRIOPort,
-  AVRTimer,
-  AVRUSART,
-  AVRADC,
-  adcConfig,
-  portBConfig,
-  portCConfig,
-  portDConfig,
-  timer0Config,
-  timer1Config,
-  timer2Config,
-  usart0Config,
-  PinState,
-} from 'avr8js';
-import { parseIntelHex } from './intelHex';
-import { AVR_BOARD_PROFILES, type AvrBoardProfile } from '../boards/pinMaps';
+import { CPU, avrInstruction, AVRIOPort, AVRTimer, AVRUSART, AVRADC, PinState } from 'avr8js';
+import { parseIntelHex, intelHexHighestAddress } from './intelHex';
+import { AVR_BOARD_PROFILES, type AvrBoardProfile, type AvrPortName } from '../boards/pinMaps';
+import { MCU_CONFIGS, PORT_CONFIGS } from './avr/mcuConfig';
 
 export const F_CPU = 16_000_000;
 
 /** Default profile (ATmega328P / Uno pinout) for direct test usage. */
 export const DEFAULT_AVR_PROFILE: AvrBoardProfile = AVR_BOARD_PROFILES['board.arduino-uno'];
+
+/** Hard ceiling on instructions per runToCycles() call — runaway-sketch guard. */
+const MAX_INSTRUCTIONS_PER_CALL = 200_000_000;
+
+export class FirmwareRejectedError extends Error {}
 
 /** @deprecated board-aware resolution lives in boards/pinMaps.ts (arduinoPinNumber). */
 export function boardPinToArduino(pinId: string): number | undefined {
@@ -42,7 +34,7 @@ export function boardPinToArduino(pinId: string): number | undefined {
 }
 
 export interface PinSnapshot {
-  /** state per Arduino pin 0..19 */
+  /** state per Arduino pin, indexed 0..profile.pinCount-1 */
   states: ('low' | 'high' | 'input' | 'input-pullup')[];
   /** measured PWM duty per pin over the last sample window (0..1), only for output pins */
   duty: number[];
@@ -64,39 +56,77 @@ interface DutyTracker {
 
 export class AVRRunner {
   readonly cpu: CPU;
-  readonly portB: AVRIOPort;
-  readonly portC: AVRIOPort;
-  readonly portD: AVRIOPort;
   readonly usart: AVRUSART;
   readonly adc: AVRADC;
-  readonly timer0: AVRTimer;
-  readonly timer1: AVRTimer;
-  readonly timer2: AVRTimer;
+  readonly timers: AVRTimer[];
+  readonly profile: AvrBoardProfile;
+
+  private readonly ports = new Map<AvrPortName, AVRIOPort>();
+  /** Reverse index: port name → [arduinoPin, bitIndex][] (avoids per-change scans). */
+  private readonly portPins = new Map<AvrPortName, [number, number][]>();
 
   onSerialByte: ((byte: number) => void) | null = null;
   /** Called on any digital pin change with (arduinoPin, isHigh). */
   onPinChange: ((pin: number, high: boolean) => void) | null = null;
 
-  private program = new Uint8Array(0x8000);
   private trackers: DutyTracker[] = [];
   private serialRxQueue: number[] = [];
 
-  readonly profile: AvrBoardProfile;
-
   constructor(hex: string, profile: AvrBoardProfile = DEFAULT_AVR_PROFILE) {
     this.profile = profile;
-    parseIntelHex(hex, this.program);
-    this.cpu = new CPU(new Uint16Array(this.program.buffer));
-    this.timer0 = new AVRTimer(this.cpu, timer0Config);
-    this.timer1 = new AVRTimer(this.cpu, timer1Config);
-    this.timer2 = new AVRTimer(this.cpu, timer2Config);
-    this.portB = new AVRIOPort(this.cpu, portBConfig);
-    this.portC = new AVRIOPort(this.cpu, portCConfig);
-    this.portD = new AVRIOPort(this.cpu, portDConfig);
-    this.usart = new AVRUSART(this.cpu, usart0Config, F_CPU);
-    this.adc = new AVRADC(this.cpu, adcConfig);
+    const mcu = MCU_CONFIGS[profile.mcu];
+    if (!mcu) {
+      throw new FirmwareRejectedError(`No emulator configuration is registered for MCU "${profile.mcu}".`);
+    }
 
-    for (let pin = 0; pin < 20; pin++) {
+    // Flash image sized for this MCU. Firmware that reaches beyond this chip's
+    // flash is rejected outright rather than silently truncated into a
+    // different chip's address space.
+    let highest: number;
+    try {
+      highest = intelHexHighestAddress(hex);
+    } catch (err) {
+      throw new FirmwareRejectedError(
+        `Firmware could not be parsed as Intel HEX for ${profile.mcu}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (highest < 0) {
+      throw new FirmwareRejectedError(`Firmware image for ${profile.mcu} is empty.`);
+    }
+    if (highest >= profile.flashBytes) {
+      throw new FirmwareRejectedError(
+        `Firmware addresses flash byte 0x${highest.toString(16)} but ${profile.mcu} has only ${profile.flashBytes} bytes of flash — refusing to run firmware built for a different MCU.`,
+      );
+    }
+    const program = new Uint8Array(profile.flashBytes);
+    try {
+      parseIntelHex(hex, program);
+    } catch (err) {
+      throw new FirmwareRejectedError(
+        `Firmware could not be loaded for ${profile.mcu}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // avr8js allocates 0x100 of register space plus sramBytes, so the SRAM
+    // allocation must span through RAMEND. The ATmega2560's extended I/O
+    // pushes SRAM to 0x200, which the 328P's layout would silently truncate.
+    this.cpu = new CPU(new Uint16Array(program.buffer), profile.ramEnd + 1 - 0x100);
+
+    this.timers = mcu.timers.map((cfg) => new AVRTimer(this.cpu, cfg));
+    this.usart = new AVRUSART(this.cpu, mcu.usart, F_CPU);
+    this.adc = new AVRADC(this.cpu, mcu.adc);
+
+    for (const name of profile.ports) {
+      const cfg = PORT_CONFIGS[name];
+      if (!cfg) continue;
+      this.ports.set(name, new AVRIOPort(this.cpu, cfg));
+      this.portPins.set(name, []);
+    }
+    for (const [pinStr, ref] of Object.entries(profile.portMap)) {
+      this.portPins.get(ref.port)?.push([Number(pinStr), ref.index]);
+    }
+
+    for (let pin = 0; pin < profile.pinCount; pin++) {
       this.trackers.push({
         lastState: false,
         lastChangeCycles: 0,
@@ -113,22 +143,17 @@ export class AVRRunner {
     };
     this.usart.onRxComplete = () => this.pumpSerialRx();
 
-    this.portB.addListener(() => this.portChanged('B'));
-    this.portC.addListener(() => this.portChanged('C'));
-    this.portD.addListener(() => this.portChanged('D'));
+    for (const [name, port] of this.ports) {
+      port.addListener(() => this.portChanged(name));
+    }
   }
 
-  private portOf(name: 'B' | 'C' | 'D'): AVRIOPort {
-    return name === 'B' ? this.portB : name === 'C' ? this.portC : this.portD;
-  }
-
-  private portChanged(name: 'B' | 'C' | 'D'): void {
-    const port = this.portOf(name);
-    for (const [pinStr, ref] of Object.entries(this.profile.portMap)) {
-      if (ref.port !== name) continue;
-      const pin = Number(pinStr);
-      const state = port.pinState(ref.index);
-      const high = state === PinState.High;
+  private portChanged(name: AvrPortName): void {
+    const port = this.ports.get(name);
+    const pins = this.portPins.get(name);
+    if (!port || !pins) return;
+    for (const [pin, index] of pins) {
+      const high = port.pinState(index) === PinState.High;
       const tracker = this.trackers[pin];
       if (high !== tracker.lastState) {
         const now = this.cpu.cycles;
@@ -149,7 +174,7 @@ export class AVRRunner {
   pinState(pin: number): PinState | undefined {
     const ref = this.profile.portMap[pin];
     if (!ref) return undefined;
-    return this.portOf(ref.port as 'B' | 'C' | 'D').pinState(ref.index);
+    return this.ports.get(ref.port)?.pinState(ref.index);
   }
 
   /** String pin level for engine-agnostic consumers (no avr8js enum leak). */
@@ -167,7 +192,7 @@ export class AVRRunner {
   setDigitalInput(pin: number, value: boolean): void {
     const ref = this.profile.portMap[pin];
     if (!ref) return;
-    this.portOf(ref.port as 'B' | 'C' | 'D').setPin(ref.index, value);
+    this.ports.get(ref.port)?.setPin(ref.index, value);
   }
 
   /** ADC channel for an Arduino pin number on this board's profile. */
@@ -176,7 +201,7 @@ export class AVRRunner {
   }
 
   setAnalogVolts(channel: number, volts: number): void {
-    if (channel >= 0 && channel < 8) {
+    if (channel >= 0 && channel < this.adc.channelValues.length) {
       this.adc.channelValues[channel] = Math.max(0, Math.min(5, volts));
     }
   }
@@ -199,12 +224,20 @@ export class AVRRunner {
     return () => this.cpu.clearClockEvent(cb);
   }
 
-  /** Executes AVR instructions until the CPU reaches the target cycle count. */
+  /**
+   * Executes AVR instructions until the CPU reaches the target cycle count.
+   * The instruction budget is a safety net: if firmware ever stops advancing
+   * the cycle counter, this throws instead of spinning the thread forever.
+   */
   runToCycles(targetCycles: number): void {
     const { cpu } = this;
+    let executed = 0;
     while (cpu.cycles < targetCycles) {
       avrInstruction(cpu);
       cpu.tick();
+      if (++executed > MAX_INSTRUCTIONS_PER_CALL) {
+        throw new Error('Simulation stopped: the firmware executed an excessive number of instructions without advancing time.');
+      }
     }
   }
 
@@ -219,7 +252,7 @@ export class AVRRunner {
     const pulseWidthUs: number[] = [];
     const toggles: number[] = [];
     const now = this.cpu.cycles;
-    for (let pin = 0; pin < 20; pin++) {
+    for (let pin = 0; pin < this.profile.pinCount; pin++) {
       const s = this.pinState(pin);
       states.push(
         s === PinState.High ? 'high' : s === PinState.Low ? 'low' : s === PinState.InputPullUp ? 'input-pullup' : 'input',

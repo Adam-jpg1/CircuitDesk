@@ -4,7 +4,7 @@ import { useSimulationStore } from '../simulation/simulationStore';
 import { simulationController } from '../simulation/simulationController';
 import { fetchCompilerHealth } from '../compiler/compilerClient';
 import { resolveDefinition } from '../project/partsRegistry';
-import { buildPinStatesModel } from '../simulation/pinStatesModel';
+import { buildPinStatesModel, pinStateCell } from '../simulation/pinStatesModel';
 import { CodePanel } from './CodePanel';
 import { TestsPanel } from './TestsPanel';
 import { ErrorIcon, InfoIcon, WarnIcon } from '../ui/icons';
@@ -226,25 +226,18 @@ function PinsPanel() {
   return (
     <div className="pins-grid">
       {model.rows.map((row) => {
-        if (row.pin === undefined) {
-          return (
-            <div className="pin-chip" key={row.label} title="ADC-only input — no digital pin state">
-              <span className="pin-dot input" />
-              <span style={{ minWidth: 26 }}>{row.label}</span>
-              <span style={{ color: 'var(--text-2)' }}>ADC</span>
-            </div>
-          );
-        }
-        const state = snapshot.states[row.pin];
-        const duty = snapshot.duty[row.pin];
-        const isPwm = state === 'high' || state === 'low' ? duty > 0.02 && duty < 0.98 : false;
+        // Rows and snapshot can describe different boards (e.g. the canvas
+        // board was swapped mid-run) — pinStateCell resolves that safely.
+        const cell = pinStateCell(row, snapshot);
+        const dot =
+          cell.level === 'high' ? 'high' : cell.level === 'low' ? 'low' : cell.level === 'input-pullup' ? 'pullup' : 'input';
         return (
-          <div className="pin-chip" key={row.label} title={`${snapshot.toggles[row.pin]} transitions since start`}>
-            <span className={`pin-dot ${state === 'high' ? 'high' : state === 'low' ? 'low' : state === 'input-pullup' ? 'pullup' : 'input'}`} />
-            <span style={{ minWidth: 26 }}>{row.label}</span>
+          <div className="pin-chip" key={cell.label} title={cell.title}>
+            <span className={`pin-dot ${dot}`} />
+            <span style={{ minWidth: 26 }}>{cell.label}</span>
             <span style={{ color: 'var(--text-2)' }}>
-              {state === 'input-pullup' ? 'IN·PU' : state.toUpperCase().slice(0, 5)}
-              {isPwm ? ` ${(duty * 100).toFixed(0)}%` : ''}
+              {cell.text}
+              {cell.dutyPercent !== undefined ? ` ${cell.dutyPercent.toFixed(0)}%` : ''}
             </span>
           </div>
         );
@@ -260,6 +253,15 @@ function DebugPanel() {
   const error = useSimulationStore((s) => s.error);
   const lastCompile = useEditorStore((s) => s.lastCompile);
   const project = useEditorStore((s) => s.project);
+
+  // Engine label follows the board actually on the canvas — the Mega runs on
+  // an ATmega2560 profile, not the 328P this line used to hard-code.
+  const engineLabel = useMemo(() => {
+    const inst = project?.boardInstances[0];
+    const def = inst ? resolveDefinition(inst.definitionId, project) : undefined;
+    if (!def?.isBoard || !def.simulation?.supported) return 'no simulator for this board';
+    return `${def.simulation.engine} (${def.processor})`;
+  }, [project]);
 
   const stats = useMemo(() => {
     if (!project) return null;
@@ -284,7 +286,7 @@ function DebugPanel() {
         </div>
       )}
       <div style={{ marginTop: 8, color: 'var(--text-2)' }}>
-        Pipeline: Arduino C++ → {lastCompile?.toolchain ?? 'avr-gcc / arduino-cli'} → Intel HEX → AVR8js (ATmega328P) → port state → circuit graph → component visuals.
+        Pipeline: Arduino C++ → {lastCompile?.toolchain ?? 'avr-gcc / arduino-cli'} → Intel HEX → {engineLabel} → port state → circuit graph → component visuals.
       </div>
     </div>
   );

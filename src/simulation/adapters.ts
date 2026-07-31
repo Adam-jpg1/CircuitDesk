@@ -5,6 +5,9 @@
 
 import type { BoardDefinition } from '../types';
 import type { AVRRunner } from './avrRunner';
+// Pure data (no avr8js), already part of the main chunk — imported statically
+// so only the emulator itself is lazily loaded.
+import { AVR_BOARD_PROFILES } from '../boards/pinMaps';
 
 export interface BoardSimulatorAdapter {
   engine: 'avr8js';
@@ -14,14 +17,28 @@ export interface BoardSimulatorAdapter {
   createRunner(hex: string, board: BoardDefinition): Promise<AVRRunner>;
 }
 
+/**
+ * Rejects firmware that was not compiled for the board about to run it.
+ * Firmware is tagged with the board id it was built for at compile time, so a
+ * mismatch is refused outright instead of executing on the wrong CPU profile.
+ */
+export function assertFirmwareMatchesBoard(
+  compiledForBoardId: string,
+  board: Pick<BoardDefinition, 'id' | 'name'>,
+): void {
+  if (compiledForBoardId !== board.id) {
+    throw new Error(
+      `Firmware was compiled for "${compiledForBoardId}" but the canvas board is "${board.id}" (${board.name}). ` +
+        'CircuitDesk will not execute firmware on a different MCU — recompile for this board.',
+    );
+  }
+}
+
 const avr8jsAdapter: BoardSimulatorAdapter = {
   engine: 'avr8js',
-  boardIds: ['board.arduino-uno', 'board.arduino-nano'],
+  boardIds: ['board.arduino-uno', 'board.arduino-nano', 'board.arduino-mega2560'],
   async createRunner(hex, board) {
-    const [{ AVRRunner }, { AVR_BOARD_PROFILES }] = await Promise.all([
-      import('./avrRunner'),
-      import('../boards/pinMaps'),
-    ]);
+    const { AVRRunner } = await import('./avrRunner');
     const profile = AVR_BOARD_PROFILES[board.id];
     if (!profile) {
       throw new Error(`No AVR pin profile is registered for ${board.name} (${board.id}) — refusing to run it on another board's profile.`);

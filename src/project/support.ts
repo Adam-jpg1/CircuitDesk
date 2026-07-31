@@ -56,5 +56,11 @@ export function describeSupport(def: PartDefinition): string {
   } else {
     lines.push('No compiler toolchain for this board yet.');
   }
+
+  // The badge must state what is NOT emulated, not only what is.
+  const limitation = def.metadata?.limitation;
+  if (typeof limitation === 'string' && limitation.length > 0) {
+    lines.push(`Limitations: ${limitation}`);
+  }
   return lines.join('\n');
 }

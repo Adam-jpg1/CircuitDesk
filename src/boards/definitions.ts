@@ -2,6 +2,7 @@ import type { BoardDefinition, PinDefinition, SupportLevel } from '../types';
 import { BOARD_CAPABILITIES } from './capabilities';
 import { deriveBoardSupportLevel } from '../project/support';
 import { ARDUINO_UNO } from './unoDefinition';
+import { ARDUINO_MEGA } from './megaDefinition';
 import { pinRow, gpio, analog, gnd, p5v, p3v3, vin, reset, type PinSpec } from './pinHelpers';
 
 interface HeaderBoardSpec {
@@ -213,13 +214,7 @@ const seqPins = (prefix: string, from: number, to: number, v: number): PinSpec[]
 const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   ARDUINO_UNO,
   ARDUINO_NANO,
-  simpleWiringBoard(
-    'board.arduino-mega2560', 'Arduino Mega 2560', 'Arduino AVR', 'ATmega2560', 101.5, 53.3, 5,
-    [gpio('D22', '22'), gpio('D24', '24'), gpio('D26', '26'), gpio('D28', '28'), gpio('D30', '30'), gpio('D32', '32'), gpio('D34', '34'), gpio('D36', '36'), gpio('D38', '38'), gpio('D40', '40'), gpio('D42', '42'), gpio('D44', '44'), gpio('D46', '46'), gpio('D48', '48'), gpio('D50', '50'), gpio('D52', '52'), gnd('GNDL'), p5v('5VL')],
-    [gpio('D23', '23'), gpio('D25', '25'), gpio('D27', '27'), gpio('D29', '29'), gpio('D31', '31'), gpio('D33', '33'), gpio('D35', '35'), gpio('D37', '37'), gpio('D39', '39'), gpio('D41', '41'), gpio('D43', '43'), gpio('D45', '45'), gpio('D47', '47'), gpio('D49', '49'), gpio('D51', '51'), gpio('D53', '53'), gnd('GNDR'), vin('VINR')],
-    'wiring',
-    { color: '#0b3d5e', description: 'Mega 2560 (subset of the double header shown). Wiring support; AVR simulation of the ATmega2560 is not implemented yet.' },
-  ),
+  ARDUINO_MEGA,
   simpleWiringBoard(
     'board.arduino-leonardo', 'Arduino Leonardo', 'Arduino AVR', 'ATmega32U4', 68.6, 53.3, 5,
     [gpio('D0', 'RX0', ['digital-in', 'digital-out', 'uart-rx']), gpio('D1', 'TX1', ['digital-in', 'digital-out', 'uart-tx']), gpio('D2', 'D2'), gpio('D3', 'D3'), gpio('D4', 'D4'), gpio('D5', 'D5'), gpio('D6', 'D6'), gpio('D7', 'D7'), gpio('D8', 'D8'), gpio('D9', 'D9'), gpio('D10', 'D10'), gpio('D11', 'D11'), gpio('D12', 'D12'), gpio('D13', 'D13')],

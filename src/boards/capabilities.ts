@@ -31,6 +31,15 @@ const AVR_SIM_APIS = [
   'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite (PWM)',
   'delay/millis/micros', 'Serial (UART both directions)', 'timers', 'external interrupts',
 ];
+
+/**
+ * The Mega's list deliberately omits external interrupts: the emulator's
+ * INT/PCINT wiring is ATmega328P-specific (INT0/INT1 on PD2/PD3, PCINT0 at the
+ * 328P vector), which does not match the ATmega2560's INT0-INT7 / PCINT0-2
+ * layout. Until Mega-correct interrupt configs exist, attachInterrupt is
+ * declared unsupported rather than silently emulated wrong.
+ */
+const MEGA_SIM_APIS = AVR_SIM_APIS.filter((api) => api !== 'external interrupts');
 const AVR_SIM_PERIPHERALS = ['GPIO ports', 'Timer0/1/2', 'USART0', 'ADC'];
 
 const avrCliCompiler = (fqbn: string): BoardCompilerInfo => ({
@@ -71,9 +80,22 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     architecture: 'avr',
     aliases: ['arduino-mega', 'mega', 'mega2560', 'arduino:avr:mega'],
     compiler: avrCliCompiler('arduino:avr:mega'),
+    simulation: {
+      engine: 'avr8js',
+      supported: true,
+      supportedApis: MEGA_SIM_APIS,
+      supportedPeripherals: [
+        'GPIO ports A-L (D0-D53, A0-A15)',
+        'Timer0/1/2 plus Mega-only Timer3/4/5 (PWM on pins 2-13 and 44-46)',
+        'USART0 (Serial)',
+        'ADC 16 channels incl. A8-A15 via MUX5',
+      ],
+    },
     analogPinBase: 54,
     limitation:
-      'ATmega2560 firmware compiles for the real board, but the AVR8js engine models the ATmega328P — the Mega is not simulated (and is never run through the Uno profile).',
+      'Runs its own ATmega2560 profile (8 KB SRAM at 0x200, Mega vector table, ports A-L) — never the Uno profile. ' +
+      'Serial1-Serial3 (USART1-3) are not emulated; only Serial (USART0) is. ' +
+      'attachInterrupt is not emulated on this board either: external interrupts (INT0-INT7) and pin-change interrupts (PCINT0-2) are not modeled for the ATmega2560, so those pins still wire and validate but produce no interrupt behavior.',
   },
   'board.arduino-leonardo': {
     architecture: 'avr',

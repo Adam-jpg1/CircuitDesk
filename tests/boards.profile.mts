@@ -7,7 +7,8 @@ import { AVR_BOARD_PROFILES, arduinoPinNumber } from '../src/boards/pinMaps';
 import { getSimulatorAdapter, registeredSimulatedBoardIds } from '../src/simulation/adapters';
 import { resolveDefinition } from '../src/project/partsRegistry';
 import { resolveCompileTarget } from '../src/compiler/targets';
-import { buildPinStatesModel } from '../src/simulation/pinStatesModel';
+import { buildPinStatesModel, pinStateCell } from '../src/simulation/pinStatesModel';
+import { describeSupport } from '../src/project/support';
 import { CircuitBinding } from '../src/simulation/circuitSim';
 import { emptyProject } from '../src/project/templates';
 import { SUPPORTED_TARGETS, findTarget } from '../server/compiler/types';
@@ -58,14 +59,14 @@ function projectWith(boardDefId: string): CircuitProject {
   check(ok, 'every Simulated badge has adapter + pin profile; every Compile badge has a real toolchain target');
   const simulated = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'simulated').map((b) => b.id).sort();
   check(
-    JSON.stringify(simulated) === JSON.stringify(['board.arduino-nano', 'board.arduino-uno']),
-    `only tested boards are Simulated (got: ${simulated.join(', ')})`,
+    JSON.stringify(simulated) === JSON.stringify(['board.arduino-mega2560', 'board.arduino-nano', 'board.arduino-uno']),
+    `only boards with passing runtime tests are Simulated (got: ${simulated.join(', ')})`,
   );
   const compileOnly = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'compile').map((b) => b.id).sort();
   check(
     JSON.stringify(compileOnly) ===
-      JSON.stringify(['board.arduino-leonardo', 'board.arduino-mega2560', 'board.raspberry-pi-pico', 'board.raspberry-pi-pico-w']),
-    `compile tier is Mega, Leonardo, Pico, Pico W (got: ${compileOnly.join(', ')})`,
+      JSON.stringify(['board.arduino-leonardo', 'board.raspberry-pi-pico', 'board.raspberry-pi-pico-w']),
+    `compile tier is Leonardo, Pico, Pico W (got: ${compileOnly.join(', ')})`,
   );
 }
 
@@ -107,7 +108,16 @@ function projectWith(boardDefId: string): CircuitProject {
   const leo = getBoardDefinition('board.arduino-leonardo')!;
   check(uno.architecture === 'avr' && Number(uno.metadata.logicVoltage) === 5 && uno.compiler?.fqbn === 'arduino:avr:uno', 'Uno: avr / 5V / arduino:avr:uno');
   check(nano.architecture === 'avr' && nano.compiler?.fqbn === 'arduino:avr:nano' && nano.supportLevel === 'simulated', 'Nano: avr / arduino:avr:nano / simulated');
-  check(mega.compiler?.fqbn === 'arduino:avr:mega' && mega.supportLevel === 'compile' && !mega.simulation?.supported, 'Mega: compile-tier arduino:avr:mega, honestly not simulated');
+  check(
+    mega.compiler?.fqbn === 'arduino:avr:mega' && mega.supportLevel === 'simulated' && mega.simulation?.engine === 'avr8js',
+    'Mega: arduino:avr:mega target and genuinely simulated on avr8js',
+  );
+  check(
+    mega.simulation!.supportedPeripherals.some((p) => /Timer3\/4\/5/.test(p)) &&
+      mega.metadata.limitation !== undefined &&
+      /Serial1-Serial3 \(USART1-3\) are not emulated/.test(String(mega.metadata.limitation)),
+    'Mega declares its Mega-only timers and states the Serial1-3 limitation',
+  );
   check(leo.compiler?.fqbn === 'arduino:avr:leonardo' && Number(leo.metadata.analogPinBase) === 18, 'Leonardo: arduino:avr:leonardo, A0=18');
   check(arduinoPinNumber(mega, 'A0') === 54 && arduinoPinNumber(mega, 'D53') === 53, 'Mega pin numbering: A0=54, D53=53 (not Uno numbering)');
   check(arduinoPinNumber(uno, 'SDA') === 18 && arduinoPinNumber(uno, 'A5') === 19, 'Uno pin numbering: SDA=18, A5=19');
@@ -161,7 +171,18 @@ function projectWith(boardDefId: string): CircuitProject {
   check(picoModel.kind === 'not-simulated', 'Pin States (Pico): live states honestly unavailable — never shows D0-D13/A0-A5');
   check(buildPinStatesModel(null).kind === 'no-board', 'Pin States: no board → no fake pins');
   const mega = getBoardDefinition('board.arduino-mega2560')!;
-  check(buildPinStatesModel(mega).kind === 'not-simulated', 'Pin States (Mega, compile-only): no fake live pin activity');
+  const megaModel = buildPinStatesModel(mega);
+  const megaLabels = megaModel.kind === 'pins' ? megaModel.rows.map((r) => r.label) : [];
+  check(
+    megaModel.kind === 'pins' && megaLabels.length === 70 && megaLabels[0] === 'D0' && megaLabels[69] === 'A15',
+    `Pin States (Mega): its own 70 pins D0..A15 (got ${megaLabels.length})`,
+  );
+  check(
+    megaLabels.includes('D53') && megaLabels.includes('A15') && !megaLabels.includes('A6') === false,
+    'Pin States (Mega): includes Mega-only pins D53 and A8-A15',
+  );
+  const leo = getBoardDefinition('board.arduino-leonardo')!;
+  check(buildPinStatesModel(leo).kind === 'not-simulated', 'Pin States (Leonardo, compile-only): no fake live pin activity');
 }
 
 // ---------- 7. Server capability endpoint + no-fallback compile responses ----------
@@ -197,6 +218,79 @@ function projectWith(boardDefId: string): CircuitProject {
   check(mega.success === true, `server compile: Mega 2560 builds with its own atmega2560/mega variant (${mega.toolchain})`);
   const leo = await compileAs('board.arduino-leonardo', 'arduino:avr:leonardo');
   check(leo.success === true, `server compile: Leonardo builds with atmega32u4/leonardo variant (${leo.toolchain})`);
+}
+
+// ---------- 8. Interrupt support is claimed only where it is emulated ----------
+{
+  const mega = getBoardDefinition('board.arduino-mega2560')!;
+  const uno = getBoardDefinition('board.arduino-uno')!;
+  const nano = getBoardDefinition('board.arduino-nano')!;
+
+  // avr8js models INT0/INT1 on PD2/PD3 and the 328P PCINT vectors, which is
+  // correct for the Uno/Nano and wrong for the ATmega2560 — so the Mega must
+  // not advertise interrupt APIs it cannot honestly emulate.
+  check(
+    !mega.simulation!.supportedApis.includes('external interrupts'),
+    'Mega does not claim external interrupts among its simulated APIs',
+  );
+  check(
+    uno.simulation!.supportedApis.includes('external interrupts') &&
+      nano.simulation!.supportedApis.includes('external interrupts'),
+    'Uno and Nano keep their (correct) external-interrupt support',
+  );
+  const megaLimitation = String(mega.metadata.limitation ?? '');
+  check(
+    /external interrupts/i.test(megaLimitation) && /pin-change interrupts/i.test(megaLimitation),
+    'Mega limitation text names external and pin-change interrupts as unemulated',
+  );
+  check(
+    describeSupport(mega).includes(megaLimitation),
+    'the Mega badge tooltip states the limitation (not only the supported list)',
+  );
+  const megaProfile = AVR_BOARD_PROFILES['board.arduino-mega2560'];
+  check(
+    megaProfile.unsupported.some((u) => /INT0-INT7/.test(u)) && megaProfile.unsupported.some((u) => /PCINT/.test(u)),
+    'Mega profile lists INT0-INT7 and PCINT0-2 as unsupported',
+  );
+  // The physical board really does have interrupt pins; keeping that metadata
+  // is honest as long as the simulation claim above is not made.
+  check(
+    mega.pins.find((p) => p.id === 'D18')?.capabilities.includes('interrupt') === true,
+    'D18-D21 keep their real hardware interrupt capability metadata',
+  );
+}
+
+// ---------- 9. Pin States cells never borrow another board's state ----------
+{
+  const megaModel = buildPinStatesModel(getBoardDefinition('board.arduino-mega2560'));
+  const rows = megaModel.kind === 'pins' ? megaModel.rows : [];
+  // A 20-entry (Uno-sized) snapshot against the Mega's 70 rows.
+  const staleSnapshot = {
+    states: Array(20).fill('high') as ('high' | 'low' | 'input' | 'input-pullup')[],
+    duty: Array(20).fill(1),
+    pulseWidthUs: Array(20).fill(0),
+    toggles: Array(20).fill(3),
+  };
+  let threw = false;
+  let cells: ReturnType<typeof pinStateCell>[] = [];
+  try {
+    cells = rows.map((r) => pinStateCell(r, staleSnapshot));
+  } catch {
+    threw = true;
+  }
+  check(!threw, 'pinStateCell never throws on a snapshot shorter than the row list');
+  check(
+    cells.slice(20).every((c) => c.level === 'unavailable' && c.text === '—'),
+    'Mega rows outside a stale snapshot render "—" rather than an Uno pin state',
+  );
+  let emptyThrew = false;
+  try {
+    rows.map((r) => pinStateCell(r, { states: [], duty: [], pulseWidthUs: [], toggles: [] }));
+    rows.map((r) => pinStateCell(r, null));
+  } catch {
+    emptyThrew = true;
+  }
+  check(!emptyThrew, 'pinStateCell handles an empty and a null snapshot (stopped simulation)');
 }
 
 console.log(failures === 0 ? '\nAll board-profile checks passed.' : `\n${failures} check(s) FAILED`);
