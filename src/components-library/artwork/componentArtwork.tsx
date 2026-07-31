@@ -341,6 +341,21 @@ function GenericBoxArt({ def, visual }: ArtProps) {
         {(def.name.match(/\(([^)]+)\)/)?.[1] ?? def.name).slice(0, 12)}
       </text>
       {visual?.coilOn && <circle cx={W - 3 * MM} cy={3 * MM} r={1.4 * MM} fill="#ff5f52" opacity="0.9" />}
+      {/* Live values read out of a simulated device model (I2C sensors). */}
+      {visual?.readout?.map((line, i) => (
+        <text
+          key={i}
+          className="device-readout"
+          x={W / 2}
+          y={H / 2 + 2.5 + (i + 1) * Math.min(7, W / 8)}
+          fontSize={Math.min(5.5, W / 11)}
+          fill="#8fd0ff"
+          textAnchor="middle"
+          fontFamily="monospace"
+        >
+          {line}
+        </text>
+      ))}
     </g>
   );
 }

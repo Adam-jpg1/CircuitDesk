@@ -9,6 +9,9 @@ import { buildCircuitGraph, splitNode, type CircuitGraph } from '../circuit/nets
 import type { AVRRunner } from './avrRunner';
 import { arduinoPinNumber, avrProfileFor } from '../boards/pinMaps';
 import { Ssd1306Device, SSD1306_ADDRESSES } from './devices/ssd1306';
+import { Bmp280Device, BMP280_ADDRESSES } from './devices/bmp280';
+import { Mpu6050Device, MPU6050_ADDRESSES } from './devices/mpu6050';
+import type { I2cDevice } from './devices/types';
 
 export interface NetLevel {
   volts: number | null;
@@ -28,6 +31,8 @@ export interface DisplayVisual {
 export interface ComponentVisualState {
   /** Populated for display devices driven by real bus traffic. */
   display?: DisplayVisual;
+  /** Live text lines read out of a simulated device model, drawn on the part. */
+  readout?: string[];
   ledOn?: boolean;
   brightness?: number;
   rgb?: [number, number, number];
@@ -56,6 +61,38 @@ export function emptyControls(): SimControls {
     sensorValues: new Map(),
   };
 }
+
+/** Pin types that count as a supply feeding a module's VCC (or an address strap). */
+const POWER_PIN_TYPES = ['power-5v', 'power-3v3', 'power-vin'];
+
+interface I2cDeviceModel {
+  /** 7-bit address used when the instance has no explicit override. */
+  defaultAddress: number;
+  create: (instanceId: string, address: number) => I2cDevice;
+  /** Pin that selects the alternate address when strapped to a supply (AD0, …). */
+  addressSelect?: { pinId: string; alternateAddress: number };
+}
+
+/**
+ * Components with a genuine device model behind them. A part missing here is
+ * not simulated at the protocol level — it is simply not attached to the bus,
+ * so firmware addressing it gets a NACK rather than a fabricated reply.
+ */
+const I2C_DEVICE_MODELS: Record<string, I2cDeviceModel> = {
+  'comp.oled': {
+    defaultAddress: SSD1306_ADDRESSES[0],
+    create: (id, address) => new Ssd1306Device(id, address),
+  },
+  'comp.bmp280': {
+    defaultAddress: BMP280_ADDRESSES[0],
+    create: (id, address) => new Bmp280Device(id, address),
+  },
+  'comp.mpu6050': {
+    defaultAddress: MPU6050_ADDRESSES[0],
+    create: (id, address) => new Mpu6050Device(id, address),
+    addressSelect: { pinId: 'ad0', alternateAddress: MPU6050_ADDRESSES[1] },
+  },
+};
 
 interface ConductiveEdge {
   a: string;
@@ -286,22 +323,38 @@ export class CircuitBinding {
       return false;
     };
 
-    const wanted: { instanceId: string; create: () => Ssd1306Device }[] = [];
+    const wanted: { instanceId: string; create: () => I2cDevice }[] = [];
     for (const inst of this.graph.instances) {
       const def = this.graph.definitions.get(inst.id);
-      if (def?.id !== 'comp.oled') continue;
+      const model = def ? I2C_DEVICE_MODELS[def.id] : undefined;
+      if (!model) continue;
       const sdaNet = this.netOfInstancePin(inst.id, 'sda');
       const sclNet = this.netOfInstancePin(inst.id, 'scl');
       const vccNet = this.netOfInstancePin(inst.id, 'vcc');
       const gndNet = this.netOfInstancePin(inst.id, 'gnd');
       const wiredToBus = netHasPin(sdaNet, sdaPin) && netHasPin(sclNet, sclPin);
-      const powered = netFedBy(vccNet, inst.id, ['power-5v', 'power-3v3', 'power-vin']);
+      const powered = netFedBy(vccNet, inst.id, POWER_PIN_TYPES);
       const grounded = netFedBy(gndNet, inst.id, ['ground']);
       if (!wiredToBus || !powered || !grounded) continue;
-      const address = Number(inst.properties.i2cAddress ?? SSD1306_ADDRESSES[0]);
+
+      // Explicit property wins; otherwise an address-select pin tied to a
+      // supply picks the alternate address, exactly like the AD0 strap.
+      const raw = inst.properties.i2cAddress;
+      const explicit = raw === undefined || raw === '' ? Number.NaN : Number(raw);
+      let address: number;
+      if (Number.isFinite(explicit)) {
+        address = explicit;
+      } else if (
+        model.addressSelect &&
+        netFedBy(this.netOfInstancePin(inst.id, model.addressSelect.pinId), inst.id, POWER_PIN_TYPES)
+      ) {
+        address = model.addressSelect.alternateAddress;
+      } else {
+        address = model.defaultAddress;
+      }
       wanted.push({
         instanceId: inst.id,
-        create: () => new Ssd1306Device(inst.id, address),
+        create: () => model.create(inst.id, address),
       });
     }
     runner.i2cBus.sync(wanted);
@@ -515,6 +568,37 @@ export class CircuitBinding {
           } else {
             // Not wired to the bus (or no simulation running): stays dark.
             visuals.set(inst.id, { display: { pixels: null, on: false, revision: 0 } });
+          }
+          break;
+        }
+        case 'sim.bmp280': {
+          const device = runner?.i2cBus.deviceFor(inst.id);
+          if (device instanceof Bmp280Device) {
+            visuals.set(inst.id, {
+              readout: device.isMeasuring
+                ? [`${device.temperatureC.toFixed(1)} C`, `${device.pressureHpa.toFixed(0)} hPa`]
+                : ['sleep'],
+            });
+          } else {
+            // Not wired to the bus (or no simulation running): no readout.
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.mpu6050': {
+          const device = runner?.i2cBus.deviceFor(inst.id);
+          if (device instanceof Mpu6050Device) {
+            const { accelG, gyroDps } = device.motion;
+            visuals.set(inst.id, {
+              readout: device.isAwake
+                ? [
+                    `${accelG.x.toFixed(2)} ${accelG.y.toFixed(2)} ${accelG.z.toFixed(2)} g`,
+                    `${gyroDps.x.toFixed(0)} ${gyroDps.y.toFixed(0)} ${gyroDps.z.toFixed(0)} d/s`,
+                  ]
+                : ['sleep'],
+            });
+          } else {
+            visuals.set(inst.id, {});
           }
           break;
         }
