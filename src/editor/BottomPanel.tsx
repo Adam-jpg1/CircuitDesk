@@ -3,6 +3,8 @@ import { useEditorStore, type BottomTab } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
 import { simulationController } from '../simulation/simulationController';
 import { fetchCompilerHealth } from '../compiler/compilerClient';
+import { resolveDefinition } from '../project/partsRegistry';
+import { buildPinStatesModel, pinStateCell } from '../simulation/pinStatesModel';
 import { CodePanel } from './CodePanel';
 import { TestsPanel } from './TestsPanel';
 import { ErrorIcon, InfoIcon, WarnIcon } from '../ui/icons';
@@ -191,27 +193,51 @@ function ValidationPanel() {
   );
 }
 
-const PIN_LABELS = ['D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'];
-
 function PinsPanel() {
   const snapshot = useSimulationStore((s) => s.pinSnapshot);
   const status = useSimulationStore((s) => s.status);
+  const project = useEditorStore((s) => s.project);
+
+  // The panel is generated from the selected board's own definition —
+  // never from a hard-coded Uno pin list.
+  const model = useMemo(() => {
+    const inst = project?.boardInstances[0];
+    const def = inst ? resolveDefinition(inst.definitionId, project) : undefined;
+    return buildPinStatesModel(def?.isBoard ? def : null);
+  }, [project]);
+
+  if (model.kind === 'no-board') {
+    return <div className="empty-state">Place a board on the canvas to see its pins.</div>;
+  }
+  if (model.kind === 'not-simulated') {
+    return (
+      <div className="empty-state">
+        <p>Live pin states require simulation support for {model.boardName}.</p>
+        <p style={{ fontSize: 11.5 }}>
+          This board's badge describes what is supported. Its pins are still real connection points for wiring
+          and validation — CircuitDesk just doesn't pretend to show live activity it can't simulate.
+        </p>
+      </div>
+    );
+  }
   if (!snapshot || status === 'stopped') {
-    return <div className="empty-state">Run the simulation to see live pin states from the emulator.</div>;
+    return <div className="empty-state">Run the simulation to see live pin states from the emulator ({model.boardName}).</div>;
   }
   return (
     <div className="pins-grid">
-      {PIN_LABELS.map((label, pin) => {
-        const state = snapshot.states[pin];
-        const duty = snapshot.duty[pin];
-        const isPwm = state === 'high' || state === 'low' ? duty > 0.02 && duty < 0.98 : false;
+      {model.rows.map((row) => {
+        // Rows and snapshot can describe different boards (e.g. the canvas
+        // board was swapped mid-run) — pinStateCell resolves that safely.
+        const cell = pinStateCell(row, snapshot);
+        const dot =
+          cell.level === 'high' ? 'high' : cell.level === 'low' ? 'low' : cell.level === 'input-pullup' ? 'pullup' : 'input';
         return (
-          <div className="pin-chip" key={label} title={`${snapshot.toggles[pin]} transitions since start`}>
-            <span className={`pin-dot ${state === 'high' ? 'high' : state === 'low' ? 'low' : state === 'input-pullup' ? 'pullup' : 'input'}`} />
-            <span style={{ minWidth: 26 }}>{label}</span>
+          <div className="pin-chip" key={cell.label} title={cell.title}>
+            <span className={`pin-dot ${dot}`} />
+            <span style={{ minWidth: 26 }}>{cell.label}</span>
             <span style={{ color: 'var(--text-2)' }}>
-              {state === 'input-pullup' ? 'IN·PU' : state.toUpperCase().slice(0, 5)}
-              {isPwm ? ` ${(duty * 100).toFixed(0)}%` : ''}
+              {cell.text}
+              {cell.dutyPercent !== undefined ? ` ${cell.dutyPercent.toFixed(0)}%` : ''}
             </span>
           </div>
         );
@@ -227,6 +253,15 @@ function DebugPanel() {
   const error = useSimulationStore((s) => s.error);
   const lastCompile = useEditorStore((s) => s.lastCompile);
   const project = useEditorStore((s) => s.project);
+
+  // Engine label follows the board actually on the canvas — the Mega runs on
+  // an ATmega2560 profile, not the 328P this line used to hard-code.
+  const engineLabel = useMemo(() => {
+    const inst = project?.boardInstances[0];
+    const def = inst ? resolveDefinition(inst.definitionId, project) : undefined;
+    if (!def?.isBoard || !def.simulation?.supported) return 'no simulator for this board';
+    return `${def.simulation.engine} (${def.processor})`;
+  }, [project]);
 
   const stats = useMemo(() => {
     if (!project) return null;
@@ -251,7 +286,7 @@ function DebugPanel() {
         </div>
       )}
       <div style={{ marginTop: 8, color: 'var(--text-2)' }}>
-        Pipeline: Arduino C++ → {lastCompile?.toolchain ?? 'avr-gcc / arduino-cli'} → Intel HEX → AVR8js (ATmega328P) → port state → circuit graph → component visuals.
+        Pipeline: Arduino C++ → {lastCompile?.toolchain ?? 'avr-gcc / arduino-cli'} → Intel HEX → {engineLabel} → port state → circuit graph → component visuals.
       </div>
     </div>
   );

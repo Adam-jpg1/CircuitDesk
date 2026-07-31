@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useEditorStore } from '../app/editorStore';
-import { runTest } from '../testing/testRunner';
 import { compileAction } from '../app/actions';
 import { uid, type TestAssertion, type TestCase, type TestInputEvent, type TestResult } from '../types';
 import { Modal, toast } from '../ui/primitives';
@@ -19,23 +18,45 @@ export function TestsPanel() {
   if (!project) return null;
   const s = useEditorStore.getState();
 
-  async function ensureFirmware(): Promise<string | null> {
+  /**
+   * Returns firmware that genuinely belongs to the board on the canvas.
+   * A cached build for another board is never reused — it is rebuilt, and if
+   * the rebuild still does not match, tests refuse to run.
+   */
+  async function ensureFirmware(): Promise<{ hex: string; boardId: string } | null> {
+    const currentBoardId = useEditorStore.getState().project?.boardInstances[0]
+      ? resolveDefinition(useEditorStore.getState().project!.boardInstances[0].definitionId, useEditorStore.getState().project!)?.id
+      : undefined;
     let compile = useEditorStore.getState().lastCompile;
-    if (!compile?.success || !compile.firmware) {
-      toast('Compiling before running tests…');
+    const stale =
+      !compile?.success || !compile.firmware || (currentBoardId !== undefined && compile.boardId !== currentBoardId);
+    if (stale) {
+      toast(
+        compile?.success && compile.boardId && compile.boardId !== currentBoardId
+          ? 'The cached build targets a different board — recompiling before running tests…'
+          : 'Compiling before running tests…',
+      );
       const ok = await compileAction(false);
       if (!ok) return null;
       compile = useEditorStore.getState().lastCompile;
     }
-    return compile?.firmware?.data ?? null;
+    const hex = compile?.firmware?.data;
+    const boardId = compile?.boardId;
+    if (!hex || !boardId) return null;
+    if (currentBoardId !== undefined && boardId !== currentBoardId) {
+      toast('Firmware does not match the board on the canvas — tests were not run.', 'error');
+      return null;
+    }
+    return { hex, boardId };
   }
 
   async function run(test: TestCase) {
-    const hex = await ensureFirmware();
-    if (!hex || !project) return;
+    const firmware = await ensureFirmware();
+    if (!firmware || !project) return;
     setRunning(test.id);
     try {
-      const result = await runTest(project, hex, test);
+      const { runTest } = await import('../testing/testRunner');
+      const result = await runTest(project, firmware, test);
       testResultsCache.set(test.id, result);
       setResults(new Map(testResultsCache));
     } finally {
@@ -44,11 +65,12 @@ export function TestsPanel() {
   }
 
   async function runAll() {
-    const hex = await ensureFirmware();
-    if (!hex || !project) return;
+    const firmware = await ensureFirmware();
+    if (!firmware || !project) return;
+    const { runTest } = await import('../testing/testRunner');
     for (const test of project.tests) {
       setRunning(test.id);
-      const result = await runTest(project, hex, test);
+      const result = await runTest(project, firmware, test);
       testResultsCache.set(test.id, result);
       setResults(new Map(testResultsCache));
     }

@@ -4,6 +4,7 @@ import { buildBlinkProject, emptyProject, PROJECT_TEMPLATES } from '../project/t
 import { navigate, ContextMenu, Modal, SupportBadge, timeAgo, toast } from '../ui/primitives';
 import { LogoIcon, ImportIcon, PlusIcon, ChipIcon } from '../ui/icons';
 import { loadSetting } from '../persistence/settings';
+import { APP_VERSION_LABEL } from '../version';
 import type { CircuitProject, ProjectMeta } from '../types';
 
 type SortKey = 'updated' | 'name' | 'created';
@@ -21,7 +22,8 @@ export function Dashboard() {
     try {
       setMetas(await listProjectMetas());
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to list projects', 'error');
+      console.error('[CircuitDesk] failed to list projects:', err);
+      toast('Could not load your projects from local storage. See the browser console for details.', 'error');
       setMetas([]);
     }
   }, []);
@@ -40,7 +42,8 @@ export function Dashboard() {
         await saveProject(project);
         navigate(`#/editor/${project.id}`);
       } catch (err) {
-        toast(err instanceof Error ? err.message : 'Failed to create project', 'error');
+        console.error('[CircuitDesk] project creation failed:', err);
+        toast('Could not create the project. See the browser console for details.', 'error');
       } finally {
         creatingRef.current = false;
       }
@@ -63,6 +66,7 @@ export function Dashboard() {
       <header className="dash-header">
         <span className="dash-brand">
           <LogoIcon /> CircuitDesk
+          <span className="badge compile" title="First public beta release">{APP_VERSION_LABEL}</span>
           <span className="tagline">Plan, wire, code, validate, simulate and test hardware projects before you build them.</span>
         </span>
         <div style={{ flex: 1 }} />

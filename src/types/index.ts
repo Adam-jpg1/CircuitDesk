@@ -65,6 +65,43 @@ export interface BoardArtwork {
 
 export type ComponentArtwork = BoardArtwork;
 
+export type BoardArchitecture =
+  | 'avr'
+  | 'sam'
+  | 'samd'
+  | 'renesas'
+  | 'rp2040'
+  | 'esp8266'
+  | 'esp32'
+  | 'stm32'
+  | 'nrf52'
+  | 'imxrt'
+  | 'linux'
+  | 'other';
+
+export interface BoardCompilerInfo {
+  provider: 'arduino-cli' | 'none';
+  fqbn?: string;
+  /** Core the compiler service must have installed (e.g. "arduino:avr"). */
+  requiredCore?: string;
+  /**
+   * True only when CircuitDesk's compiler backend genuinely targets this
+   * board (strict server-side allowlist). Cores that must be installed at
+   * deploy time are still reported honestly by /api/compiler/capabilities.
+   */
+  supported: boolean;
+  note?: string;
+}
+
+export interface BoardSimulationInfo {
+  engine: 'avr8js' | 'none';
+  supported: boolean;
+  /** APIs genuinely exercised by automated tests for this board. */
+  supportedApis: string[];
+  supportedPeripherals: string[];
+}
+
+/** @deprecated superseded by BoardCompilerInfo; kept for stored-project compatibility. */
 export interface CompilerTarget {
   fqbn: string;
   mcu: string;
@@ -74,13 +111,21 @@ export interface CompilerTarget {
 export interface BoardDefinition {
   id: string;
   name: string;
+  /** Alternate names/identifiers this board is known by. */
+  aliases?: string[];
   family: string;
+  /** Optional for backward compatibility with stored custom boards; treat undefined as 'other'. */
+  architecture?: BoardArchitecture;
   processor: string;
   widthMm: number;
   heightMm: number;
   artwork: BoardArtwork;
   pins: PinDefinition[];
+  compiler?: BoardCompilerInfo;
+  simulation?: BoardSimulationInfo;
+  /** @deprecated use `compiler` */
   compilerTarget?: CompilerTarget;
+  /** @deprecated use `simulation` */
   simulationAdapterId?: string;
   supportLevel: SupportLevel;
   metadata: Record<string, unknown>;
@@ -269,11 +314,15 @@ export interface CompileResult {
   stdout: string;
   stderr: string;
   diagnostics: Diagnostic[];
-  firmware?: { format: 'intel-hex'; data: string };
+  firmware?: { format: 'intel-hex' | 'uf2' | 'bin'; data: string };
   memory?: { flashBytes: number; flashMaxBytes: number; ramBytes: number; ramMaxBytes: number };
   durationMs: number;
   error?: string;
   errorCode?: string;
+  /** Board this firmware was built for — required before it may be executed. */
+  boardId?: string;
+  /** Toolchain target this firmware was built for. */
+  fqbn?: string;
 }
 
 export interface CompilerHealth {
