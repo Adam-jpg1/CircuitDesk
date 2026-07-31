@@ -20,7 +20,8 @@
     "test:boards": "tsx tests/boards.profile.mts",
     "test:mega": "tsx tests/mega.runtime.mts",
     "test:leonardo": "tsx tests/leonardo.runtime.mts",
-    "build:server": "tsc -p tsconfig.server.build.json"
+    "build:server": "tsc -p tsconfig.server.build.json",
+    "test:components": "tsx tests/components.i2c.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

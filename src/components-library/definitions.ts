@@ -323,8 +323,13 @@ export const OLED = def(
     pin('scl', 'SCL', 15.5, 1.0, { type: 'digital', caps: ['i2c-scl'] }),
     pin('sda', 'SDA', 19.5, 1.0, { type: 'digital', caps: ['i2c-sda'] }),
   ],
-  'validation',
-  { validationRules: ['i2c-pins'], description: 'I2C OLED. Wiring/validation-level: SSD1306 command decoding is not implemented yet — honestly labeled.' },
+  'simulated',
+  {
+    simulationAdapterId: 'sim.ssd1306',
+    validationRules: ['i2c-pins'],
+    description:
+      'I2C OLED driven by real SSD1306 traffic: firmware Wire writes are decoded into display RAM and drawn. Address 0x3C by default (0x3D selectable). Only responds when SDA/SCL, VCC and GND are actually wired.',
+  },
 );
 
 export const SEVEN_SEGMENT = def(

@@ -9,10 +9,11 @@
 // timers, USART and ADC. Only boards with a registered profile can run here —
 // there is no implicit Uno fallback for any other board.
 
-import { CPU, avrInstruction, AVRIOPort, AVRTimer, AVRUSART, AVRADC, PinState } from 'avr8js';
+import { CPU, avrInstruction, AVRIOPort, AVRTimer, AVRUSART, AVRADC, AVRTWI, PinState } from 'avr8js';
 import { parseIntelHex, intelHexHighestAddress } from './intelHex';
 import { AVR_BOARD_PROFILES, type AvrBoardProfile, type AvrPortName } from '../boards/pinMaps';
 import { MCU_CONFIGS, PORT_CONFIGS } from './avr/mcuConfig';
+import { I2cBus } from './devices/i2cBus';
 
 export const F_CPU = 16_000_000;
 
@@ -58,6 +59,10 @@ export class AVRRunner {
   readonly cpu: CPU;
   readonly usart: AVRUSART;
   readonly adc: AVRADC;
+  /** Hardware I2C controller. Device models attach through the bus below. */
+  readonly twi: AVRTWI;
+  /** I2C devices on the canvas attach here; survives circuit re-binds. */
+  readonly i2cBus = new I2cBus();
   readonly timers: AVRTimer[];
   readonly profile: AvrBoardProfile;
 
@@ -119,6 +124,13 @@ export class AVRRunner {
     this.timers = mcu.timers.map((cfg) => new AVRTimer(this.cpu, cfg));
     this.usart = new AVRUSART(this.cpu, mcu.usart, F_CPU);
     this.adc = new AVRADC(this.cpu, mcu.adc);
+    // The TWI controller reports what the firmware's Wire calls actually do.
+    // Until a device model attaches, avr8js's default handler NACKs everything,
+    // which is the honest answer for a bus with nothing on it.
+    this.twi = new AVRTWI(this.cpu, mcu.twi, F_CPU);
+    // With no device attached the bus NACKs every address, which is the honest
+    // answer for a bus with nothing on it (Wire.endTransmission() returns 2).
+    this.twi.eventHandler = this.i2cBus.handler(this.twi);
 
     for (const name of profile.ports) {
       const cfg = PORT_CONFIGS[name];
