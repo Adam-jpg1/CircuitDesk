@@ -17,7 +17,8 @@
     "test:sim": "tsx tests/sim.behaviors.mts",
     "test:qa": "tsx tests/qa.beta.mts",
     "start:backend": "tsx server/index.ts",
-    "test:boards": "tsx tests/boards.profile.mts"
+    "test:boards": "tsx tests/boards.profile.mts",
+    "test:mega": "tsx tests/mega.runtime.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

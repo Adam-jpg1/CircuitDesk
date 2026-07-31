@@ -33,7 +33,7 @@ export async function compileAction(run: boolean): Promise<boolean> {
     );
     const adapter = getSimulatorAdapter(target.board);
     if (result.firmware?.format === 'intel-hex' && adapter) {
-      simulationController.loadFirmware(result.firmware.data, project);
+      simulationController.loadFirmware(result.firmware.data, project, target.boardId);
       if (run) {
         simulationController.start();
         s.setBottomTab('serial');

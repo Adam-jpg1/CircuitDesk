@@ -319,6 +319,10 @@ export interface CompileResult {
   durationMs: number;
   error?: string;
   errorCode?: string;
+  /** Board this firmware was built for — required before it may be executed. */
+  boardId?: string;
+  /** Toolchain target this firmware was built for. */
+  fqbn?: string;
 }
 
 export interface CompilerHealth {
