@@ -9,6 +9,7 @@ import { ComponentArtwork } from '../components-library/artwork/componentArtwork
 import { UnoArtwork } from '../boards/artwork/UnoArtwork';
 import { GenericModuleArtwork } from '../boards/artwork/GenericModuleArtwork';
 import { MegaArtwork } from '../boards/artwork/MegaArtwork';
+import { LeonardoArtwork } from '../boards/artwork/LeonardoArtwork';
 import type { CircuitProject, ComponentInstance, PartDefinition, PinDefinition } from '../types';
 
 const WIRE_COLORS = ['#e03131', '#212529', '#2f9e44', '#1971c2', '#e8590c', '#7048e8', '#f08c00', '#c2255c'];
@@ -589,6 +590,8 @@ const PartView = memo(function PartView({
           <UnoArtwork def={def} />
         ) : def.artwork.builtinId === 'arduino-mega' ? (
           <MegaArtwork def={def} />
+        ) : def.artwork.builtinId === 'arduino-leonardo' ? (
+          <LeonardoArtwork def={def} />
         ) : (
           <GenericModuleArtwork def={def} />
         )

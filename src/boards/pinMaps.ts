@@ -21,7 +21,7 @@ export interface AvrPortRef {
 
 export interface AvrBoardProfile {
   /** Canonical MCU id; selects the peripheral register/vector set. */
-  mcu: 'atmega328p' | 'atmega2560';
+  mcu: 'atmega328p' | 'atmega2560' | 'atmega32u4';
   /** Highest valid data-space address (RAMEND). avr8js allocates 0x100 + sramBytes. */
   ramEnd: number;
   /** Flash size in bytes — firmware larger than this is rejected. */
@@ -79,6 +79,35 @@ function atmega2560Map(): Record<number, AvrPortRef> {
   return map;
 }
 
+/**
+ * ATmega32U4 (Arduino Leonardo) digital pin → port/bit mapping, matching the
+ * `leonardo` variant's pins_arduino.h. Like the Mega this is written out in
+ * full: the 32U4 pinout hops across ports B/C/D/E/F and shares nothing with
+ * the 328P layout.
+ *
+ * A6-A11 are deliberately absent. On real hardware they are alternate ADC
+ * functions of D4/D6/D8/D9/D10/D12 (channels 8-13) reached through MUX5, which
+ * this engine cannot select on the 32U4 — see the unsupported list below.
+ */
+function atmega32u4Map(): Record<number, AvrPortRef> {
+  const spec: [number, AvrPortName, number][] = [
+    [0, 'D', 2], [1, 'D', 3], [2, 'D', 1], [3, 'D', 0], [4, 'D', 4],
+    [5, 'C', 6], [6, 'D', 7], [7, 'E', 6],
+    [8, 'B', 4], [9, 'B', 5], [10, 'B', 6], [11, 'B', 7],
+    [12, 'D', 6], [13, 'C', 7],
+    // ICSP / SPI pins (D17 = SS drives the RX LED and is not broken out).
+    [14, 'B', 3], [15, 'B', 1], [16, 'B', 2], [17, 'B', 0],
+  ];
+  const map: Record<number, AvrPortRef> = {};
+  for (const [pin, port, index] of spec) map[pin] = { port, index };
+  // A0-A5 → PF7, PF6, PF5, PF4, PF1, PF0 = ADC7, 6, 5, 4, 1, 0.
+  const analog: [number, number, number][] = [
+    [18, 7, 7], [19, 6, 6], [20, 5, 5], [21, 4, 4], [22, 1, 1], [23, 0, 0],
+  ];
+  for (const [pin, index, adcChannel] of analog) map[pin] = { port: 'F', index, adcChannel };
+  return map;
+}
+
 const ATMEGA328P_UNO: AvrBoardProfile = {
   mcu: 'atmega328p',
   ramEnd: 0x08ff, // 2 KB SRAM at 0x0100
@@ -116,12 +145,35 @@ const ATMEGA2560_MEGA: AvrBoardProfile = {
   ],
 };
 
+const ATMEGA32U4_LEONARDO: AvrBoardProfile = {
+  mcu: 'atmega32u4',
+  // 2.5 KB SRAM at 0x0100 (extended I/O ends at 0x00FF).
+  ramEnd: 0x0aff,
+  flashBytes: 32 * 1024,
+  analogPinBase: 18,
+  digitalPinCount: 18,
+  pinCount: 24, // D0-D17 + A0-A5
+  ports: ['B', 'C', 'D', 'E', 'F'],
+  portMap: atmega32u4Map(),
+  unsupported: [
+    'Serial (native USB CDC) — the ATmega32U4 USB device is not emulated; only Serial1 (USART1 on D0/D1) produces output',
+    'USB HID: Keyboard, Mouse and other native-USB libraries',
+    'Timer4 (high-speed 10-bit) — analogWrite on D6 and D13 produces no PWM',
+    'ADC channels 8-13 (the A6-A11 alternate functions of D4/D6/D8/D9/D10/D12) — MUX5 sits at a different ADCSRB bit on this MCU than the engine assumes',
+    'External interrupts INT0-INT3/INT6 (attachInterrupt) and pin-change interrupts (PCINT0)',
+    'SPI and I2C (TWI) peripheral devices',
+    'EEPROM contents are not persisted',
+    'Caterina bootloader, USB auto-reset and serial-port enumeration',
+  ],
+};
+
 /** AVR simulation profiles, keyed by canonical board id. Only boards listed
  * here may run on the AVR8js engine — there is no fallback profile. */
 export const AVR_BOARD_PROFILES: Record<string, AvrBoardProfile> = {
   'board.arduino-uno': ATMEGA328P_UNO,
   'board.arduino-nano': ATMEGA328P_NANO,
   'board.arduino-mega2560': ATMEGA2560_MEGA,
+  'board.arduino-leonardo': ATMEGA32U4_LEONARDO,
 };
 
 export function avrProfileFor(board: BoardDefinition | undefined | null): AvrBoardProfile | undefined {
