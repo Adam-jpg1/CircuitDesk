@@ -2,7 +2,6 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import type { BoardTarget } from './types.js';
 
 const execFileAsync = promisify(execFile);
 const CLI_TIMEOUT_MS = 180_000;
@@ -10,6 +9,8 @@ const CLI_TIMEOUT_MS = 180_000;
 export interface CliAvailability {
   available: boolean;
   version: string;
+  /** Core ids reported installed by `arduino-cli core list` (e.g. "arduino:avr"). */
+  installedCores: string[];
   avrCoreInstalled: boolean;
   reason?: string;
 }
@@ -21,16 +22,21 @@ export async function detectArduinoCli(): Promise<CliAvailability> {
   try {
     const { stdout } = await execFileAsync('arduino-cli', ['version'], { timeout: 10_000 });
     const version = stdout.trim();
-    let avrCoreInstalled = false;
+    let installedCores: string[] = [];
     try {
       const cores = await execFileAsync('arduino-cli', ['core', 'list'], { timeout: 20_000 });
-      avrCoreInstalled = /arduino:avr/.test(cores.stdout);
+      installedCores = cores.stdout
+        .split('\n')
+        .map((line) => /^([a-z0-9_]+:[a-z0-9_]+)\s/i.exec(line.trim())?.[1])
+        .filter((c): c is string => Boolean(c));
     } catch {
-      avrCoreInstalled = false;
+      installedCores = [];
     }
+    const avrCoreInstalled = installedCores.includes('arduino:avr');
     cached = {
       available: true,
       version,
+      installedCores,
       avrCoreInstalled,
       reason: avrCoreInstalled
         ? undefined
@@ -40,6 +46,7 @@ export async function detectArduinoCli(): Promise<CliAvailability> {
     cached = {
       available: false,
       version: '',
+      installedCores: [],
       avrCoreInstalled: false,
       reason: 'arduino-cli is not installed or not on PATH.',
     };
@@ -52,6 +59,9 @@ export interface CliBuildOutput {
   stdout: string;
   stderr: string;
   hex?: string;
+  /** base64-encoded binary firmware for non-AVR targets (.uf2 preferred, else .bin). */
+  binaryBase64?: string;
+  binaryFormat?: 'uf2' | 'bin';
   flashBytes?: number;
   ramBytes?: number;
 }
@@ -71,10 +81,21 @@ export async function cliCompile(
       maxBuffer: 1024 * 1024,
     });
     let hex: string | undefined;
+    let binaryBase64: string | undefined;
+    let binaryFormat: 'uf2' | 'bin' | undefined;
     if (!syntaxOnly) {
       const files = await readdir(outputDir);
       const hexFile = files.find((f) => f.endsWith('.hex') && !f.endsWith('.with_bootloader.hex'));
       if (hexFile) hex = await readFile(path.join(outputDir, hexFile), 'utf8');
+      if (!hexFile) {
+        const uf2 = files.find((f) => f.endsWith('.uf2'));
+        const bin = files.find((f) => f.endsWith('.bin'));
+        const chosen = uf2 ?? bin;
+        if (chosen) {
+          binaryBase64 = (await readFile(path.join(outputDir, chosen))).toString('base64');
+          binaryFormat = uf2 ? 'uf2' : 'bin';
+        }
+      }
     }
     const flashMatch = /Sketch uses (\d+) bytes/.exec(stdout);
     const ramMatch = /Global variables use (\d+) bytes/.exec(stdout);
@@ -83,6 +104,8 @@ export async function cliCompile(
       stdout,
       stderr,
       hex,
+      binaryBase64,
+      binaryFormat,
       flashBytes: flashMatch ? Number(flashMatch[1]) : undefined,
       ramBytes: ramMatch ? Number(ramMatch[1]) : undefined,
     };
@@ -96,6 +119,4 @@ export async function cliCompile(
   }
 }
 
-export function targetFqbnSupported(target: BoardTarget): boolean {
-  return target.fqbn.startsWith('arduino:avr:');
-}
+

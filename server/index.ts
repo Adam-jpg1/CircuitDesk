@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { getCompilerHealth, compileProject } from './compiler/compilerService.js';
 import { SUPPORTED_TARGETS, findTarget, type CompileRequest } from './compiler/types.js';
 import { detectGccToolchain, ensureCoreArchive } from './compiler/gccToolchain.js';
+import { detectArduinoCli } from './compiler/arduinoCli.js';
 import { rateLimit } from './rateLimit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -68,6 +69,40 @@ app.get('/api/compiler/boards', (_req, res) => {
   res.json({ targets: SUPPORTED_TARGETS });
 });
 
+/**
+ * Live per-board compiler capability report: which allowlisted targets can
+ * actually be built on THIS instance (installed cores/toolchains), with an
+ * explicit reason when they cannot. The frontend uses this for honest
+ * badges/tooltips — a missing core is reported, never papered over.
+ */
+app.get('/api/compiler/capabilities', async (_req, res) => {
+  try {
+    const cli = await detectArduinoCli();
+    const gcc = await detectGccToolchain();
+    const targets = SUPPORTED_TARGETS.map((t) => {
+      const cliHasCore = cli.available && cli.installedCores.includes(t.core);
+      const installed = t.arch === 'avr' ? cliHasCore || gcc.available : cliHasCore;
+      const toolchain = cliHasCore ? 'arduino-cli' : t.arch === 'avr' && gcc.available ? 'avr-gcc' : 'none';
+      return {
+        id: t.id,
+        name: t.name,
+        fqbn: t.fqbn,
+        arch: t.arch,
+        core: t.core,
+        installed,
+        toolchain,
+        reason: installed
+          ? undefined
+          : `The ${t.core} core is not installed on this compiler service (arduino-cli ${cli.available ? 'present' : 'missing'}).`,
+      };
+    });
+    res.json({ targets });
+  } catch (err) {
+    console.error('[CircuitDesk] capabilities check failed:', err);
+    res.status(500).json({ targets: [] });
+  }
+});
+
 // ---- compile endpoints (rate-limited; one build at a time) ----
 
 const compileLimiter = rateLimit({ windowMs: 5 * 60_000, max: 60, name: 'compile' });
@@ -105,6 +140,11 @@ app.post('/api/compiler/validate', compileLimiter, async (req, res) => {
 const dist = path.resolve(__dirname, '../dist');
 if (existsSync(dist)) {
   app.use(express.static(dist));
+  // Vercel Analytics only exists on Vercel hosting; answer with a no-op script
+  // instead of letting the SPA fallback return HTML for a .js request.
+  app.get(/^\/_vercel\/.*/, (_req, res) => {
+    res.type('application/javascript').send('/* analytics disabled on this host */');
+  });
   app.get(/^\/(?!api\/|health$).*/, (_req, res) => {
     res.sendFile(path.join(dist, 'index.html'));
   });

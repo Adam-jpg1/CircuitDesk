@@ -18,10 +18,15 @@ export async function fetchCompilerHealth(): Promise<CompilerHealth> {
   }
 }
 
-export async function compileProjectCode(project: CircuitProject, syntaxOnly = false): Promise<CompileResult> {
+export async function compileProjectCode(
+  project: CircuitProject,
+  target: { boardId: string; fqbn: string },
+  syntaxOnly = false,
+): Promise<CompileResult> {
   const body = {
     projectId: project.id,
-    fqbn: project.settings.boardFqbn ?? 'arduino:avr:uno',
+    boardId: target.boardId,
+    fqbn: target.fqbn,
     files: project.codeFiles.map((f) => ({ name: f.name, content: f.content })),
   };
   try {

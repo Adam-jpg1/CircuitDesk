@@ -23,6 +23,16 @@ RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/inst
     && (arduino-cli core update-index && arduino-cli core install arduino:avr) \
     || echo "arduino-cli core install failed; falling back to avr-g++ toolchain"
 
+# RP2040 core (Raspberry Pi Pico / Pico W compile targets, official Arduino
+# mbed core, FQBN arduino:mbed_rp2040:pico).
+# SIZE TRADEOFF: this core + its ARM GCC toolchain add roughly 400-500 MB to
+# the image. It is the only non-AVR family CircuitDesk genuinely compiles, so
+# the cost is accepted; remove this RUN to build a smaller AVR-only image —
+# the backend then reports CORE_MISSING for Pico with a clear message instead
+# of ever falling back to another board.
+RUN (arduino-cli core update-index && arduino-cli core install arduino:mbed_rp2040) \
+    || echo "arduino:mbed_rp2040 core install failed; Pico compiles will report CORE_MISSING"
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./

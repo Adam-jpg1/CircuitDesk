@@ -3,7 +3,7 @@ import { useEditorStore } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
 import { resolveDefinition } from '../project/partsRegistry';
 import { buildCircuitGraph } from '../circuit/nets';
-import { boardPinToArduino } from '../simulation/avrRunner';
+import { arduinoPinNumber } from '../boards/pinMaps';
 import { pinAbsolute, partBounds, partSize, wirePath, snap, type Pt } from './geometry';
 import { ComponentArtwork } from '../components-library/artwork/componentArtwork';
 import { UnoArtwork } from '../boards/artwork/UnoArtwork';
@@ -460,7 +460,8 @@ const WiresLayer = memo(function WiresLayer({
       for (const node of net.nodes) {
         const [instId, pinId] = node.split(/:(.+)/s) as unknown as [string, string];
         if (instId === board.id) {
-          const arduinoPin = boardPinToArduino(pinId);
+          const boardDef = graph.definitions.get(board.id);
+          const arduinoPin = boardDef?.isBoard ? arduinoPinNumber(boardDef, pinId) : undefined;
           if (arduinoPin !== undefined && snapshot.states[arduinoPin] === 'high') {
             map.set(conn.id, true);
             break;
@@ -658,8 +659,8 @@ function PinTooltip({ toWorldRect }: { toWorldRect: () => DOMRect | null }) {
     );
     let simState: string | null = null;
     if (def.isBoard && simStatus !== 'stopped' && pinSnapshot) {
-      const n = boardPinToArduino(pin.id);
-      if (n !== undefined) {
+      const n = arduinoPinNumber(def, pin.id);
+      if (n !== undefined && n < pinSnapshot.states.length) {
         const st = pinSnapshot.states[n];
         const duty = pinSnapshot.duty[n];
         simState = st === 'high' || st === 'low' ? `${st.toUpperCase()}${duty > 0.02 && duty < 0.98 && st === 'high' ? ` (PWM ${(duty * 100).toFixed(0)}%)` : ''}` : st;

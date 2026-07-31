@@ -47,7 +47,7 @@ export function emptyProject(name: string): CircuitProject {
     codeFiles: [code('sketch.ino', 'void setup() {\n  // put your setup code here, to run once:\n\n}\n\nvoid loop() {\n  // put your main code here, to run repeatedly:\n\n}\n')],
     tests: [],
     customDefinitions: [],
-    settings: { boardFqbn: 'arduino:avr:uno', serialBaud: 9600, simulationSpeed: 1 },
+    settings: { serialBaud: 9600, simulationSpeed: 1 },
   };
 }
 

@@ -2,7 +2,7 @@
 
 import { uid, type CircuitProject, type ValidationIssue, type PinDefinition } from '../types';
 import { buildCircuitGraph, splitNode, type CircuitGraph } from '../circuit/nets';
-import { boardPinToArduino } from '../simulation/avrRunner';
+import { arduinoPinNumber } from '../boards/pinMaps';
 import { analyzeCodePins } from '../compiler/codeAnalysis';
 
 interface NetInfo {
@@ -48,7 +48,7 @@ function collectNetInfo(graph: CircuitGraph): Map<string, NetInfo> {
       if (pin.type === 'power-3v3') info.maxSupplyVolts = Math.max(info.maxSupplyVolts, 3.3);
       if (pin.type === 'power-vin') info.maxSupplyVolts = Math.max(info.maxSupplyVolts, pin.voltage ?? 9);
       if (def.isBoard && (pin.type === 'digital' || pin.type === 'analog')) {
-        const n = boardPinToArduino(pinId);
+        const n = arduinoPinNumber(def, pinId);
         if (n !== undefined) info.boardDigitalPins.push(n);
       }
     }
@@ -270,17 +270,19 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
   }
 
   // --- code ↔ circuit cross-checks ---
-  if (board && boardDef?.isBoard) {
+  // Code↔circuit pin cross-checks only apply to AVR boards with Arduino
+  // numbering; a Pico's GP pins are never interpreted as D0-D13.
+  if (board && boardDef?.isBoard && (boardDef.architecture ?? 'other') === 'avr') {
     const boardArduinoPins = new Set<number>();
     for (const pin of boardDef.pins) {
-      const n = boardPinToArduino(pin.id);
+      const n = arduinoPinNumber(boardDef, pin.id);
       if (n !== undefined) boardArduinoPins.add(n);
     }
     const connectedArduinoPins = new Set<number>();
     for (const c of project.connections) {
       for (const [instId, pinId] of [[c.sourceComponentId, c.sourcePinId], [c.targetComponentId, c.targetPinId]] as const) {
         if (instId === board.id) {
-          const n = boardPinToArduino(pinId);
+          const n = arduinoPinNumber(boardDef, pinId);
           if (n !== undefined) connectedArduinoPins.add(n);
         }
       }

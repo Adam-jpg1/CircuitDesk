@@ -83,6 +83,10 @@ export function buildCustomDefinition(result: ImportParseResult, options: Import
   const def: BoardDefinition = {
     ...base,
     family: 'Imported',
+    architecture: 'other',
+    aliases: [],
+    compiler: { provider: 'none', supported: false },
+    simulation: { engine: 'none', supported: false, supportedApis: [], supportedPeripherals: [] },
     processor: (result.metadata?.processor as string) ?? 'unknown',
     metadata: { importFormat: result.format, ...(result.metadata ?? {}) },
     isBoard: true,
