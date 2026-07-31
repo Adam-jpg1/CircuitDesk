@@ -5,7 +5,9 @@ FROM node:22-bookworm-slim
 
 # AVR toolchain + utilities. arduino-core-avr provides the Arduino AVR core for
 # the avr-g++ fallback path; arduino-cli (installed below) is preferred when its
-# core download succeeds.
+# core download succeeds. python3 is required by the Arduino-Pico core: its
+# build recipe shells out to python3, and without it an RP2040 build fails with
+# "/usr/bin/env: 'python3': No such file or directory" (exit 127).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       gcc-avr \
       avr-libc \
@@ -14,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       make \
       curl \
       ca-certificates \
+      python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # arduino-cli + the arduino:avr core. Core installation needs network access at
