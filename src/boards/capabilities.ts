@@ -165,15 +165,21 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
   },
 
   // ---------------- RP2040 ----------------
+  // Both boards build through the Arduino-Pico core (rp2040:rp2040), each with
+  // its own FQBN. The retired arduino:mbed_rp2040:pico identifier is kept only
+  // as a lookup alias — see the note on the Pico's alias list below.
   'board.raspberry-pi-pico': {
     architecture: 'rp2040',
-    aliases: ['raspberry-pi-pico', 'pico', 'rp2040', 'arduino:mbed_rp2040:pico'],
+    // 'arduino:mbed_rp2040:pico' stays purely so findBoardByIdOrAlias() still
+    // resolves projects imported while that was the live target. Aliases are a
+    // lookup mechanism only and are never shown in capability text.
+    aliases: ['raspberry-pi-pico', 'pico', 'rp2040', 'rp2040:rp2040:rpipico', 'arduino:mbed_rp2040:pico'],
     compiler: {
       provider: 'arduino-cli',
-      fqbn: 'arduino:mbed_rp2040:pico',
-      requiredCore: 'arduino:mbed_rp2040',
+      fqbn: 'rp2040:rp2040:rpipico',
+      requiredCore: 'rp2040:rp2040',
       supported: true,
-      note: 'Requires the arduino:mbed_rp2040 core on the compiler service (installed in the production image). Never compiled through arduino:avr.',
+      note: 'Requires the rp2040:rp2040 (Arduino-Pico) core on the compiler service, installed in the production image. Never compiled through arduino:avr.',
     },
     // Every RP2040 GPIO can be routed to a PWM slice.
     extraPinCaps: [{ pattern: /^GP\d+$/, add: ['pwm'] }],
@@ -182,16 +188,16 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
   },
   'board.raspberry-pi-pico-w': {
     architecture: 'rp2040',
-    aliases: ['raspberry-pi-pico-w', 'pico-w'],
+    aliases: ['raspberry-pi-pico-w', 'pico-w', 'rp2040:rp2040:rpipicow'],
     compiler: {
       provider: 'arduino-cli',
-      fqbn: 'arduino:mbed_rp2040:pico',
-      requiredCore: 'arduino:mbed_rp2040',
+      fqbn: 'rp2040:rp2040:rpipicow',
+      requiredCore: 'rp2040:rp2040',
       supported: true,
-      note: 'Compiled as an RP2040 Pico target; the CYW43 Wi-Fi APIs are not included in this toolchain.',
+      note: 'Built as a Pico W in its own right (rp2040:rp2040:rpipicow), not as a plain Pico. The CYW43 Wi-Fi APIs are not included in this toolchain.',
     },
     extraPinCaps: [{ pattern: /^GP\d+$/, add: ['pwm'] }],
-    limitation: 'Same RP2040 target as the Pico; Wi-Fi is not compiled or simulated.',
+    limitation: 'Same RP2040 silicon as the Pico, built for its own target; Wi-Fi is not compiled or simulated.',
   },
 
   // ---------------- Espressif (variants are distinct) ----------------

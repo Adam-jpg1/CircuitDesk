@@ -84,7 +84,8 @@ function projectWith(boardDefId: string): CircuitProject {
     `Pico ADC pins are exactly GP26/GP27/GP28 (got: ${adcPins.join(',')})`,
   );
   check(gpPins.every((p) => p.capabilities.includes('pwm')), 'every Pico GP pin is PWM-capable (RP2040 PWM slices)');
-  check(pico.compiler?.fqbn === 'arduino:mbed_rp2040:pico', `Pico FQBN is arduino:mbed_rp2040:pico (got ${pico.compiler?.fqbn})`);
+  check(pico.compiler?.fqbn === 'rp2040:rp2040:rpipico', `Pico FQBN is rp2040:rp2040:rpipico (got ${pico.compiler?.fqbn})`);
+  check(pico.compiler?.requiredCore === 'rp2040:rp2040', `Pico requires the rp2040:rp2040 core (got ${pico.compiler?.requiredCore})`);
   check(!pico.compiler?.fqbn?.includes('avr'), 'Pico never compiles through arduino:avr');
   check(Number(pico.metadata.logicVoltage) === 3.3, 'Pico logic voltage is 3.3 V');
   check(!pico.simulation?.supported && pico.supportLevel !== 'simulated', 'Pico is honestly NOT marked Simulated');
@@ -93,7 +94,7 @@ function projectWith(boardDefId: string): CircuitProject {
     'Pico GP pins never resolve to AVR Arduino pin numbers');
   // Pico project resolves to the RP2040 target, never AVR
   const res = resolveCompileTarget(projectWith('board.raspberry-pi-pico'));
-  check(res.ok && res.fqbn === 'arduino:mbed_rp2040:pico', 'Pico project compile target is the RP2040 core');
+  check(res.ok && res.fqbn === 'rp2040:rp2040:rpipico', `Pico project compile target is the Arduino-Pico core (got ${res.ok ? res.fqbn : res.reason})`);
   // and never binds to the AVR simulator
   const binding = new CircuitBinding(projectWith('board.raspberry-pi-pico'), null);
   check(binding.boardInstance === null && binding.boardDef === null, 'Pico circuit binding refuses the AVR simulator (no fallback board)');
@@ -219,7 +220,7 @@ function projectWith(boardDefId: string): CircuitProject {
 
   const unknown = await compileAs('board.esp32-devkit', 'esp32:esp32:esp32');
   check(!unknown.success && unknown.errorCode === 'UNSUPPORTED_BOARD', 'server compile: ESP32 → UNSUPPORTED_BOARD (never compiled as Uno)');
-  const picoCompile = await compileAs('board.raspberry-pi-pico', 'arduino:mbed_rp2040:pico');
+  const picoCompile = await compileAs('board.raspberry-pi-pico', 'rp2040:rp2040:rpipico');
   check(
     !picoCompile.success
       ? ['CORE_MISSING', 'TOOLCHAIN_MISSING'].includes(picoCompile.errorCode ?? '')
@@ -339,6 +340,51 @@ function projectWith(boardDefId: string): CircuitProject {
     emptyThrew = true;
   }
   check(!emptyThrew, 'pinStateCell handles an empty and a null snapshot (stopped simulation)');
+}
+
+// ---------- 10. RP2040 capability metadata matches the real build targets ----------
+{
+  const pico = getBoardDefinition('board.raspberry-pi-pico')!;
+  const picow = getBoardDefinition('board.raspberry-pi-pico-w')!;
+
+  check(pico.compiler?.fqbn === 'rp2040:rp2040:rpipico', `Pico reports rp2040:rp2040:rpipico (${pico.compiler?.fqbn})`);
+  check(picow.compiler?.fqbn === 'rp2040:rp2040:rpipicow', `Pico W reports rp2040:rp2040:rpipicow (${picow.compiler?.fqbn})`);
+  check(
+    pico.compiler?.requiredCore === 'rp2040:rp2040' && picow.compiler?.requiredCore === 'rp2040:rp2040',
+    'both RP2040 boards require the rp2040:rp2040 core',
+  );
+  check(pico.compiler?.fqbn !== picow.compiler?.fqbn, 'Pico and Pico W no longer share one FQBN');
+
+  // The retired Mbed identifiers must not survive in anything a user reads.
+  for (const [name, def] of [['Pico', pico], ['Pico W', picow]] as const) {
+    const userFacing = [
+      describeSupport(def),
+      def.compiler?.note ?? '',
+      String(def.metadata.limitation ?? ''),
+      def.description ?? '',
+    ].join('\n');
+    check(!/mbed_rp2040/.test(userFacing), `${name} capability text never mentions arduino:mbed_rp2040`);
+  }
+
+  // The alias is a lookup key only, kept so projects imported while the Mbed
+  // target was live still resolve to this board.
+  check(
+    findBoardByIdOrAlias('arduino:mbed_rp2040:pico')?.id === 'board.raspberry-pi-pico',
+    'the retired Mbed identifier still resolves as a lookup alias (import compatibility)',
+  );
+  check(
+    findBoardByIdOrAlias('rp2040:rp2040:rpipico')?.id === 'board.raspberry-pi-pico' &&
+      findBoardByIdOrAlias('rp2040:rp2040:rpipicow')?.id === 'board.raspberry-pi-pico-w',
+    'current FQBNs resolve to their own boards',
+  );
+
+  // Tier is unchanged: still compile-only, still not simulated.
+  for (const [name, def] of [['Pico', pico], ['Pico W', picow]] as const) {
+    check(
+      def.supportLevel === 'compile' && def.simulation?.supported === false && def.simulation?.engine === 'none',
+      `${name} remains Compile only and not simulated (${def.supportLevel}/${def.simulation?.engine})`,
+    );
+  }
 }
 
 console.log(failures === 0 ? '\nAll board-profile checks passed.' : `\n${failures} check(s) FAILED`);
