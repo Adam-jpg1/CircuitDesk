@@ -40,6 +40,10 @@ export interface CompileResult {
   };
   memory?: MemoryUsage;
   durationMs: number;
+  /** Board this firmware was built for — execution paths refuse a mismatch. */
+  boardId?: string;
+  /** Toolchain target this firmware was built for. */
+  fqbn?: string;
   error?: string;
   errorCode?:
     | 'TOOLCHAIN_MISSING'
@@ -49,6 +53,7 @@ export interface CompileResult {
     | 'UNSUPPORTED_BOARD'
     | 'MISSING_LIBRARY'
     | 'MALFORMED_PROJECT'
+    | 'BUSY'
     | 'INTERNAL';
 }
 
@@ -131,24 +136,29 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     flashMaxBytes: 28_672,
     ramMaxBytes: 2_560,
   },
+  // RP2040 targets use the Arduino-Pico core (rp2040:rp2040). It emits a .uf2
+  // without also emitting a .hex, which is what an RP2040 image should be
+  // delivered as — the Mbed core emits both, and a HEX-first artifact rule
+  // would hand back an ARM image labelled 'intel-hex'. Each board also has its
+  // own FQBN here, so the Pico W is built as a Pico W rather than as a Pico.
   {
     id: 'board.raspberry-pi-pico',
-    fqbn: 'arduino:mbed_rp2040:pico',
+    fqbn: 'rp2040:rp2040:rpipico',
     name: 'Raspberry Pi Pico (RP2040)',
     arch: 'rp2040',
-    core: 'arduino:mbed_rp2040',
+    core: 'rp2040:rp2040',
     fCpuHz: 133_000_000,
-    flashMaxBytes: 2_097_152,
+    flashMaxBytes: 2_093_056,
     ramMaxBytes: 262_144,
   },
   {
     id: 'board.raspberry-pi-pico-w',
-    fqbn: 'arduino:mbed_rp2040:pico',
-    name: 'Raspberry Pi Pico W (RP2040, Wi-Fi APIs not included)',
+    fqbn: 'rp2040:rp2040:rpipicow',
+    name: 'Raspberry Pi Pico W (RP2040, Wi-Fi APIs not simulated)',
     arch: 'rp2040',
-    core: 'arduino:mbed_rp2040',
+    core: 'rp2040:rp2040',
     fCpuHz: 133_000_000,
-    flashMaxBytes: 2_097_152,
+    flashMaxBytes: 2_093_056,
     ramMaxBytes: 262_144,
   },
 ];

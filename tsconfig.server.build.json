@@ -1,0 +1,26 @@
+// Production build for the compiler backend.
+//
+// tsconfig.server.json stays type-check only (noEmit) because it is what
+// `npm run typecheck` uses; this config is the emitting variant. Output is
+// plain ESM run directly by node — no tsx, no esbuild, no npm wrapper in the
+// production process tree.
+//
+// rootDir "server" maps server/index.ts -> dist-server/index.js, which keeps
+// every import.meta.url-derived path resolving to the same place it does in
+// development (../dist for the static frontend, ../../.server-cache for the
+// gcc toolchain cache).
+{
+  "extends": "./tsconfig.server.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "server",
+    "outDir": "dist-server",
+    "declaration": false,
+    // Source maps are omitted deliberately: node only materialises them when
+    // an error is formatted, but the files still ship and are of no use in a
+    // container without the sources. Stack traces stay accurate to the emitted
+    // JS, which is a near 1:1 transform of the TypeScript.
+    "sourceMap": false
+  },
+  "include": ["server"]
+}
