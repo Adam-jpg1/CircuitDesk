@@ -147,7 +147,10 @@ function projectWith(boardDefId: string): CircuitProject {
   check(findTarget('unknown:fqbn') === undefined, 'server: unknown fqbn is rejected');
   check(findTarget('arduino:avr:uno', 'board.not-a-board') === undefined, 'server: unknown boardId never resolves via fqbn side-channel');
   check(findTarget('arduino:avr:uno', 'board.arduino-uno')?.id === 'board.arduino-uno', 'server: Uno resolves to Uno');
-  check(findTarget('arduino:mbed_rp2040:pico')?.arch === 'rp2040', 'server: Pico fqbn maps to the rp2040 arch, never avr');
+  check(findTarget('rp2040:rp2040:rpipico')?.arch === 'rp2040', 'server: Pico fqbn maps to the rp2040 arch, never avr');
+  // The retired Mbed FQBN must not resolve any more: a target we no longer
+  // install should be refused outright, never quietly built as something else.
+  check(findTarget('arduino:mbed_rp2040:pico') === undefined, 'server: the retired Mbed Pico fqbn is refused, not silently remapped');
   const avrTargets = SUPPORTED_TARGETS.filter((t) => t.arch === 'avr');
   check(new Set(avrTargets.map((t) => `${t.mcu}/${t.variant}`)).size === avrTargets.length, 'server: every AVR target has its own mcu/variant (no shared Uno flags)');
   // alias lookup

@@ -5,6 +5,23 @@ import path from 'node:path';
 
 const execFileAsync = promisify(execFile);
 const CLI_TIMEOUT_MS = 180_000;
+/** Cap on captured compiler output; beyond this the build fails loudly. */
+const OUTPUT_LIMIT_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Parallel compiler jobs. arduino-cli defaults to one job per detected CPU,
+ * but inside a container it sees the HOST's CPU count, not the memory the
+ * instance actually has. Measured peak RSS for one RP2040 sketch on 4 CPUs:
+ *
+ *   default jobs : 685-690 MB across 9-13 processes
+ *   --jobs 2     : 465-500 MB
+ *   --jobs 1     : 354-375 MB
+ *
+ * A 512 MB instance cannot survive the default, which is what produced the
+ * out-of-memory restarts (and the resulting 502s) on the deployed service.
+ * Override with COMPILE_JOBS where there is more headroom.
+ */
+const COMPILE_JOBS = Math.max(1, Number(process.env.COMPILE_JOBS ?? '1') || 1);
 
 export interface CliAvailability {
   available: boolean;
@@ -71,23 +88,27 @@ export async function cliCompile(
   outputDir: string,
   fqbn: string,
   syntaxOnly: boolean,
+  arch: 'avr' | 'rp2040' = 'avr',
 ): Promise<CliBuildOutput> {
+  const jobs = ['--jobs', String(COMPILE_JOBS)];
   const args = syntaxOnly
-    ? ['compile', '--fqbn', fqbn, '--warnings', 'default', '--dry-run', sketchDir]
-    : ['compile', '--fqbn', fqbn, '--warnings', 'default', '--output-dir', outputDir, sketchDir];
+    ? ['compile', ...jobs, '--fqbn', fqbn, '--warnings', 'default', '--dry-run', sketchDir]
+    : ['compile', ...jobs, '--fqbn', fqbn, '--warnings', 'default', '--output-dir', outputDir, sketchDir];
   try {
     const { stdout, stderr } = await execFileAsync('arduino-cli', args, {
       timeout: CLI_TIMEOUT_MS,
-      maxBuffer: 1024 * 1024,
+      maxBuffer: OUTPUT_LIMIT_BYTES,
+      killSignal: 'SIGKILL',
     });
     let hex: string | undefined;
     let binaryBase64: string | undefined;
     let binaryFormat: 'uf2' | 'bin' | undefined;
     if (!syntaxOnly) {
       const files = await readdir(outputDir);
-      const hexFile = files.find((f) => f.endsWith('.hex') && !f.endsWith('.with_bootloader.hex'));
-      if (hexFile) hex = await readFile(path.join(outputDir, hexFile), 'utf8');
-      if (!hexFile) {
+      // Artifact choice follows the TARGET's architecture, not whatever the
+      // core happens to emit first: an RP2040 build must never be handed back
+      // as Intel HEX just because the core also wrote a .hex file.
+      if (arch === 'rp2040') {
         const uf2 = files.find((f) => f.endsWith('.uf2'));
         const bin = files.find((f) => f.endsWith('.bin'));
         const chosen = uf2 ?? bin;
@@ -95,6 +116,9 @@ export async function cliCompile(
           binaryBase64 = (await readFile(path.join(outputDir, chosen))).toString('base64');
           binaryFormat = uf2 ? 'uf2' : 'bin';
         }
+      } else {
+        const hexFile = files.find((f) => f.endsWith('.hex') && !f.endsWith('.with_bootloader.hex'));
+        if (hexFile) hex = await readFile(path.join(outputDir, hexFile), 'utf8');
       }
     }
     const flashMatch = /Sketch uses (\d+) bytes/.exec(stdout);

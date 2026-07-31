@@ -109,7 +109,7 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
     try {
       const sketchDir = await buildCliSketchDir(buildDirRp, req.files);
       const outDir = path.join(buildDirRp, 'out');
-      const out = await cliCompile(sketchDir, outDir, target.fqbn, syntaxOnly);
+      const out = await cliCompile(sketchDir, outDir, target.fqbn, syntaxOnly, target.arch);
       const nameMap = new Map<string, string>([['cdsketch.ino', 'sketch.ino']]);
       const diagnostics = parseDiagnostics(out.stderr, nameMap);
       return finish(out.code === 0, 'arduino-cli', cli.version, out, diagnostics, target, started, syntaxOnly);
@@ -145,7 +145,7 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
     if (health.toolchain === 'arduino-cli') {
       const sketchDir = await buildCliSketchDir(buildDir, req.files);
       const outDir = path.join(buildDir, 'out');
-      const out = await cliCompile(sketchDir, outDir, target.fqbn, syntaxOnly);
+      const out = await cliCompile(sketchDir, outDir, target.fqbn, syntaxOnly, target.arch);
       const nameMap = new Map<string, string>([['cdsketch.ino', 'sketch.ino']]);
       const diagnostics = parseDiagnostics(out.stderr, nameMap);
       return finish(out.code === 0, 'arduino-cli', health.version, out, diagnostics, target, started, syntaxOnly);
@@ -191,7 +191,7 @@ function finish(
   version: string,
   out: { stdout: string; stderr: string; hex?: string; binaryBase64?: string; binaryFormat?: 'uf2' | 'bin'; flashBytes?: number; ramBytes?: number },
   diagnostics: Diagnostic[],
-  target: { flashMaxBytes: number; ramMaxBytes: number },
+  target: { id: string; fqbn: string; flashMaxBytes: number; ramMaxBytes: number },
   started: number,
   syntaxOnly: boolean,
 ): CompileResult {
@@ -203,6 +203,10 @@ function finish(
     stderr: out.stderr.slice(0, 64 * 1024),
     diagnostics,
     durationMs: Date.now() - started,
+    // Firmware identity travels with the artifact so no consumer has to infer
+    // which board a build belongs to.
+    boardId: target.id,
+    fqbn: target.fqbn,
   };
   if (success && !syntaxOnly) {
     if (out.hex) {
@@ -211,7 +215,7 @@ function finish(
       result.firmware = { format: out.binaryFormat, data: out.binaryBase64 };
     } else {
       result.success = false;
-      result.error = 'Build succeeded but no HEX firmware was produced.';
+      result.error = 'Build succeeded but produced no firmware artifact for this target.';
       result.errorCode = 'INTERNAL';
     }
     if (out.flashBytes !== undefined && out.ramBytes !== undefined) {
