@@ -289,6 +289,24 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
           State: <b>{visuals?.buzzerOn ? 'sounding' : 'silent'}</b>
         </div>
       )}
+      {(adapter === 'sim.bmp280' || adapter === 'sim.mpu6050') && (
+        <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
+          {visuals?.readout?.length ? (
+            <>
+              {visuals.readout.map((line) => (
+                <div key={line}>{line}</div>
+              ))}
+              <div style={{ color: 'var(--text-2)', marginTop: 4 }}>
+                Simulated environment served to firmware over I2C.
+              </div>
+            </>
+          ) : (
+            <span style={{ color: 'var(--text-2)' }}>
+              Not on the bus — check SDA/SCL, VCC and GND, then start the simulation.
+            </span>
+          )}
+        </div>
+      )}
       {adapter === 'sim.seven-segment' && (
         <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
           Lit segments: <b>{Object.entries(visuals?.segments ?? {}).filter(([, v]) => v).map(([k]) => k.toUpperCase()).join(' ') || 'none'}</b>

@@ -399,8 +399,13 @@ export const BMP280 = def(
     pin('scl', 'SCL', 8.0, 11.6, { type: 'digital', caps: ['i2c-scl'] }),
     pin('sda', 'SDA', 11.0, 11.6, { type: 'digital', caps: ['i2c-sda'] }),
   ],
-  'validation',
-  { validationRules: ['i2c-pins'], description: 'I2C pressure sensor. Wiring/validation-level: the I2C register protocol is not simulated.' },
+  'simulated',
+  {
+    simulationAdapterId: 'sim.bmp280',
+    validationRules: ['i2c-pins'],
+    description:
+      'I2C temperature + pressure sensor driven by real firmware traffic: the chip ID, calibration block, ctrl_meas/config and the raw ADC registers are all served by the device model, so the sketch runs the datasheet compensation itself. Address 0x76 by default (0x77 selectable). Only responds when SDA/SCL, VCC and GND are actually wired.',
+  },
 );
 
 export const PULSE_SENSOR = def(
@@ -424,8 +429,13 @@ export const MPU6050 = def(
     pin('xda', 'XDA', 14.0, 0.6), pin('xcl', 'XCL', 17.0, 0.6),
     pin('ad0', 'AD0', 20.0, 0.6), pin('int', 'INT', 20.0, 4.0, { caps: ['digital-out'] }),
   ],
-  'validation',
-  { validationRules: ['i2c-pins'], description: 'Accelerometer + gyro on I2C. Wiring/validation-level only — sensor registers are not simulated.' },
+  'simulated',
+  {
+    simulationAdapterId: 'sim.mpu6050',
+    validationRules: ['i2c-pins'],
+    description:
+      'Accelerometer + gyro driven by real firmware traffic: WHO_AM_I, power management, the range registers and the 14-byte accel/temp/gyro burst are served by the device model at the selected full scale. The part boots asleep, so firmware must clear the SLEEP bit. Address 0x68, or 0x69 when AD0 is tied to a supply. Only responds when SDA/SCL, VCC and GND are actually wired.',
+  },
 );
 
 export const GPS = def(
