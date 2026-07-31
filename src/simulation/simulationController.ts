@@ -1,15 +1,31 @@
-// Owns the live emulator instance. The AVR CPU runs outside React state —
-// only throttled snapshots are published to the simulation store.
+// Owns the live emulator instance. The CPU runs outside React state — only
+// throttled snapshots are published to the simulation store.
+//
+// Board gating: firmware only ever executes through the simulator adapter
+// registered for the project's board (adapters.ts). Boards without an
+// adapter produce a clear status message — they are never run on another
+// board's engine or pin profile. Engines are loaded lazily on first start.
 
-import { AVRRunner, F_CPU } from './avrRunner';
+import type { AVRRunner } from './avrRunner';
 import { CircuitBinding, emptyControls, type SimControls } from './circuitSim';
+import { getSimulatorAdapter, assertFirmwareMatchesBoard } from './adapters';
+import { resolveDefinition } from '../project/partsRegistry';
 import { useSimulationStore } from './simulationStore';
-import type { CircuitProject } from '../types';
+import type { BoardDefinition, CircuitProject } from '../types';
 
+const F_CPU = 16_000_000;
 const TICK_MS = 12;
 /** Max cycles executed per tick — keeps the UI responsive if the machine can't keep up. */
 const MAX_CYCLES_PER_TICK = (F_CPU / 1000) * 40;
 const PUBLISH_EVERY_MS = 33;
+
+function findSimulatedBoard(project: CircuitProject): BoardDefinition | null {
+  for (const inst of project.boardInstances) {
+    const def = resolveDefinition(inst.definitionId, project);
+    if (def?.isBoard && getSimulatorAdapter(def)) return def;
+  }
+  return null;
+}
 
 class SimulationController {
   private runner: AVRRunner | null = null;
@@ -19,13 +35,16 @@ class SimulationController {
   private lastPublishWall = 0;
   private serialDecoder = new TextDecoder();
   private hex: string | null = null;
+  private compiledForBoardId: string | null = null;
   private project: CircuitProject | null = null;
   private executedRecently = 0;
   private wallRecently = 0;
+  private starting = false;
 
-  loadFirmware(hex: string, project: CircuitProject): void {
+  loadFirmware(hex: string, project: CircuitProject, compiledForBoardId: string): void {
     this.stop();
     this.hex = hex;
+    this.compiledForBoardId = compiledForBoardId;
     this.project = project;
   }
 
@@ -33,12 +52,36 @@ class SimulationController {
     return this.hex !== null;
   }
 
-  /** Re-bind the circuit (e.g. after wiring changes) without recompiling. */
+  /**
+   * Re-bind the circuit (e.g. after wiring changes) without recompiling.
+   *
+   * If the board itself changed, the running firmware no longer belongs to
+   * this project: the simulation is stopped instead of continuing to publish
+   * the old board's pin states under the new board's name.
+   */
   refreshCircuit(project: CircuitProject): void {
     this.project = project;
-    if (this.runner) {
-      this.binding = new CircuitBinding(project, this.runner);
+    if (!this.runner) return;
+    const board = findSimulatedBoard(project);
+    if (!board) {
+      this.stop();
+      useSimulationStore
+        .getState()
+        .setStatus('error', 'The simulated board was removed from the canvas, so the simulation was stopped.');
+      return;
     }
+    if (this.compiledForBoardId && board.id !== this.compiledForBoardId) {
+      this.stop();
+      useSimulationStore
+        .getState()
+        .setStatus(
+          'error',
+          `The board on the canvas changed to ${board.name}, but the loaded firmware was compiled for "${this.compiledForBoardId}". ` +
+            'The simulation was stopped — recompile for this board.',
+        );
+      return;
+    }
+    this.binding = new CircuitBinding(project, this.runner);
   }
 
   start(): void {
@@ -52,20 +95,56 @@ class SimulationController {
       store.setStatus('running');
       return;
     }
-    try {
-      this.runner = new AVRRunner(this.hex);
-    } catch (err) {
-      store.setStatus('error', err instanceof Error ? err.message : 'Failed to load firmware.');
-      return;
+    if (this.starting) return;
+    this.starting = true;
+    void this.createRunner()
+      .then((runner) => {
+        if (!runner) return;
+        this.attachRunner(runner);
+        useSimulationStore.getState().clearSerial();
+        useSimulationStore.getState().setStatus('running');
+        this.resumeLoop();
+      })
+      .finally(() => {
+        this.starting = false;
+      });
+  }
+
+  /** Creates a runner through the board's registered adapter — or reports why not. */
+  private async createRunner(): Promise<AVRRunner | null> {
+    const store = useSimulationStore.getState();
+    const project = this.project!;
+    const boardDef = findSimulatedBoard(project);
+    if (!boardDef) {
+      const firstBoard = project.boardInstances[0]
+        ? resolveDefinition(project.boardInstances[0].definitionId, project)
+        : undefined;
+      store.setStatus(
+        'error',
+        firstBoard
+          ? `Simulation is not supported for ${firstBoard.name} (${firstBoard.supportLevel} support). It will not be run on another board's simulator.`
+          : 'Place a simulated board (e.g. Arduino Uno or Nano) on the canvas to run firmware.',
+      );
+      return null;
     }
-    this.runner.onSerialByte = (byte) => {
+    const adapter = getSimulatorAdapter(boardDef)!;
+    try {
+      assertFirmwareMatchesBoard(this.compiledForBoardId ?? '', boardDef);
+      return await adapter.createRunner(this.hex!, boardDef);
+    } catch (err) {
+      console.error('[CircuitDesk] simulator init failed:', err);
+      store.setStatus('error', err instanceof Error ? err.message : 'Failed to load firmware into the simulator.');
+      return null;
+    }
+  }
+
+  private attachRunner(runner: AVRRunner): void {
+    this.runner = runner;
+    runner.onSerialByte = (byte) => {
       const text = this.serialDecoder.decode(new Uint8Array([byte]), { stream: true });
       if (text) useSimulationStore.getState().appendSerial(text);
     };
-    this.binding = new CircuitBinding(this.project, this.runner);
-    store.clearSerial();
-    store.setStatus('running');
-    this.resumeLoop();
+    this.binding = new CircuitBinding(this.project!, runner);
   }
 
   private controls(): SimControls {
@@ -162,22 +241,19 @@ class SimulationController {
     const store = useSimulationStore.getState();
     const wasRunning = store.status === 'running';
     this.stopLoop();
-    if (this.hex && this.project) {
-      this.runner = new AVRRunner(this.hex);
-      this.runner.onSerialByte = (byte) => {
-        const text = this.serialDecoder.decode(new Uint8Array([byte]), { stream: true });
-        if (text) useSimulationStore.getState().appendSerial(text);
-      };
-      this.binding = new CircuitBinding(this.project, this.runner);
-      store.clearSerial();
+    if (!this.hex || !this.project) return;
+    void this.createRunner().then((runner) => {
+      if (!runner) return;
+      this.attachRunner(runner);
+      useSimulationStore.getState().clearSerial();
       if (wasRunning) {
         this.resumeLoop();
-        store.setStatus('running');
+        useSimulationStore.getState().setStatus('running');
       } else {
         this.publish();
-        store.setStatus('paused');
+        useSimulationStore.getState().setStatus('paused');
       }
-    }
+    });
   }
 
   stop(): void {
@@ -189,7 +265,7 @@ class SimulationController {
     store.publishFrame({
       simTimeMs: 0,
       speedFactor: 1,
-      pinSnapshot: { states: Array(20).fill('input'), duty: Array(20).fill(0), pulseWidthUs: Array(20).fill(0), toggles: Array(20).fill(0) },
+      pinSnapshot: { states: [], duty: [], pulseWidthUs: [], toggles: [] },
       visuals: {},
     });
   }

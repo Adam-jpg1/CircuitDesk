@@ -4,6 +4,7 @@ import { useCustomPartsStore } from '../custom-parts/customPartsStore';
 import { BOARD_DEFINITIONS } from '../boards/definitions';
 import { COMPONENT_DEFINITIONS } from '../components-library/definitions';
 import { SupportBadge } from '../ui/primitives';
+import { describeSupport } from '../project/support';
 import { loadSetting, saveSetting } from '../persistence/settings';
 import type { PartDefinition } from '../types';
 
@@ -97,7 +98,7 @@ export function LibraryPanel() {
                   <MiniPartIcon def={def} />
                 </span>
                 <span className="li-name">{def.name}</span>
-                <SupportBadge level={def.supportLevel} />
+                <SupportBadge level={def.supportLevel} title={describeSupport(def)} />
               </div>
             ))}
           </div>

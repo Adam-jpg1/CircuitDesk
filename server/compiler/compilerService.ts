@@ -3,7 +3,7 @@ import { detectArduinoCli, cliCompile } from './arduinoCli.js';
 import { detectGccToolchain, gccCompile, parseDiagnostics, BuildTimeoutError } from './gccToolchain.js';
 import { buildSketchDir, buildCliSketchDir } from './sketchBuilder.js';
 import { cleanupDir, createBuildDir, validateFiles, InputValidationError } from './fileService.js';
-import { findTarget, type CompileRequest, type CompileResult, type Diagnostic } from './types.js';
+import { findTarget, SUPPORTED_TARGETS, type CompileRequest, type CompileResult, type Diagnostic } from './types.js';
 
 export interface CompilerHealth {
   available: boolean;
@@ -52,12 +52,15 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
     durationMs: 0,
   };
 
-  const target = findTarget(req.fqbn);
+  const target = findTarget(req.fqbn, req.boardId);
   if (!target) {
     return {
       ...base,
       success: false,
-      error: `Board "${req.fqbn}" has no compile support yet. Compilation currently targets AVR boards (arduino:avr:uno, arduino:avr:nano). Other boards are wiring/validation level for now.`,
+      error:
+        `Board "${req.boardId ?? req.fqbn}" is not on the compile allowlist. ` +
+        'Supported targets: ' + SUPPORTED_TARGETS.map((t) => `${t.id} (${t.fqbn})`).join(', ') + '. ' +
+        'Unsupported boards are never compiled as a different board.',
       errorCode: 'UNSUPPORTED_BOARD',
       durationMs: Date.now() - started,
     };
@@ -76,6 +79,54 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
       };
     }
     throw err;
+  }
+
+  const cli = await detectArduinoCli();
+
+  // Non-AVR architectures (RP2040) compile ONLY through arduino-cli with the
+  // exact required core installed. There is no fallback to any other
+  // architecture or board.
+  if (target.arch !== 'avr') {
+    if (!cli.available) {
+      return {
+        ...base,
+        success: false,
+        error: `Compiling ${target.name} requires arduino-cli with the ${target.core} core, but arduino-cli is not installed on the compiler service.`,
+        errorCode: 'TOOLCHAIN_MISSING',
+        durationMs: Date.now() - started,
+      };
+    }
+    if (!cli.installedCores.includes(target.core)) {
+      return {
+        ...base,
+        success: false,
+        error: `The ${target.core} core is not installed on the compiler service, so ${target.name} cannot be compiled here. Install it with: arduino-cli core install ${target.core}. The board was NOT compiled as any other target.`,
+        errorCode: 'CORE_MISSING',
+        durationMs: Date.now() - started,
+      };
+    }
+    const buildDirRp = await createBuildDir();
+    try {
+      const sketchDir = await buildCliSketchDir(buildDirRp, req.files);
+      const outDir = path.join(buildDirRp, 'out');
+      const out = await cliCompile(sketchDir, outDir, target.fqbn, syntaxOnly);
+      const nameMap = new Map<string, string>([['cdsketch.ino', 'sketch.ino']]);
+      const diagnostics = parseDiagnostics(out.stderr, nameMap);
+      return finish(out.code === 0, 'arduino-cli', cli.version, out, diagnostics, target, started, syntaxOnly);
+    } catch (err) {
+      if (err instanceof BuildTimeoutError) {
+        return { ...base, success: false, error: err.message, errorCode: 'BUILD_TIMEOUT', durationMs: Date.now() - started };
+      }
+      return {
+        ...base,
+        success: false,
+        error: err instanceof Error ? err.message.slice(0, 2000) : 'Internal compiler error.',
+        errorCode: 'INTERNAL',
+        durationMs: Date.now() - started,
+      };
+    } finally {
+      await cleanupDir(buildDirRp);
+    }
   }
 
   const health = await getCompilerHealth();
@@ -138,7 +189,7 @@ function finish(
   success: boolean,
   toolchain: 'arduino-cli' | 'avr-gcc',
   version: string,
-  out: { stdout: string; stderr: string; hex?: string; flashBytes?: number; ramBytes?: number },
+  out: { stdout: string; stderr: string; hex?: string; binaryBase64?: string; binaryFormat?: 'uf2' | 'bin'; flashBytes?: number; ramBytes?: number },
   diagnostics: Diagnostic[],
   target: { flashMaxBytes: number; ramMaxBytes: number },
   started: number,
@@ -156,6 +207,8 @@ function finish(
   if (success && !syntaxOnly) {
     if (out.hex) {
       result.firmware = { format: 'intel-hex', data: out.hex };
+    } else if (out.binaryBase64 && out.binaryFormat) {
+      result.firmware = { format: out.binaryFormat, data: out.binaryBase64 };
     } else {
       result.success = false;
       result.error = 'Build succeeded but no HEX firmware was produced.';

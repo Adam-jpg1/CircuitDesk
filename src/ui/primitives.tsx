@@ -4,9 +4,9 @@ import { SUPPORT_LEVEL_LABEL, type SupportLevel } from '../types';
 
 // ---------- support badge ----------
 
-export function SupportBadge({ level }: { level: SupportLevel }) {
+export function SupportBadge({ level, title }: { level: SupportLevel; title?: string }) {
   return (
-    <span className={`badge ${level}`} title={supportBadgeTitle(level)}>
+    <span className={`badge ${level}`} title={title ?? supportBadgeTitle(level)}>
       {SUPPORT_LEVEL_LABEL[level]}
     </span>
   );

@@ -1,5 +1,7 @@
 # CircuitDesk
 
+**Public Beta · v0.9.0**
+
 **CircuitDesk is a realistic electronics project workspace for planning, wiring, coding, validating, simulating, testing, and documenting hardware projects before physically assembling them.**
 
 It is a desktop-first engineering application — not a mockup. The default Blink project compiles with a real
@@ -46,7 +48,7 @@ Production: `npm run build && npm start` (serves the built app + API on :3411).
 |---|---|
 | **Dashboard** | Create / open / rename / duplicate / delete / search / sort, recent project, thumbnails, 9 starter templates, empty states |
 | **Editor** | IDE-style workspace; resizable + collapsible panels (sizes persist), infinite SVG canvas with grid/pan/zoom/fit, minimap, box-select, multi-select, rotate, snap, undo/redo, copy/paste, keyboard shortcuts, status bar |
-| **Boards** | Detailed vector Arduino Uno (fully simulated); Nano (compile); Mega, Leonardo, Due, Uno R4, Nano 33 BLE, ESP32 family, ESP8266, Pico/Pico W, Pi GPIO headers, Teensy, micro:bit, STM32 Nucleo, Feather, QT Py, XIAO — with real pin metadata and honest wiring/validation badges |
+| **Boards** | Detailed vector Arduino Uno, Nano and Mega 2560 (all genuinely simulated, each on its own MCU profile); Leonardo and Pico/Pico W compile for the real target; Due, Uno R4, Nano 33 BLE, ESP32 family, ESP8266, Pi GPIO headers, Teensy, micro:bit, STM32 Nucleo, Feather, QT Py, XIAO — with real pin metadata and honest wiring/validation badges |
 | **Components** | Breadboards with real row/rail connectivity, LEDs, RGB LED, resistors (band colors from value), buttons, switches, pots, buzzer, servo, 7-segment, HC-SR04, TMP36, LDR, plus 20+ validation/wiring-level parts |
 | **Wiring** | Pin-snapped wires (never attach to arbitrary pixels), wires follow moved parts, waypoints, smooth/orthogonal/straight routing, recoloring, labels, live signal highlighting, rich pin hover tooltips |
 | **Code** | Monaco (bundled, offline), multiple files/tabs, compile diagnostics as markers, pin↔code cross-referencing |
@@ -92,9 +94,17 @@ npm run build          # production build
 npm run test:pipeline  # compiles Blink via the API, executes it on AVR8js,
                        # asserts real 500ms timing, serial output, and that
                        # editing delay() changes behavior
-npm run test:ui        # Playwright smoke test: dashboard → create project →
-                       # editor → compile+run → serial output → persistence
-                       # → no "Maximum update depth exceeded"
+npm run test:sim       # simulator behavior QA: button → digital input, pot →
+                       # real ADC (0/1023), PWM duty measurement, servo pulse
+                       # width → angle, ultrasonic echo protocol, Nano profile
+npm run test:mega      # ATmega2560 runtime suite: GPIO in/out, 150 ms timing,
+                       # Serial, ADC incl. A8-A15 via MUX5, PWM on Timer1 and
+                       # the Mega-only Timer5, wrong-MCU firmware rejection
+npm run test:boards    # board profiles, honest badges, no Uno fallbacks
+npm run test:ui        # quick Playwright smoke test
+npm run test:qa        # full beta QA: create → edit → undo/redo → compiler
+                       # errors → compile+run → sim controls → persistence →
+                       # export → all 9 import formats → graceful failures
 ```
 
 ## Honest limitations (by design, clearly labeled in-app)

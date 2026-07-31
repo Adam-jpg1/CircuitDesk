@@ -96,8 +96,8 @@ export const ARDUINO_UNO: BoardDefinition = {
   heightMm: 53.4,
   artwork: { kind: 'builtin', builtinId: 'arduino-uno' },
   pins: unoPins(),
-  compilerTarget: { fqbn: 'arduino:avr:uno', mcu: 'atmega328p', fCpuHz: 16_000_000 },
-  simulationAdapterId: 'avr8js-atmega328p',
+  // compiler/simulation/architecture come from the canonical capability
+  // table (boards/capabilities.ts); the badge is derived, not hand-set.
   supportLevel: 'simulated',
   isBoard: true,
   description:

@@ -3,13 +3,13 @@ import { useEditorStore } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
 import { resolveDefinition } from '../project/partsRegistry';
 import { buildCircuitGraph } from '../circuit/nets';
-import { boardPinToArduino } from '../simulation/avrRunner';
+import { arduinoPinNumber } from '../boards/pinMaps';
 import { pinAbsolute, partBounds, partSize, wirePath, snap, type Pt } from './geometry';
 import { ComponentArtwork } from '../components-library/artwork/componentArtwork';
 import { UnoArtwork } from '../boards/artwork/UnoArtwork';
 import { GenericModuleArtwork } from '../boards/artwork/GenericModuleArtwork';
-import type { CircuitProject, ComponentInstance, Connection, PartDefinition, PinDefinition } from '../types';
-import { MM } from '../boards/pinHelpers';
+import { MegaArtwork } from '../boards/artwork/MegaArtwork';
+import type { CircuitProject, ComponentInstance, PartDefinition, PinDefinition } from '../types';
 
 const WIRE_COLORS = ['#e03131', '#212529', '#2f9e44', '#1971c2', '#e8590c', '#7048e8', '#f08c00', '#c2255c'];
 
@@ -461,7 +461,8 @@ const WiresLayer = memo(function WiresLayer({
       for (const node of net.nodes) {
         const [instId, pinId] = node.split(/:(.+)/s) as unknown as [string, string];
         if (instId === board.id) {
-          const arduinoPin = boardPinToArduino(pinId);
+          const boardDef = graph.definitions.get(board.id);
+          const arduinoPin = boardDef?.isBoard ? arduinoPinNumber(boardDef, pinId) : undefined;
           if (arduinoPin !== undefined && snapshot.states[arduinoPin] === 'high') {
             map.set(conn.id, true);
             break;
@@ -584,7 +585,13 @@ const PartView = memo(function PartView({
       style={{ cursor: 'move' }}
     >
       {def.isBoard ? (
-        def.artwork.builtinId === 'arduino-uno' ? <UnoArtwork def={def} /> : <GenericModuleArtwork def={def} />
+        def.artwork.builtinId === 'arduino-uno' ? (
+          <UnoArtwork def={def} />
+        ) : def.artwork.builtinId === 'arduino-mega' ? (
+          <MegaArtwork def={def} />
+        ) : (
+          <GenericModuleArtwork def={def} />
+        )
       ) : (
         <ComponentArtwork def={def} instance={inst} visual={visual} />
       )}
@@ -659,8 +666,8 @@ function PinTooltip({ toWorldRect }: { toWorldRect: () => DOMRect | null }) {
     );
     let simState: string | null = null;
     if (def.isBoard && simStatus !== 'stopped' && pinSnapshot) {
-      const n = boardPinToArduino(pin.id);
-      if (n !== undefined) {
+      const n = arduinoPinNumber(def, pin.id);
+      if (n !== undefined && n < pinSnapshot.states.length) {
         const st = pinSnapshot.states[n];
         const duty = pinSnapshot.duty[n];
         simState = st === 'high' || st === 'low' ? `${st.toUpperCase()}${duty > 0.02 && duty < 0.98 && st === 'high' ? ` (PWM ${(duty * 100).toFixed(0)}%)` : ''}` : st;

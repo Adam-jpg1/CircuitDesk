@@ -1,0 +1,232 @@
+// Canonical per-board capability table — the single source of truth for
+// architecture, aliases, compiler targets and simulation support. Badges are
+// DERIVED from this data (see project/support.ts); they are never hand-edited.
+//
+// Honesty rules enforced here and by tests/boards.profile.mts:
+//  - simulation.supported=true only for boards with a registered simulator
+//    adapter, a board-specific pin map, and passing runtime tests.
+//  - compiler.supported=true only for boards on the backend's strict
+//    allowlist. Core availability is reported live by
+//    /api/compiler/capabilities; a missing core produces a clear error,
+//    never a silent fallback to another board.
+
+import type { BoardArchitecture, BoardCompilerInfo, BoardSimulationInfo, PinCapability } from '../types';
+
+export interface BoardCapabilityEntry {
+  architecture: BoardArchitecture;
+  aliases: string[];
+  compiler?: BoardCompilerInfo;
+  simulation?: BoardSimulationInfo;
+  /** Arduino pin number of A0 (AVR boards with Arduino numbering). */
+  analogPinBase?: number;
+  /** Chip variant discriminator (e.g. esp32 vs esp32s3 vs esp32c3). */
+  variant?: string;
+  /** Add capabilities to pins whose id matches (e.g. RP2040: PWM on every GP pin). */
+  extraPinCaps?: { pattern: RegExp; add: PinCapability[] }[];
+  /** Honest statement of the biggest current limitation, surfaced in tooltips. */
+  limitation?: string;
+}
+
+const AVR_SIM_APIS = [
+  'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite (PWM)',
+  'delay/millis/micros', 'Serial (UART both directions)', 'timers', 'external interrupts',
+];
+
+/**
+ * The Mega's list deliberately omits external interrupts: the emulator's
+ * INT/PCINT wiring is ATmega328P-specific (INT0/INT1 on PD2/PD3, PCINT0 at the
+ * 328P vector), which does not match the ATmega2560's INT0-INT7 / PCINT0-2
+ * layout. Until Mega-correct interrupt configs exist, attachInterrupt is
+ * declared unsupported rather than silently emulated wrong.
+ */
+const MEGA_SIM_APIS = AVR_SIM_APIS.filter((api) => api !== 'external interrupts');
+const AVR_SIM_PERIPHERALS = ['GPIO ports', 'Timer0/1/2', 'USART0', 'ADC'];
+
+const avrCliCompiler = (fqbn: string): BoardCompilerInfo => ({
+  provider: 'arduino-cli',
+  fqbn,
+  requiredCore: 'arduino:avr',
+  supported: true,
+});
+
+export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
+  // ---------------- AVR (genuinely simulated where tested) ----------------
+  'board.arduino-uno': {
+    architecture: 'avr',
+    aliases: ['arduino-uno', 'uno', 'Arduino UNO R3', 'arduino:avr:uno'],
+    compiler: avrCliCompiler('arduino:avr:uno'),
+    simulation: {
+      engine: 'avr8js',
+      supported: true,
+      supportedApis: AVR_SIM_APIS,
+      supportedPeripherals: AVR_SIM_PERIPHERALS,
+    },
+    analogPinBase: 14,
+  },
+  'board.arduino-nano': {
+    architecture: 'avr',
+    aliases: ['arduino-nano', 'nano', 'arduino:avr:nano'],
+    compiler: avrCliCompiler('arduino:avr:nano'),
+    simulation: {
+      engine: 'avr8js',
+      supported: true,
+      supportedApis: AVR_SIM_APIS,
+      supportedPeripherals: [...AVR_SIM_PERIPHERALS, 'A6/A7 ADC-only inputs'],
+    },
+    analogPinBase: 14,
+    limitation: 'Same ATmega328P core as the Uno; A6/A7 are ADC-only, as on real hardware.',
+  },
+  'board.arduino-mega2560': {
+    architecture: 'avr',
+    aliases: ['arduino-mega', 'mega', 'mega2560', 'arduino:avr:mega'],
+    compiler: avrCliCompiler('arduino:avr:mega'),
+    simulation: {
+      engine: 'avr8js',
+      supported: true,
+      supportedApis: MEGA_SIM_APIS,
+      supportedPeripherals: [
+        'GPIO ports A-L (D0-D53, A0-A15)',
+        'Timer0/1/2 plus Mega-only Timer3/4/5 (PWM on pins 2-13 and 44-46)',
+        'USART0 (Serial)',
+        'ADC 16 channels incl. A8-A15 via MUX5',
+      ],
+    },
+    analogPinBase: 54,
+    limitation:
+      'Runs its own ATmega2560 profile (8 KB SRAM at 0x200, Mega vector table, ports A-L) — never the Uno profile. ' +
+      'Serial1-Serial3 (USART1-3) are not emulated; only Serial (USART0) is. ' +
+      'attachInterrupt is not emulated on this board either: external interrupts (INT0-INT7) and pin-change interrupts (PCINT0-2) are not modeled for the ATmega2560, so those pins still wire and validate but produce no interrupt behavior.',
+  },
+  'board.arduino-leonardo': {
+    architecture: 'avr',
+    aliases: ['arduino-leonardo', 'leonardo', 'arduino:avr:leonardo'],
+    compiler: avrCliCompiler('arduino:avr:leonardo'),
+    analogPinBase: 18,
+    limitation: 'ATmega32U4 (native USB) compiles for the real board; not simulated.',
+  },
+
+  // ---------------- SAM / SAMD / Renesas ----------------
+  'board.arduino-due': {
+    architecture: 'sam',
+    aliases: ['arduino-due', 'due'],
+    limitation: 'SAM3X8E toolchain not installed on the compiler service; wiring + 3.3 V validation only.',
+  },
+  'board.arduino-uno-r4': {
+    architecture: 'renesas',
+    aliases: ['uno-r4', 'uno-r4-minima'],
+    limitation: 'Renesas RA4M1 toolchain not installed; wiring + validation only.',
+  },
+  'board.nano-33-ble': {
+    architecture: 'nrf52',
+    aliases: ['nano-33-ble', 'nano33ble'],
+    limitation: 'nRF52840 toolchain not installed; wiring + validation only.',
+  },
+  'board.adafruit-feather': {
+    architecture: 'samd',
+    aliases: ['feather-m0'],
+    limitation: 'SAMD21 toolchain not installed; wiring only.',
+  },
+  'board.adafruit-qtpy': {
+    architecture: 'samd',
+    aliases: ['qt-py'],
+    limitation: 'SAMD21 toolchain not installed; wiring only.',
+  },
+  'board.seeed-xiao': {
+    architecture: 'samd',
+    aliases: ['xiao', 'seeeduino-xiao'],
+    limitation: 'SAMD21 toolchain not installed; wiring only.',
+  },
+
+  // ---------------- RP2040 ----------------
+  'board.raspberry-pi-pico': {
+    architecture: 'rp2040',
+    aliases: ['raspberry-pi-pico', 'pico', 'rp2040', 'arduino:mbed_rp2040:pico'],
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'arduino:mbed_rp2040:pico',
+      requiredCore: 'arduino:mbed_rp2040',
+      supported: true,
+      note: 'Requires the arduino:mbed_rp2040 core on the compiler service (installed in the production image). Never compiled through arduino:avr.',
+    },
+    // Every RP2040 GPIO can be routed to a PWM slice.
+    extraPinCaps: [{ pattern: /^GP\d+$/, add: ['pwm'] }],
+    limitation:
+      'RP2040 instruction-level simulation is not implemented — the Pico never runs on the AVR engine. Compile support targets the real board.',
+  },
+  'board.raspberry-pi-pico-w': {
+    architecture: 'rp2040',
+    aliases: ['raspberry-pi-pico-w', 'pico-w'],
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'arduino:mbed_rp2040:pico',
+      requiredCore: 'arduino:mbed_rp2040',
+      supported: true,
+      note: 'Compiled as an RP2040 Pico target; the CYW43 Wi-Fi APIs are not included in this toolchain.',
+    },
+    extraPinCaps: [{ pattern: /^GP\d+$/, add: ['pwm'] }],
+    limitation: 'Same RP2040 target as the Pico; Wi-Fi is not compiled or simulated.',
+  },
+
+  // ---------------- Espressif (variants are distinct) ----------------
+  'board.esp32-devkit': {
+    architecture: 'esp32',
+    variant: 'esp32',
+    aliases: ['esp32-devkit-v1', 'esp32'],
+    limitation: 'Xtensa LX6 execution is not simulated and the ESP32 core is not installed on the compiler service; wiring + 3.3 V validation only.',
+  },
+  'board.esp32-s3': {
+    architecture: 'esp32',
+    variant: 'esp32s3',
+    aliases: ['esp32-s3'],
+    limitation: 'ESP32-S3 (Xtensa LX7) — validation only; distinct from the base ESP32.',
+  },
+  'board.esp32-c3': {
+    architecture: 'esp32',
+    variant: 'esp32c3',
+    aliases: ['esp32-c3'],
+    limitation: 'ESP32-C3 is RISC-V, not Xtensa — tracked as its own variant; validation only.',
+  },
+  'board.esp8266-nodemcu': {
+    architecture: 'esp8266',
+    variant: 'esp8266',
+    aliases: ['nodemcu', 'esp8266'],
+    limitation: 'Single ADC (A0, 1.0 V range on the bare chip); not compiled or simulated.',
+  },
+  'board.esp32-cam': {
+    architecture: 'esp32',
+    variant: 'esp32',
+    aliases: ['esp32-cam'],
+    limitation: 'Visual reference; camera and execution are not modeled.',
+  },
+
+  // ---------------- STM32 / imxrt / nRF52 ----------------
+  'board.stm32-nucleo': {
+    architecture: 'stm32',
+    aliases: ['nucleo-64', 'nucleo-f401re'],
+    limitation: 'STM32 toolchain not installed; wiring only.',
+  },
+  'board.teensy41': {
+    architecture: 'imxrt',
+    aliases: ['teensy-4.1'],
+    limitation: 'IMXRT1062 toolchain not installed; wiring only.',
+  },
+  'board.microbit': {
+    architecture: 'nrf52',
+    aliases: ['micro:bit', 'microbit-v2'],
+    limitation: 'Edge-connector visual reference only.',
+  },
+
+  // ---------------- Linux SBC headers ----------------
+  'board.rpi-zero-gpio': {
+    architecture: 'linux',
+    aliases: ['raspberry-pi-zero'],
+    limitation:
+      'Linux boards are not emulated. No behavioral GPIO runtime is implemented yet, so this stays at wiring level — it is never claimed as simulated.',
+  },
+  'board.rpi4-gpio': {
+    architecture: 'linux',
+    aliases: ['raspberry-pi-4', 'raspberry-pi-5'],
+    limitation:
+      'Linux boards are not emulated. No behavioral GPIO runtime is implemented yet, so this stays at wiring level — it is never claimed as simulated.',
+  },
+};

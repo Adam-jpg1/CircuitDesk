@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { navigate } from '../ui/primitives';
 import { BackIcon, LogoIcon } from '../ui/icons';
 import { fetchCompilerHealth } from '../compiler/compilerClient';
+import { APP_VERSION_LABEL } from '../version';
 import type { CompilerHealth } from '../types';
 
 export function AboutPage() {
@@ -18,7 +19,7 @@ export function AboutPage() {
       </header>
       <div className="dash-body">
         <div className="doc-page">
-          <h2 style={{ marginTop: 0 }}>CircuitDesk</h2>
+          <h2 style={{ marginTop: 0 }}>CircuitDesk <span className="badge compile">{APP_VERSION_LABEL}</span></h2>
           <p>
             CircuitDesk is a realistic electronics project workspace for planning, wiring, coding, validating,
             simulating, testing, and documenting hardware projects before physically assembling them.
@@ -48,9 +49,9 @@ export function AboutPage() {
           <h2>Honest support levels</h2>
           <p>Every board and component carries a badge that says what actually works:</p>
           <ul>
-            <li><strong>Simulated</strong> — real firmware execution drives it (Arduino Uno, LEDs, buttons, potentiometers, buzzer, servo, 7-segment, HC-SR04, analog sensors).</li>
-            <li><strong>Compile</strong> — code compiles for this target, but canvas simulation is limited (Arduino Nano).</li>
-            <li><strong>Validation</strong> — wiring plus electrical rule checks (ESP32, Pico, I2C modules…).</li>
+            <li><strong>Simulated</strong> — real firmware execution drives it (Arduino Uno, Nano and Mega 2560, each on its own MCU profile, plus LEDs, buttons, potentiometers, buzzer, servo, 7-segment, HC-SR04, analog sensors).</li>
+            <li><strong>Compile</strong> — code compiles for the real target, but CircuitDesk cannot execute it (Arduino Leonardo, Raspberry Pi Pico).</li>
+            <li><strong>Validation</strong> — wiring plus electrical rule checks (ESP32, Due, Uno R4, I2C modules…).</li>
             <li><strong>Wiring</strong> — placeable with real pins and metadata, no deep checks yet.</li>
             <li><strong>Visual only</strong> — reference artwork (imported Gerbers, ESP32-CAM…).</li>
           </ul>

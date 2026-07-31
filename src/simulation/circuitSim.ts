@@ -4,10 +4,10 @@
 // circuit model (documented as such) — full analog SPICE simulation is a
 // separate future adapter.
 
-import type { CircuitProject, ComponentInstance } from '../types';
+import type { BoardDefinition, CircuitProject, ComponentInstance } from '../types';
 import { buildCircuitGraph, splitNode, type CircuitGraph } from '../circuit/nets';
-import { AVRRunner, boardPinToArduino } from './avrRunner';
-import { PinState } from 'avr8js';
+import type { AVRRunner } from './avrRunner';
+import { arduinoPinNumber, avrProfileFor } from '../boards/pinMaps';
 
 export interface NetLevel {
   volts: number | null;
@@ -65,8 +65,11 @@ interface UltrasonicState {
 export class CircuitBinding {
   readonly graph: CircuitGraph;
   readonly boardInstance: ComponentInstance | null;
+  readonly boardDef: BoardDefinition | null;
   private edges: ConductiveEdge[] = [];
   private netBoardPins = new Map<string, number[]>();
+  /** netId → emulated ADC channels reachable on that net (board-profile-aware). */
+  private netAdcChannels = new Map<string, number[]>();
   private groundNets = new Set<string>();
   private supplyNets = new Map<string, number>();
   private ultrasonic = new Map<string, UltrasonicState>();
@@ -78,11 +81,16 @@ export class CircuitBinding {
     readonly runner: AVRRunner | null,
   ) {
     this.graph = buildCircuitGraph(project);
+    // Bind ONLY to a board whose definition declares genuine simulation
+    // support. Boards without a simulator never fall back to another
+    // board's profile — with no simulated board, no MCU pins are bound.
     this.boardInstance =
       project.boardInstances.find((b) => {
         const def = this.graph.definitions.get(b.id);
-        return def?.isBoard && def.simulationAdapterId?.startsWith('avr8js');
-      }) ?? project.boardInstances[0] ?? null;
+        return def?.isBoard && def.simulation?.supported === true;
+      }) ?? null;
+    const bd = this.boardInstance ? this.graph.definitions.get(this.boardInstance.id) : undefined;
+    this.boardDef = bd?.isBoard ? bd : null;
 
     this.indexNets();
     this.buildEdges();
@@ -96,12 +104,21 @@ export class CircuitBinding {
         const def = this.graph.definitions.get(instId);
         const pin = def?.pins.find((p) => p.id === pinId);
         if (!pin) continue;
-        if (def?.isBoard && instId === this.boardInstance?.id) {
-          const arduinoPin = boardPinToArduino(pinId);
+        if (def?.isBoard && instId === this.boardInstance?.id && this.boardDef) {
+          const arduinoPin = arduinoPinNumber(this.boardDef, pinId);
           if (arduinoPin !== undefined) {
             const arr = this.netBoardPins.get(net.id) ?? [];
             arr.push(arduinoPin);
             this.netBoardPins.set(net.id, arr);
+          }
+          const profile = avrProfileFor(this.boardDef);
+          const channel =
+            (arduinoPin !== undefined ? profile?.portMap[arduinoPin]?.adcChannel : undefined) ??
+            profile?.adcOnlyChannels?.[pinId];
+          if (channel !== undefined) {
+            const chans = this.netAdcChannels.get(net.id) ?? [];
+            chans.push(channel);
+            this.netAdcChannels.set(net.id, chans);
           }
         }
         if (pin.type === 'ground') this.groundNets.add(net.id);
@@ -234,11 +251,12 @@ export class CircuitBinding {
 
     // MCU-driven nets from real emulator pin states.
     if (runner) {
+      const highVolts = Number(this.boardDef?.metadata.logicVoltage ?? 5);
       for (const [netId, pins] of this.netBoardPins) {
         for (const pin of pins) {
-          const state = runner.pinState(pin);
-          if (state === PinState.High) setLevel(netId, 5, pin, 0);
-          else if (state === PinState.Low) setLevel(netId, 0, pin, 0);
+          const level = runner.digitalPinLevel(pin);
+          if (level === 'high') setLevel(netId, highVolts, pin, 0);
+          else if (level === 'low') setLevel(netId, 0, pin, 0);
         }
       }
     }
@@ -269,11 +287,11 @@ export class CircuitBinding {
       for (const [netId, pins] of this.netBoardPins) {
         const level = levels.get(netId);
         for (const pin of pins) {
-          const state = runner.pinState(pin);
-          if (state === PinState.Input || state === PinState.InputPullUp) {
+          const state = runner.digitalPinLevel(pin);
+          if (state === 'input' || state === 'input-pullup') {
             if (level?.volts != null) {
               runner.setDigitalInput(pin, level.volts >= 2.5);
-            } else if (state === PinState.InputPullUp) {
+            } else if (state === 'input-pullup') {
               runner.setDigitalInput(pin, true); // floating + internal pull-up reads high
             }
           }
@@ -331,12 +349,11 @@ export class CircuitBinding {
           visuals.set(inst.id, { potPosition: pos });
           if (runner) {
             const wiperNet = net('wiper');
-            const pins = wiperNet ? this.netBoardPins.get(wiperNet) ?? [] : [];
-            const analogPin = pins.find((p) => p >= 14 && p <= 19);
-            if (analogPin !== undefined) {
+            const channel = wiperNet ? this.netAdcChannels.get(wiperNet)?.[0] : undefined;
+            if (channel !== undefined) {
               const v1 = levelOf(net('t1'))?.volts ?? 0;
               const v2 = levelOf(net('t2'))?.volts ?? 5;
-              runner.setAnalogVolts(analogPin - 14, v1 + pos * (v2 - v1));
+              runner.setAnalogVolts(channel, v1 + pos * (v2 - v1));
             }
           }
           break;
@@ -381,9 +398,8 @@ export class CircuitBinding {
           visuals.set(inst.id, { value: temp });
           if (runner) {
             const outNet = net('vout');
-            const pins = outNet ? this.netBoardPins.get(outNet) ?? [] : [];
-            const analogPin = pins.find((p) => p >= 14 && p <= 19);
-            if (analogPin !== undefined) runner.setAnalogVolts(analogPin - 14, 0.5 + temp * 0.01);
+            const channel = outNet ? this.netAdcChannels.get(outNet)?.[0] : undefined;
+            if (channel !== undefined) runner.setAnalogVolts(channel, 0.5 + temp * 0.01);
           }
           break;
         }
@@ -393,11 +409,10 @@ export class CircuitBinding {
           if (runner) {
             for (const pinId of ['p1', 'p2']) {
               const n = net(pinId);
-              const pins = n ? this.netBoardPins.get(n) ?? [] : [];
-              const analogPin = pins.find((p) => p >= 14 && p <= 19);
-              if (analogPin !== undefined) {
+              const channel = n ? this.netAdcChannels.get(n)?.[0] : undefined;
+              if (channel !== undefined) {
                 // Simplified divider model, documented in the part description.
-                runner.setAnalogVolts(analogPin - 14, 5 * light);
+                runner.setAnalogVolts(channel, 5 * light);
               }
             }
           }

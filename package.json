@@ -1,6 +1,6 @@
 {
   "name": "circuitdesk",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "private": true,
   "description": "CircuitDesk \u2014 a realistic electronics project workspace for planning, wiring, coding, validating, simulating, testing, and documenting hardware projects before physically assembling them.",
   "type": "module",
@@ -13,10 +13,16 @@
     "preview": "vite preview",
     "start": "NODE_ENV=production tsx server/index.ts",
     "test:pipeline": "tsx tests/pipeline.e2e.mts",
-    "test:ui": "tsx tests/ui.smoke.mts"
+    "test:ui": "tsx tests/ui.smoke.mts",
+    "test:sim": "tsx tests/sim.behaviors.mts",
+    "test:qa": "tsx tests/qa.beta.mts",
+    "start:backend": "tsx server/index.ts",
+    "test:boards": "tsx tests/boards.profile.mts",
+    "test:mega": "tsx tests/mega.runtime.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
+    "@vercel/analytics": "^2.0.1",
     "avr8js": "^0.20.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",

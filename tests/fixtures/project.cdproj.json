@@ -1,0 +1,93 @@
+{
+ "app": "CircuitDesk",
+ "kind": "circuitdesk-project",
+ "id": "proj_fixture",
+ "name": "QA Imported Project",
+ "version": "1.0.0",
+ "createdAt": "2026-07-01T00:00:00.000Z",
+ "updatedAt": "2026-07-01T00:00:00.000Z",
+ "boardInstances": [
+  {
+   "id": "b1",
+   "definitionId": "board.arduino-uno",
+   "x": 100,
+   "y": 100,
+   "rotation": 0,
+   "properties": {},
+   "simulationState": {}
+  }
+ ],
+ "componentInstances": [
+  {
+   "id": "c1",
+   "definitionId": "comp.resistor",
+   "x": 420,
+   "y": 90,
+   "rotation": 0,
+   "properties": {
+    "resistance": 220
+   },
+   "simulationState": {}
+  },
+  {
+   "id": "c2",
+   "definitionId": "comp.led",
+   "x": 500,
+   "y": 130,
+   "rotation": 0,
+   "properties": {
+    "color": "green"
+   },
+   "simulationState": {}
+  }
+ ],
+ "connections": [
+  {
+   "id": "w1",
+   "sourceComponentId": "b1",
+   "sourcePinId": "D13",
+   "targetComponentId": "c1",
+   "targetPinId": "p1",
+   "netId": "",
+   "color": "#e8590c",
+   "points": [],
+   "routing": "smooth"
+  },
+  {
+   "id": "w2",
+   "sourceComponentId": "c1",
+   "sourcePinId": "p2",
+   "targetComponentId": "c2",
+   "targetPinId": "anode",
+   "netId": "",
+   "color": "#e8590c",
+   "points": [],
+   "routing": "smooth"
+  },
+  {
+   "id": "w3",
+   "sourceComponentId": "c2",
+   "sourcePinId": "cathode",
+   "targetComponentId": "b1",
+   "targetPinId": "GND_TOP",
+   "netId": "",
+   "color": "#212529",
+   "points": [],
+   "routing": "smooth"
+  }
+ ],
+ "codeFiles": [
+  {
+   "id": "f1",
+   "name": "sketch.ino",
+   "language": "cpp",
+   "content": "void setup(){pinMode(13,OUTPUT);}\\nvoid loop(){digitalWrite(13,HIGH);delay(200);digitalWrite(13,LOW);delay(200);}\\n"
+  }
+ ],
+ "tests": [],
+ "customDefinitions": [],
+ "settings": {
+  "boardFqbn": "arduino:avr:uno",
+  "serialBaud": 9600
+ }
+}
