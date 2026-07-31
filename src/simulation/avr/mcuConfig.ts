@@ -14,6 +14,8 @@ import {
   ADCMuxInputType,
   adcConfig,
   portBConfig,
+  portCConfig,
+  portDConfig,
   portEConfig,
   portGConfig,
   portHConfig,
@@ -22,6 +24,7 @@ import {
   timer1Config,
   timer2Config,
   usart0Config,
+  type CPU,
   type AVRTimerConfig,
   type ADCConfig,
   type AVRPortConfig,
@@ -34,9 +37,14 @@ type UsartConfig = typeof usart0Config;
 
 export interface AvrMcuConfig {
   timers: AVRTimerConfig[];
-  /** Primary Serial (USART0). Additional USARTs are listed as unsupported. */
+  /** The hardware UART this board's emulated serial stream comes from. */
   usart: UsartConfig;
   adc: ADCConfig;
+  /**
+   * Optional per-MCU hardware that avr8js has no peripheral class for but
+   * whose absence would stop firmware from booting. Kept deliberately narrow.
+   */
+  installExtras?: (cpu: CPU) => void;
 }
 
 export const PORT_CONFIGS: Record<AvrPortName, AVRPortConfig> = {
@@ -228,7 +236,150 @@ const ATMEGA2560: AvrMcuConfig = {
   adc: mega2560Adc,
 };
 
-export const MCU_CONFIGS: Record<'atmega328p' | 'atmega2560', AvrMcuConfig> = {
+// --------------------------------------------------------------- ATmega32U4
+
+/**
+ * Timer0 on the ATmega32U4: same registers as the 328P, different vectors and
+ * output-compare pins (OC0A → PB7 = D11, OC0B → PD0 = D3). T0 is PD7 here.
+ */
+const atmega32u4Timer0: AVRTimerConfig = {
+  ...timer0Config,
+  compAInterrupt: 0x2a,
+  compBInterrupt: 0x2c,
+  ovfInterrupt: 0x2e,
+  compPortA: portBConfig.PORT,
+  compPinA: 7,
+  compPortB: portDConfig.PORT,
+  compPinB: 0,
+  externalClockPort: portDConfig.PORT,
+  externalClockPin: 7,
+};
+
+/** Timer1: OC1A → PB5 (D9), OC1B → PB6 (D10), OC1C → PB7 (D11). T1 is PD6. */
+const atmega32u4Timer1: AVRTimerConfig = {
+  ...timer1Config,
+  captureInterrupt: 0x20,
+  compAInterrupt: 0x22,
+  compBInterrupt: 0x24,
+  compCInterrupt: 0x26,
+  ovfInterrupt: 0x28,
+  OCRC: 0x8c,
+  compPortA: portBConfig.PORT,
+  compPinA: 5,
+  compPortB: portBConfig.PORT,
+  compPinB: 6,
+  compPortC: portBConfig.PORT,
+  compPinC: 7,
+  externalClockPort: portDConfig.PORT,
+  externalClockPin: 6,
+};
+
+/**
+ * Timer3 is a 16-bit unit with the same register block as the Mega's Timer3,
+ * but the 32U4 only bonds out OC3A (PC6 = D5) — OC3B/OC3C have no pin, so they
+ * are left unconnected rather than pointed at some other port.
+ */
+const atmega32u4Timer3: AVRTimerConfig = {
+  ...timer1Config,
+  captureInterrupt: 0x3e,
+  compAInterrupt: 0x40,
+  compBInterrupt: 0x42,
+  compCInterrupt: 0x44,
+  ovfInterrupt: 0x46,
+  TIFR: 0x38,
+  TIMSK: 0x71,
+  TCCRA: 0x90,
+  TCCRB: 0x91,
+  TCCRC: 0x92,
+  TCNT: 0x94,
+  ICR: 0x96,
+  OCRA: 0x98,
+  OCRB: 0x9a,
+  OCRC: 0x9c,
+  compPortA: portCConfig.PORT,
+  compPinA: 6,
+  compPortB: 0,
+  compPinB: 0,
+  compPortC: 0,
+  compPinC: 0,
+  externalClockPort: 0,
+  externalClockPin: 0,
+};
+
+/**
+ * The 32U4's hardware UART is USART1 (Arduino's `Serial1` on D0/D1) and it
+ * lives at 0xC8, NOT at the 328P's 0xC0 — on this chip 0xC0 is TCCR4A, so
+ * reusing usart0Config would alias the UART onto Timer4's registers.
+ */
+const atmega32u4Usart1: UsartConfig = {
+  ...usart0Config,
+  rxCompleteInterrupt: 0x32,
+  dataRegisterEmptyInterrupt: 0x34,
+  txCompleteInterrupt: 0x36,
+  UCSRA: 0xc8,
+  UCSRB: 0xc9,
+  UCSRC: 0xca,
+  UBRRL: 0xcc,
+  UBRRH: 0xcd,
+  UDR: 0xce,
+};
+
+/**
+ * ADC channels 0-7 only. The 32U4 reaches channels 8-13 through MUX5, which
+ * is bit 5 of ADCSRB on this chip — avr8js hardcodes MUX5 as bit 3 (the
+ * ATmega2560 position), so those channels cannot be selected correctly and are
+ * declared unsupported instead of being wired up to return the wrong pin.
+ * Masking with MUX4:0 keeps channels 0-7 correct regardless of ADCSRB bit 3.
+ */
+const atmega32u4AdcChannels: ADCConfig['muxChannels'] = (() => {
+  const channels: ADCConfig['muxChannels'] = {};
+  for (let i = 0; i < 8; i++) channels[i] = { type: ADCMuxInputType.SingleEnded as const, channel: i };
+  return channels;
+})();
+
+const atmega32u4Adc: ADCConfig = {
+  ...adcConfig,
+  adcInterrupt: 0x3a,
+  numChannels: 8,
+  muxInputMask: 0x1f,
+  muxChannels: atmega32u4AdcChannels,
+  // REFS1:0 → AREF, AVCC, reserved, internal 2.56 V (no 1.1 V band gap here).
+  adcReferences: [ADCReference.AREF, ADCReference.AVCC, ADCReference.Reserved, ADCReference.Internal2V56],
+};
+
+/**
+ * The single piece of USB hardware that has to exist for a Leonardo sketch to
+ * reach setup(): the USB PLL lock flag.
+ *
+ * The Arduino 32U4 core calls USBDevice.attach() from main() before setup(),
+ * and that spins on `while (!(PLLCSR & (1<<PLOCK)))`. On real silicon the PLL
+ * locks a few microseconds after PLLE is set; with no model at all the flag
+ * never appears and firmware hangs forever in the boot loop. Reflecting PLLE
+ * into PLOCK models exactly that one behavior.
+ *
+ * This is NOT USB support: no device, endpoints, enumeration or CDC serial are
+ * emulated, and the board's capability list says so.
+ */
+const PLLCSR = 0x49;
+const PLLE = 0b10;
+const PLOCK = 0b1;
+
+function installAtmega32u4Extras(cpu: CPU): void {
+  cpu.writeHooks[PLLCSR] = (value: number) => {
+    cpu.data[PLLCSR] = value & PLLE ? value | PLOCK : value & ~PLOCK;
+    return true;
+  };
+}
+
+const ATMEGA32U4: AvrMcuConfig = {
+  timers: [atmega32u4Timer0, atmega32u4Timer1, atmega32u4Timer3],
+  usart: atmega32u4Usart1,
+  adc: atmega32u4Adc,
+  installExtras: installAtmega32u4Extras,
+};
+
+export const MCU_CONFIGS: Record<'atmega328p' | 'atmega2560' | 'atmega32u4', AvrMcuConfig> = {
   atmega328p: ATMEGA328P,
   atmega2560: ATMEGA2560,
+  atmega32u4: ATMEGA32U4,
 };

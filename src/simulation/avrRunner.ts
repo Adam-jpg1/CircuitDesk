@@ -112,6 +112,10 @@ export class AVRRunner {
     // pushes SRAM to 0x200, which the 328P's layout would silently truncate.
     this.cpu = new CPU(new Uint16Array(program.buffer), profile.ramEnd + 1 - 0x100);
 
+    // Narrow per-MCU hardware avr8js has no class for (e.g. the 32U4's USB PLL
+    // lock bit, without which the Arduino core never reaches setup()).
+    mcu.installExtras?.(this.cpu);
+
     this.timers = mcu.timers.map((cfg) => new AVRTimer(this.cpu, cfg));
     this.usart = new AVRUSART(this.cpu, mcu.usart, F_CPU);
     this.adc = new AVRADC(this.cpu, mcu.adc);

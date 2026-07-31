@@ -48,7 +48,7 @@ Production: `npm run build && npm start` (serves the built app + API on :3411).
 |---|---|
 | **Dashboard** | Create / open / rename / duplicate / delete / search / sort, recent project, thumbnails, 9 starter templates, empty states |
 | **Editor** | IDE-style workspace; resizable + collapsible panels (sizes persist), infinite SVG canvas with grid/pan/zoom/fit, minimap, box-select, multi-select, rotate, snap, undo/redo, copy/paste, keyboard shortcuts, status bar |
-| **Boards** | Detailed vector Arduino Uno, Nano and Mega 2560 (all genuinely simulated, each on its own MCU profile); Leonardo and Pico/Pico W compile for the real target; Due, Uno R4, Nano 33 BLE, ESP32 family, ESP8266, Pi GPIO headers, Teensy, micro:bit, STM32 Nucleo, Feather, QT Py, XIAO — with real pin metadata and honest wiring/validation badges |
+| **Boards** | Detailed vector Arduino Uno, Nano, Mega 2560 and Leonardo (all genuinely simulated, each on its own MCU profile); Pico/Pico W compile for the real target; Due, Uno R4, Nano 33 BLE, ESP32 family, ESP8266, Pi GPIO headers, Teensy, micro:bit, STM32 Nucleo, Feather, QT Py, XIAO — with real pin metadata and honest wiring/validation badges |
 | **Components** | Breadboards with real row/rail connectivity, LEDs, RGB LED, resistors (band colors from value), buttons, switches, pots, buzzer, servo, 7-segment, HC-SR04, TMP36, LDR, plus 20+ validation/wiring-level parts |
 | **Wiring** | Pin-snapped wires (never attach to arbitrary pixels), wires follow moved parts, waypoints, smooth/orthogonal/straight routing, recoloring, labels, live signal highlighting, rich pin hover tooltips |
 | **Code** | Monaco (bundled, offline), multiple files/tabs, compile diagnostics as markers, pin↔code cross-referencing |
@@ -100,6 +100,9 @@ npm run test:sim       # simulator behavior QA: button → digital input, pot �
 npm run test:mega      # ATmega2560 runtime suite: GPIO in/out, 150 ms timing,
                        # Serial, ADC incl. A8-A15 via MUX5, PWM on Timer1 and
                        # the Mega-only Timer5, wrong-MCU firmware rejection
+npm run test:leonardo  # ATmega32U4 runtime suite: GPIO in/out, millis, Serial1
+                       # both directions, ADC, PWM on Timer0/1/3, and proof that
+                       # native USB Serial is not faked onto the UART
 npm run test:boards    # board profiles, honest badges, no Uno fallbacks
 npm run test:ui        # quick Playwright smoke test
 npm run test:qa        # full beta QA: create → edit → undo/redo → compiler

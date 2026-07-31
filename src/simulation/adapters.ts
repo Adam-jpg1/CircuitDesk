@@ -36,7 +36,7 @@ export function assertFirmwareMatchesBoard(
 
 const avr8jsAdapter: BoardSimulatorAdapter = {
   engine: 'avr8js',
-  boardIds: ['board.arduino-uno', 'board.arduino-nano', 'board.arduino-mega2560'],
+  boardIds: ['board.arduino-uno', 'board.arduino-nano', 'board.arduino-mega2560', 'board.arduino-leonardo'],
   async createRunner(hex, board) {
     const { AVRRunner } = await import('./avrRunner');
     const profile = AVR_BOARD_PROFILES[board.id];

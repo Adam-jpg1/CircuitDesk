@@ -3,6 +3,7 @@ import { BOARD_CAPABILITIES } from './capabilities';
 import { deriveBoardSupportLevel } from '../project/support';
 import { ARDUINO_UNO } from './unoDefinition';
 import { ARDUINO_MEGA } from './megaDefinition';
+import { ARDUINO_LEONARDO } from './leonardoDefinition';
 import { pinRow, gpio, analog, gnd, p5v, p3v3, vin, reset, type PinSpec } from './pinHelpers';
 
 interface HeaderBoardSpec {
@@ -215,12 +216,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   ARDUINO_UNO,
   ARDUINO_NANO,
   ARDUINO_MEGA,
-  simpleWiringBoard(
-    'board.arduino-leonardo', 'Arduino Leonardo', 'Arduino AVR', 'ATmega32U4', 68.6, 53.3, 5,
-    [gpio('D0', 'RX0', ['digital-in', 'digital-out', 'uart-rx']), gpio('D1', 'TX1', ['digital-in', 'digital-out', 'uart-tx']), gpio('D2', 'D2'), gpio('D3', 'D3'), gpio('D4', 'D4'), gpio('D5', 'D5'), gpio('D6', 'D6'), gpio('D7', 'D7'), gpio('D8', 'D8'), gpio('D9', 'D9'), gpio('D10', 'D10'), gpio('D11', 'D11'), gpio('D12', 'D12'), gpio('D13', 'D13')],
-    [p5v('5V'), p3v3('3V3'), gnd('GND1'), gnd('GND2'), vin('VIN'), analog('A0', 'A0'), analog('A1', 'A1'), analog('A2', 'A2'), analog('A3', 'A3'), analog('A4', 'A4'), analog('A5', 'A5'), reset('RESET')],
-    'wiring', { color: '#0b3d5e' },
-  ),
+  ARDUINO_LEONARDO,
   simpleWiringBoard(
     'board.arduino-due', 'Arduino Due', 'Arduino ARM', 'AT91SAM3X8E', 101.5, 53.3, 3.3,
     [...seqPins('D', 22, 39, 3.3).slice(0, 16), gnd('GNDL'), p3v3('3V3L')],
