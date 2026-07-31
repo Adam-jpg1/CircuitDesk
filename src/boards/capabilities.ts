@@ -40,6 +40,18 @@ const AVR_SIM_APIS = [
  * declared unsupported rather than silently emulated wrong.
  */
 const MEGA_SIM_APIS = AVR_SIM_APIS.filter((api) => api !== 'external interrupts');
+
+/**
+ * The Leonardo's list is written out rather than filtered, because two entries
+ * differ in meaning: "Serial" on this board is native USB CDC (not emulated),
+ * so only Serial1 is claimed, and PWM exists on five of the seven physical
+ * PWM pins because Timer4 is not modeled.
+ */
+const LEONARDO_SIM_APIS = [
+  'pinMode', 'digitalWrite', 'digitalRead', 'analogRead (A0-A5)',
+  'analogWrite (PWM on D3, D5, D9, D10, D11)', 'delay/millis/micros',
+  'Serial1 (hardware UART on D0/D1, both directions)', 'timers',
+];
 const AVR_SIM_PERIPHERALS = ['GPIO ports', 'Timer0/1/2', 'USART0', 'ADC'];
 
 const avrCliCompiler = (fqbn: string): BoardCompilerInfo => ({
@@ -101,8 +113,23 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     architecture: 'avr',
     aliases: ['arduino-leonardo', 'leonardo', 'arduino:avr:leonardo'],
     compiler: avrCliCompiler('arduino:avr:leonardo'),
+    simulation: {
+      engine: 'avr8js',
+      supported: true,
+      supportedApis: LEONARDO_SIM_APIS,
+      supportedPeripherals: [
+        'GPIO ports B/C/D/E/F (D0-D17, A0-A5)',
+        'Timer0, Timer1 and Timer3 (PWM on D3, D5, D9, D10, D11)',
+        'USART1 — Arduino Serial1 on D0/D1',
+        'ADC channels 0-7 (A0-A5)',
+      ],
+    },
     analogPinBase: 18,
-    limitation: 'ATmega32U4 (native USB) compiles for the real board; not simulated.',
+    limitation:
+      'Runs its own ATmega32U4 profile (2.5 KB SRAM, 32U4 vector table, ports B-F) — never the Uno profile. ' +
+      'Native USB is NOT emulated: the "Serial" object (USB CDC), Keyboard and Mouse produce nothing, and a sketch that waits on "while (!Serial)" will never proceed — use Serial1 (D0/D1), which is genuinely emulated. ' +
+      'Timer4 is not modeled, so analogWrite on D6 and D13 produces no PWM (digitalWrite on those pins works normally). ' +
+      'The A6-A11 alternate ADC channels, attachInterrupt (INT0-INT3/INT6), pin-change interrupts, SPI, I2C and EEPROM persistence are not emulated.',
   },
 
   // ---------------- SAM / SAMD / Renesas ----------------
