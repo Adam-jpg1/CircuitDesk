@@ -25,6 +25,7 @@ import {
   timer2Config,
   usart0Config,
   twiConfig,
+  spiConfig,
   type CPU,
   type AVRTimerConfig,
   type ADCConfig,
@@ -36,6 +37,7 @@ import type { AvrPortName } from '../../boards/pinMaps';
 /** avr8js does not export its USART config type by name; mirror the shipped one. */
 type UsartConfig = typeof usart0Config;
 type TwiConfig = typeof twiConfig;
+type SpiConfig = typeof spiConfig;
 
 export interface AvrMcuConfig {
   timers: AVRTimerConfig[];
@@ -44,6 +46,11 @@ export interface AvrMcuConfig {
    * support; only the interrupt vector differs per chip.
    */
   twi: TwiConfig;
+  /**
+   * Hardware SPI. SPCR/SPSR/SPDR sit at 0x4C-0x4E on every AVR we support;
+   * only the SPI_STC vector differs per chip.
+   */
+  spi: SpiConfig;
   /** The hardware UART this board's emulated serial stream comes from. */
   usart: UsartConfig;
   adc: ADCConfig;
@@ -75,6 +82,9 @@ const ATMEGA328P: AvrMcuConfig = {
   usart: usart0Config,
   adc: adcConfig,
   twi: twiConfig,
+  // SPI_STC is vector 18 -> word address (18-1)*2 = 0x22, which is what the
+  // shipped avr8js config already carries.
+  spi: spiConfig,
 };
 
 // --------------------------------------------------------------- ATmega2560
@@ -241,11 +251,19 @@ const mega2560Adc: ADCConfig = {
 /** ATmega2560: TWI is vector 40 -> word address (40-1)*2 = 0x4E. */
 const mega2560Twi: TwiConfig = { ...twiConfig, twiInterrupt: 0x4e };
 
+/**
+ * ATmega2560: SPI_STC is vector 25 -> word address (25-1)*2 = 0x30. The 328P's
+ * 0x22 is TIMER0_OVF territory on this chip, so reusing the shipped config
+ * would vector SPI completions into a timer handler whenever SPIE is set.
+ */
+const mega2560Spi: SpiConfig = { ...spiConfig, spiInterrupt: 0x30 };
+
 const ATMEGA2560: AvrMcuConfig = {
   timers: [mega2560Timer0, mega2560Timer1, mega2560Timer2, mega2560Timer3, mega2560Timer4, mega2560Timer5],
   usart: mega2560Usart0,
   adc: mega2560Adc,
   twi: mega2560Twi,
+  spi: mega2560Spi,
 };
 
 // --------------------------------------------------------------- ATmega32U4
@@ -386,11 +404,15 @@ function installAtmega32u4Extras(cpu: CPU): void {
 /** ATmega32U4: TWI is vector 37 -> word address (37-1)*2 = 0x48. */
 const atmega32u4Twi: TwiConfig = { ...twiConfig, twiInterrupt: 0x48 };
 
+/** ATmega32U4: SPI_STC is vector 25 -> word address (25-1)*2 = 0x30. */
+const atmega32u4Spi: SpiConfig = { ...spiConfig, spiInterrupt: 0x30 };
+
 const ATMEGA32U4: AvrMcuConfig = {
   timers: [atmega32u4Timer0, atmega32u4Timer1, atmega32u4Timer3],
   usart: atmega32u4Usart1,
   adc: atmega32u4Adc,
   twi: atmega32u4Twi,
+  spi: atmega32u4Spi,
   installExtras: installAtmega32u4Extras,
 };
 

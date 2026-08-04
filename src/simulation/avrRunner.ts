@@ -9,11 +9,13 @@
 // timers, USART and ADC. Only boards with a registered profile can run here —
 // there is no implicit Uno fallback for any other board.
 
-import { CPU, avrInstruction, AVRIOPort, AVRTimer, AVRUSART, AVRADC, AVRTWI, PinState } from 'avr8js';
+import { CPU, avrInstruction, AVRIOPort, AVRTimer, AVRUSART, AVRADC, AVRTWI, AVRSPI, PinState } from 'avr8js';
 import { parseIntelHex, intelHexHighestAddress } from './intelHex';
 import { AVR_BOARD_PROFILES, type AvrBoardProfile, type AvrPortName } from '../boards/pinMaps';
 import { MCU_CONFIGS, PORT_CONFIGS } from './avr/mcuConfig';
 import { I2cBus } from './devices/i2cBus';
+import { SpiBus, type SpiController } from './devices/spiBus';
+import type { SpiMode } from './devices/types';
 
 export const F_CPU = 16_000_000;
 
@@ -22,6 +24,11 @@ export const DEFAULT_AVR_PROFILE: AvrBoardProfile = AVR_BOARD_PROFILES['board.ar
 
 /** Hard ceiling on instructions per runToCycles() call — runaway-sketch guard. */
 const MAX_INSTRUCTIONS_PER_CALL = 200_000_000;
+
+/** SPCR control bits used to derive the datasheet SPI mode and bit order. */
+const SPCR_DORD = 0x20;
+const SPCR_CPOL = 0x08;
+const SPCR_CPHA = 0x04;
 
 export class FirmwareRejectedError extends Error {}
 
@@ -63,6 +70,10 @@ export class AVRRunner {
   readonly twi: AVRTWI;
   /** I2C devices on the canvas attach here; survives circuit re-binds. */
   readonly i2cBus = new I2cBus();
+  /** Hardware SPI controller. Device models attach through the bus below. */
+  readonly spi: AVRSPI;
+  /** SPI devices on the canvas attach here; survives circuit re-binds. */
+  readonly spiBus = new SpiBus();
   readonly timers: AVRTimer[];
   readonly profile: AvrBoardProfile;
 
@@ -76,6 +87,9 @@ export class AVRRunner {
 
   private trackers: DutyTracker[] = [];
   private serialRxQueue: number[] = [];
+  private readonly spiCtrl: SpiController;
+  /** Edge subscribers. Additive alongside onPinChange, which stays as-is. */
+  private pinListeners = new Set<(pin: number, high: boolean) => void>();
 
   constructor(hex: string, profile: AvrBoardProfile = DEFAULT_AVR_PROFILE) {
     this.profile = profile;
@@ -132,6 +146,29 @@ export class AVRRunner {
     // answer for a bus with nothing on it (Wire.endTransmission() returns 2).
     this.twi.eventHandler = this.i2cBus.handler(this.twi);
 
+    // Hardware SPI. avr8js hands us the MOSI byte and expects the MISO byte
+    // back; the bus decides who (if anyone) is selected. The reply is delivered
+    // after the real number of SCK cycles for the configured divider, so a
+    // sketch that clocks slowly genuinely takes longer.
+    this.spi = new AVRSPI(this.cpu, mcu.spi, F_CPU);
+    const cpu = this.cpu;
+    const SPCR = mcu.spi.SPCR;
+    this.spiCtrl = {
+      // avr8js's own spiMode getter reports (CPHA<<1)|CPOL, which swaps modes 1
+      // and 2 relative to the datasheet. Read the control bits directly.
+      get mode(): SpiMode {
+        const v = cpu.data[SPCR];
+        return (((v & SPCR_CPOL ? 1 : 0) << 1) | (v & SPCR_CPHA ? 1 : 0)) as SpiMode;
+      },
+      get bitOrder(): 'msbFirst' | 'lsbFirst' {
+        return cpu.data[SPCR] & SPCR_DORD ? 'lsbFirst' : 'msbFirst';
+      },
+    };
+    this.spi.onByte = (mosi: number) => {
+      const miso = this.spiBus.transferByte(mosi, this.spiCtrl, (pin) => this.digitalPinLevel(pin));
+      this.cpu.addClockEvent(() => this.spi.completeTransfer(miso), this.spi.transferCycles);
+    };
+
     for (const name of profile.ports) {
       const cfg = PORT_CONFIGS[name];
       if (!cfg) continue;
@@ -183,8 +220,19 @@ export class AVRRunner {
         tracker.lastChangeCycles = now;
         tracker.toggles++;
         this.onPinChange?.(pin, high);
+        for (const listener of this.pinListeners) listener(pin, high);
       }
     }
+  }
+
+  /**
+   * Subscribes to digital pin edges and returns an unsubscribe function.
+   * Devices that latch on an edge (a 74HC595's RCLK) cannot poll for it — the
+   * pulse is over long before the next UI frame.
+   */
+  addPinListener(listener: (pin: number, high: boolean) => void): () => void {
+    this.pinListeners.add(listener);
+    return () => this.pinListeners.delete(listener);
   }
 
   pinState(pin: number): PinState | undefined {
