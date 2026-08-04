@@ -328,6 +328,21 @@ export function CanvasStage() {
     [instances, definitions],
   );
 
+  /** Which pins already carry a wire, so the marker can show it without hovering. */
+  const connectedPins = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    const add = (instId: string, pinId: string) => {
+      let set = map.get(instId);
+      if (!set) map.set(instId, (set = new Set()));
+      set.add(pinId);
+    };
+    for (const c of project?.connections ?? []) {
+      add(c.sourceComponentId, c.sourcePinId);
+      add(c.targetComponentId, c.targetPinId);
+    }
+    return map;
+  }, [project?.connections]);
+
   const issueHighlights = useMemo(() => {
     if (!highlightedIssueId) return { comps: new Set<string>(), conns: new Set<string>() };
     const issue = validationIssues.find((i) => i.id === highlightedIssueId);
@@ -407,6 +422,7 @@ export function CanvasStage() {
             def={definitions.get(inst.id)}
             selected={selection.componentIds.includes(inst.id)}
             issueHighlight={issueHighlights.comps.has(inst.id)}
+            connectedPins={connectedPins.get(inst.id)}
             zoom={view.zoom}
             onPointerDown={onPartPointerDown}
             onPinClick={onPinClick}
@@ -542,6 +558,41 @@ function WireDraftLayer({ pinPos }: { pinPos: (c: string, p: string) => Pt | nul
   );
 }
 
+// ---------------- pin markers ----------------
+//
+// Pins used to be drawn as a nearly transparent hit circle, so they were only
+// findable by sweeping the cursor over the board. The marker below is purely
+// decorative — it is painted underneath the unchanged interactive circle with
+// pointer events off, so the hit area and the electrical connection point are
+// exactly what they were.
+//
+// Two independent channels keep the states readable:
+//   fill   = what the pin IS   (power / ground / analog / digital / …)
+//   stroke = what the pin is DOING (idle, connected, selected, invalid, …)
+
+/** Pin-type fills, drawn from the existing theme tokens in styles.css. */
+const PIN_FILL: Record<string, string> = {
+  'power-5v': '#f85149', // --error red, the usual supply colour
+  'power-vin': '#f85149',
+  'power-3v3': '#d29922', // --warn amber
+  ground: '#6b7885', // --text-2 neutral
+  analog: '#3fb950', // --ok green
+  digital: '#3d9df2', // --accent blue
+  reset: '#a8b3bf', // --text-1
+  aref: '#a8b3bf',
+};
+const PIN_FILL_DEFAULT = '#8b98a5'; // passive / anode / cathode / nc
+
+/** State ring colours, brightest by default so a pin never hides on artwork. */
+const PIN_RING = {
+  hover: '#8fd0ff',
+  wiring: '#3fb950',
+  invalid: '#f85149',
+  selected: '#3d9df2',
+  connected: '#ffffff',
+  idle: '#e6ebf1', // --text-0
+};
+
 // ---------------- parts ----------------
 
 const PartView = memo(function PartView({
@@ -549,6 +600,7 @@ const PartView = memo(function PartView({
   def,
   selected,
   issueHighlight,
+  connectedPins,
   zoom,
   onPointerDown,
   onPinClick,
@@ -557,6 +609,7 @@ const PartView = memo(function PartView({
   def: PartDefinition | undefined;
   selected: boolean;
   issueHighlight: boolean;
+  connectedPins: Set<string> | undefined;
   zoom: number;
   onPointerDown: (inst: ComponentInstance, e: React.PointerEvent) => void;
   onPinClick: (componentId: string, pin: PinDefinition, e: React.MouseEvent) => void;
@@ -578,6 +631,9 @@ const PartView = memo(function PartView({
   const showPinLabels = zoom > 1.5;
   const isBoard = Boolean(def.isBoard);
   const pinRadius = isBoard ? 3.6 : 3.1;
+  // Zoomed far out, the halo and ring turn into mush on dense headers, so drop
+  // back to a plain colour dot rather than adding clutter.
+  const simplePins = zoom < 0.6;
 
   return (
     <g
@@ -613,14 +669,56 @@ const PartView = memo(function PartView({
       {def.pins.map((pin) => {
         const hovered = hoveredPin?.componentId === inst.id && hoveredPin.pinId === pin.id;
         const wiring = Boolean(wireDraft);
+        const connected = connectedPins?.has(pin.id) ?? false;
+        const ring = hovered
+          ? PIN_RING.hover
+          : wiring
+            ? PIN_RING.wiring
+            : issueHighlight
+              ? PIN_RING.invalid
+              : selected
+                ? PIN_RING.selected
+                : connected
+                  ? PIN_RING.connected
+                  : PIN_RING.idle;
+        // The marker plus its stroke stays inside pinRadius, so it never spills
+        // past the hit circle it sits under.
+        const markerR = (hovered ? pinRadius + 0.7 : pinRadius) - 0.9;
+        const ringW = hovered || connected || selected || issueHighlight ? 1 : 0.7;
         return (
           <g key={pin.id}>
+            {simplePins ? (
+              <circle
+                cx={pin.x}
+                cy={pin.y}
+                r={markerR}
+                fill={PIN_FILL[pin.type] ?? PIN_FILL_DEFAULT}
+                pointerEvents="none"
+              />
+            ) : (
+              <>
+                {/* halo: keeps the marker off traces, silkscreen and labels */}
+                <circle cx={pin.x} cy={pin.y} r={pinRadius} fill="rgba(0,0,0,0.5)" pointerEvents="none" />
+                <circle
+                  cx={pin.x}
+                  cy={pin.y}
+                  r={markerR}
+                  fill={PIN_FILL[pin.type] ?? PIN_FILL_DEFAULT}
+                  stroke={ring}
+                  strokeWidth={ringW}
+                  pointerEvents="none"
+                />
+                {connected && (
+                  <circle cx={pin.x} cy={pin.y} r={Math.max(0.6, pinRadius - 2.4)} fill="#0d1117" pointerEvents="none" />
+                )}
+              </>
+            )}
             <circle
               cx={pin.x}
               cy={pin.y}
               r={hovered ? pinRadius + 1.6 : pinRadius}
-              fill={hovered ? 'rgba(61,157,242,0.85)' : wiring ? 'rgba(63,185,80,0.55)' : 'rgba(255,255,255,0.001)'}
-              stroke={hovered ? '#8fd0ff' : wiring ? '#3fb950' : 'transparent'}
+              fill="rgba(255,255,255,0.001)"
+              stroke="transparent"
               strokeWidth="1"
               style={{ cursor: 'crosshair' }}
               onPointerDown={(e) => e.stopPropagation()}
@@ -628,8 +726,15 @@ const PartView = memo(function PartView({
               onPointerEnter={() => useEditorStore.getState().setHoveredPin({ componentId: inst.id, pinId: pin.id })}
               onPointerLeave={() => useEditorStore.getState().setHoveredPin(null)}
             />
-            {showPinLabels && !isBoard && hovered && (
-              <text x={pin.x} y={pin.y - 6} fontSize="7" fill="#cfe6ff" textAnchor="middle" pointerEvents="none">
+            {showPinLabels && !isBoard && (
+              <text
+                x={pin.x}
+                y={pin.y - 6}
+                fontSize="7"
+                fill={hovered ? '#cfe6ff' : '#9fb0c2'}
+                textAnchor="middle"
+                pointerEvents="none"
+              >
                 {pin.label}
               </text>
             )}
