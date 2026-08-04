@@ -66,11 +66,27 @@ export interface I2cDevice extends SimDevice {
   stop(): void;
 }
 
-/** An SPI target selected by a chip-select pin. Declared, not yet implemented. */
+/** Datasheet SPI mode numbering: (CPOL << 1) | CPHA. */
+export type SpiMode = 0 | 1 | 2 | 3;
+
+/**
+ * An SPI target.
+ *
+ * Selection is decided by the bus from the real chip-select pin level, not by
+ * the device — a part whose CS is never pulled low simply never sees traffic.
+ */
 export interface SpiDevice extends SimDevice {
-  /** Chip-select pin id on the component that activates this device. */
-  readonly csPinId: string;
+  /**
+   * Component pin id that selects this device, or null for parts with no chip
+   * select that shift whatever appears on the clock (a 74HC595 does this).
+   */
+  readonly csPinId: string | null;
+  /** SPI modes the silicon actually accepts; anything else is a wiring bug. */
+  readonly supportedModes: readonly SpiMode[];
   select(active: boolean): void;
-  /** One full-duplex byte: receives MOSI, returns MISO. */
-  transfer(mosi: number): number;
+  /**
+   * One full-duplex byte. Receives the MOSI byte as it appears on the wire and
+   * returns the MISO byte, or null when this part does not drive MISO at all.
+   */
+  transfer(mosi: number): number | null;
 }

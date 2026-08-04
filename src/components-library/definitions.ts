@@ -543,6 +543,72 @@ export const HEADER_CONNECTOR = def(
   { description: '2.54 mm pin header, useful for documenting off-board connections.' },
 );
 
+export const HC595 = def(
+  'comp.hc595', 'Shift Register (74HC595)', 'ICs', 10, 18, 'hc595',
+  [
+    pin('q1', 'Q1', 1.4, 17.6, { caps: ['digital-out'] }),
+    pin('q2', 'Q2', 3.8, 17.6, { caps: ['digital-out'] }),
+    pin('q3', 'Q3', 6.2, 17.6, { caps: ['digital-out'] }),
+    pin('q4', 'Q4', 8.6, 17.6, { caps: ['digital-out'] }),
+    pin('q5', 'Q5', 8.6, 14.0, { caps: ['digital-out'] }),
+    pin('q6', 'Q6', 8.6, 10.4, { caps: ['digital-out'] }),
+    pin('q7', 'Q7', 8.6, 6.8, { caps: ['digital-out'] }),
+    pin('gnd', 'GND', 1.4, 14.0, { type: 'ground', caps: ['ground'] }),
+    pin('q0', 'Q0', 1.4, 10.4, { caps: ['digital-out'] }),
+    pin('ser', 'SER', 1.4, 6.8, { type: 'digital', caps: ['spi-mosi'] }),
+    pin('oe', 'OE', 1.4, 3.2, { type: 'digital', caps: ['digital-in'] }),
+    pin('rclk', 'RCLK', 3.8, 3.2, { type: 'digital', caps: ['digital-in'] }),
+    pin('srclk', 'SRCLK', 6.2, 3.2, { type: 'digital', caps: ['spi-sck'] }),
+    pin('srclr', 'SRCLR', 8.6, 3.2, { type: 'digital', caps: ['digital-in'] }),
+    pin('qh2', "QH'", 8.6, 0.4, { caps: ['digital-out'] }),
+    pin('vcc', 'VCC', 1.4, 0.4, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.hc595',
+    description:
+      'Serial-in / parallel-out shift register driven by real SPI traffic: firmware shifts bits on SRCLK and they appear on Q0-Q7 only when RCLK rises. OE (active low) puts the outputs in high impedance and SRCLR clears the shift register. Outputs drive real net voltages, so an LED on Q0 lights from bits the sketch actually shifted. It has no chip select, so — like the real part — it shifts whatever appears on the clock.',
+  },
+);
+
+export const SD_CARD = def(
+  'comp.sd-card', 'SD Card Module (SPI)', 'Modules', 24, 28, 'sd-card',
+  [
+    pin('gnd', 'GND', 2.0, 27.6, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', 'VCC', 6.0, 27.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('miso', 'MISO', 10.0, 27.6, { type: 'digital', caps: ['spi-miso'] }),
+    pin('mosi', 'MOSI', 14.0, 27.6, { type: 'digital', caps: ['spi-mosi'] }),
+    pin('sck', 'SCK', 18.0, 27.6, { type: 'digital', caps: ['spi-sck'] }),
+    pin('cs', 'CS', 22.0, 27.6, { type: 'digital', caps: ['spi-ss'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.sd-card',
+    description:
+      'A 4 MiB standard-capacity card in SPI mode, preformatted FAT16. The real command layer is simulated \u2014 CMD0/CMD8/CMD58/ACMD41 initialisation (including the "still initialising" polls), CMD17/CMD18 block reads with the 0xFE data token, and CMD24 block writes with the busy period. FAT itself is left to the host library, as on real hardware; unimplemented commands answer with the illegal-command bit rather than pretending.',
+  },
+);
+
+export const SPI_FLASH = def(
+  'comp.spi-flash', 'SPI Flash (W25Q80, 1 MiB)', 'Memory', 12, 10, 'spi-flash',
+  [
+    pin('cs', 'CS', 1.4, 9.6, { type: 'digital', caps: ['spi-ss'] }),
+    pin('miso', 'DO', 1.4, 6.4, { type: 'digital', caps: ['spi-miso'] }),
+    pin('wp', 'WP', 1.4, 3.2, { type: 'digital', caps: ['digital-in'] }),
+    pin('gnd', 'GND', 1.4, 0.4, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', 'VCC', 10.6, 9.6, { type: 'power-3v3', caps: ['power'], voltage: 3.3 }),
+    pin('hold', 'HOLD', 10.6, 6.4, { type: 'digital', caps: ['digital-in'] }),
+    pin('sck', 'CLK', 10.6, 3.2, { type: 'digital', caps: ['spi-sck'] }),
+    pin('mosi', 'DI', 10.6, 0.4, { type: 'digital', caps: ['spi-mosi'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.spi-flash',
+    description:
+      'Winbond-class 8 Mbit SPI NOR flash with the real instruction set: JEDEC ID 0xEF4014, status register, write enable, read / fast read, page program, sector and block erase. Programming is refused without a preceding write enable and can only clear bits until an erase restores them, and the BUSY bit stays set for the datasheet program/erase time. WP and HOLD are wired for realism but their protection behaviour is not modelled.',
+  },
+);
+
 export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   BREADBOARD_HALF, BREADBOARD_MINI,
   LED, RGB_LED, RESISTOR, CAPACITOR, DIODE, TRANSISTOR_NPN, MOSFET,
@@ -553,6 +619,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
   GPS, BLUETOOTH, WIFI_ESP01,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
+  HC595, SD_CARD, SPI_FLASH,
   GENERIC_IC, HEADER_CONNECTOR,
 ];
 

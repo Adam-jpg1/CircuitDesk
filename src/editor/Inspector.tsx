@@ -289,6 +289,25 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
           State: <b>{visuals?.buzzerOn ? 'sounding' : 'silent'}</b>
         </div>
       )}
+      {(adapter === 'sim.hc595' || adapter === 'sim.sd-card' || adapter === 'sim.spi-flash') && (
+        <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
+          {visuals?.readout?.length ? (
+            <>
+              {visuals.readout.map((line) => (
+                <div key={line} style={{ fontFamily: 'var(--font-mono)' }}>{line}</div>
+              ))}
+              <div style={{ color: 'var(--text-2)', marginTop: 4 }}>
+                Driven by real SPI traffic from the running firmware.
+              </div>
+            </>
+          ) : (
+            <span style={{ color: 'var(--text-2)' }}>
+              Not on the SPI bus — check SCK, MOSI{adapter === 'sim.hc595' ? '' : ', MISO, CS'}, VCC and GND, then start
+              the simulation.
+            </span>
+          )}
+        </div>
+      )}
       {(adapter === 'sim.bmp280' || adapter === 'sim.mpu6050') && (
         <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
           {visuals?.readout?.length ? (

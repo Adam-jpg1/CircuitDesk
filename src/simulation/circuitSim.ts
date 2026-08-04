@@ -11,7 +11,11 @@ import { arduinoPinNumber, avrProfileFor } from '../boards/pinMaps';
 import { Ssd1306Device, SSD1306_ADDRESSES } from './devices/ssd1306';
 import { Bmp280Device, BMP280_ADDRESSES } from './devices/bmp280';
 import { Mpu6050Device, MPU6050_ADDRESSES } from './devices/mpu6050';
-import type { I2cDevice } from './devices/types';
+import type { I2cDevice, SpiDevice } from './devices/types';
+import { Sn74hc595Device, HC595_OUTPUT_PINS } from './devices/sn74hc595';
+import { SdCardDevice, type SdCardSnapshotData } from './devices/sdCard';
+import { SpiFlashDevice, type SpiFlashSnapshotData } from './devices/spiFlash';
+import { spiPinsFor } from './avr/spiPins';
 
 export interface NetLevel {
   volts: number | null;
@@ -94,6 +98,61 @@ const I2C_DEVICE_MODELS: Record<string, I2cDeviceModel> = {
   },
 };
 
+/**
+ * Components with a genuine SPI device model.
+ *
+ * `busPins` names the component pins that must reach the board's own SPI
+ * lines; `miso: null` marks a part that never drives MISO (a 74HC595), so its
+ * absence is not treated as a wiring fault. `cs` names the chip-select pin, or
+ * null for parts that have none.
+ */
+interface SpiDeviceModel {
+  busPins: { sck: string; mosi: string; miso: string | null; cs: string | null };
+  create: (ctx: SpiCreateContext) => SpiDevice;
+}
+
+interface SpiCreateContext {
+  instanceId: string;
+  csPinId: string | null;
+  logicVolts: number;
+  /** Emulated microseconds since reset — device busy timers run off this. */
+  nowUs: () => number;
+  /** Per-instance saved state, so a card keeps its contents across reloads. */
+  saved: Record<string, unknown>;
+}
+
+const SPI_DEVICE_MODELS: Record<string, SpiDeviceModel> = {
+  'comp.hc595': {
+    busPins: { sck: 'srclk', mosi: 'ser', miso: null, cs: null },
+    create: (ctx) => new Sn74hc595Device(ctx.instanceId, ctx.logicVolts),
+  },
+  'comp.sd-card': {
+    busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'cs' },
+    create: (ctx) => {
+      const device = new SdCardDevice(ctx.instanceId, ctx.csPinId ?? 'cs');
+      device.loadState(ctx.saved.sdCard as SdCardSnapshotData | undefined);
+      return device;
+    },
+  },
+  'comp.spi-flash': {
+    busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'cs' },
+    create: (ctx) => {
+      const device = new SpiFlashDevice(ctx.instanceId, ctx.csPinId ?? 'cs', ctx.nowUs);
+      device.loadState(ctx.saved.spiFlash as SpiFlashSnapshotData | undefined);
+      return device;
+    },
+  },
+};
+
+/** Control pins a 74HC595 needs beyond the shift clock and data line. */
+interface Hc595Wiring {
+  device: Sn74hc595Device;
+  /** Board pin the RCLK (latch) line reaches, or null when unwired. */
+  latchPin: number | null;
+  oeNet: string | undefined;
+  clearNet: string | undefined;
+}
+
 interface ConductiveEdge {
   a: string;
   b: string;
@@ -143,6 +202,141 @@ export class CircuitBinding {
     this.buildEdges();
     if (runner) this.setupUltrasonic(runner);
     if (runner) this.setupI2cDevices(runner);
+    if (runner) this.setupSpiDevices(runner);
+  }
+
+  private hc595 = new Map<string, Hc595Wiring>();
+  private spiDevices: SpiDevice[] = [];
+  private unsubscribeLatches: (() => void)[] = [];
+  private persistedWrites = new Map<string, number>();
+
+  /**
+   * Copies a storage device's contents into the project only when it actually
+   * changed. Re-encoding a card image every frame would be wasted work.
+   */
+  private persistDevice(inst: ComponentInstance, writeCounter: number, save: () => void): void {
+    if (this.persistedWrites.get(inst.id) === writeCounter) return;
+    this.persistedWrites.set(inst.id, writeCounter);
+    if (writeCounter > 0) save();
+  }
+
+  /** Drops edge subscriptions held for this binding (called on re-bind). */
+  releaseListeners(): void {
+    this.unsubscribeLatches.forEach((off) => off());
+    this.unsubscribeLatches = [];
+  }
+
+  /**
+   * Attaches SPI device models for parts genuinely wired to the board's SPI
+   * bus. A device whose SCK, MOSI, MISO, power or ground is missing is not
+   * attached at all, so firmware talking to it reads back an idle bus rather
+   * than a fabricated reply.
+   */
+  private setupSpiDevices(runner: AVRRunner): void {
+    const board = this.boardDef;
+    if (!board) {
+      runner.spiBus.sync([]);
+      return;
+    }
+    const profile = avrProfileFor(board);
+    const busPins = profile ? spiPinsFor(profile) : { sck: undefined, mosi: undefined, miso: undefined };
+    const logicVolts = Number(board.metadata.logicVoltage ?? 5);
+
+    const netHasPin = (netId: string | undefined, pin: number | undefined): boolean =>
+      netId !== undefined && pin !== undefined && (this.netBoardPins.get(netId) ?? []).includes(pin);
+
+    /** First board pin on a net — used to resolve chip-select and latch lines. */
+    const boardPinOn = (netId: string | undefined): number | null =>
+      netId === undefined ? null : (this.netBoardPins.get(netId) ?? [])[0] ?? null;
+
+    const netFedBy = (netId: string | undefined, instanceId: string, types: string[]): boolean => {
+      if (netId === undefined) return false;
+      const net = this.graph.nets.find((n) => n.id === netId);
+      if (!net) return false;
+      for (const node of net.nodes) {
+        const [otherId, pinId] = splitNode(node);
+        if (otherId === instanceId) continue;
+        const otherDef = this.graph.definitions.get(otherId);
+        const pin = otherDef?.pins.find((p) => p.id === pinId);
+        if (pin && types.includes(pin.type)) return true;
+      }
+      return false;
+    };
+
+    this.releaseListeners();
+    this.hc595.clear();
+
+    const wanted: { instanceId: string; csPin: number | null; create: () => SpiDevice }[] = [];
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      const model = def ? SPI_DEVICE_MODELS[def.id] : undefined;
+      if (!model) continue;
+
+      const powered = netFedBy(this.netOfInstancePin(inst.id, 'vcc'), inst.id, POWER_PIN_TYPES);
+      const grounded = netFedBy(this.netOfInstancePin(inst.id, 'gnd'), inst.id, ['ground']);
+      const onSck = netHasPin(this.netOfInstancePin(inst.id, model.busPins.sck), busPins.sck);
+      const onMosi = netHasPin(this.netOfInstancePin(inst.id, model.busPins.mosi), busPins.mosi);
+      const onMiso =
+        model.busPins.miso === null ||
+        netHasPin(this.netOfInstancePin(inst.id, model.busPins.miso), busPins.miso);
+      if (!powered || !grounded || !onSck || !onMosi || !onMiso) continue;
+
+      // A part with a chip select must have it on a real board pin; without one
+      // nothing can ever assert it, so the device stays off the bus.
+      let csPin: number | null = null;
+      if (model.busPins.cs !== null) {
+        csPin = boardPinOn(this.netOfInstancePin(inst.id, model.busPins.cs));
+        if (csPin === null) continue;
+      }
+
+      const csPinId = model.busPins.cs;
+      wanted.push({
+        instanceId: inst.id,
+        csPin,
+        create: () =>
+          model.create({
+            instanceId: inst.id,
+            csPinId,
+            logicVolts,
+            nowUs: () => runner.timeMs * 1000,
+            saved: inst.simulationState,
+          }),
+      });
+    }
+
+    this.spiDevices = runner.spiBus.sync(wanted);
+
+    // Chip select changes between transactions, when no byte is being clocked,
+    // so it has to be watched as a pin edge. Polling once per frame would let a
+    // device miss its own deselect and treat the next command as a continuation.
+    const csPins = new Set(runner.spiBus.chipSelectPins);
+    if (csPins.size > 0) {
+      this.unsubscribeLatches.push(
+        runner.addPinListener((pin) => {
+          if (csPins.has(pin)) runner.spiBus.refreshSelection((p) => runner.digitalPinLevel(p));
+        }),
+      );
+    }
+
+    // Shift registers latch on an RCLK edge, which is far too short to catch by
+    // polling once per frame — subscribe to real pin edges instead.
+    for (const device of this.spiDevices) {
+      if (!(device instanceof Sn74hc595Device)) continue;
+      const instId = device.instanceId;
+      const latchPin = boardPinOn(this.netOfInstancePin(instId, 'rclk'));
+      this.hc595.set(instId, {
+        device,
+        latchPin,
+        oeNet: this.netOfInstancePin(instId, 'oe'),
+        clearNet: this.netOfInstancePin(instId, 'srclr'),
+      });
+      if (latchPin === null) continue;
+      this.unsubscribeLatches.push(
+        runner.addPinListener((pin, high) => {
+          if (pin === latchPin && high) device.latch();
+        }),
+      );
+    }
   }
 
   private indexNets(): void {
@@ -396,21 +590,49 @@ export class CircuitBinding {
     }
 
     // Propagate through conductive elements to a fixpoint (bounded iterations).
-    for (let iter = 0; iter < 12; iter++) {
-      let changed = false;
-      for (const edge of this.edges) {
-        if (!edge.enabled(controls)) continue;
-        const la = levels.get(edge.a);
-        const lb = levels.get(edge.b);
-        if (la?.volts != null && (lb?.volts == null)) {
-          levels.set(edge.b, { volts: la.volts, sourcePin: la.sourcePin, seriesOhms: la.seriesOhms + edge.ohms, conflict: false });
-          changed = true;
-        } else if (lb?.volts != null && (la?.volts == null)) {
-          levels.set(edge.a, { volts: lb.volts, sourcePin: lb.sourcePin, seriesOhms: lb.seriesOhms + edge.ohms, conflict: false });
-          changed = true;
+    const propagate = () => {
+      for (let iter = 0; iter < 12; iter++) {
+        let changed = false;
+        for (const edge of this.edges) {
+          if (!edge.enabled(controls)) continue;
+          const la = levels.get(edge.a);
+          const lb = levels.get(edge.b);
+          if (la?.volts != null && (lb?.volts == null)) {
+            levels.set(edge.b, { volts: la.volts, sourcePin: la.sourcePin, seriesOhms: la.seriesOhms + edge.ohms, conflict: false });
+            changed = true;
+          } else if (lb?.volts != null && (la?.volts == null)) {
+            levels.set(edge.a, { volts: lb.volts, sourcePin: lb.sourcePin, seriesOhms: lb.seriesOhms + edge.ohms, conflict: false });
+            changed = true;
+          }
+        }
+        if (!changed) break;
+      }
+    };
+    propagate();
+
+    // Devices that drive their own output pins (a 74HC595's Q0-Q7) act as
+    // sources on top of the MCU's pins, so their nets are seeded and the graph
+    // is settled a second time. Control inputs are sampled from the first pass,
+    // which is where a grounded OE or a firmware-driven line has landed.
+    if (this.hc595.size > 0) {
+      for (const [, wiring] of this.hc595) {
+        const oe = levels.get(wiring.oeNet ?? '')?.volts;
+        const clear = levels.get(wiring.clearNet ?? '')?.volts;
+        // OE is active low. A floating OE is electrically undefined on real HC
+        // logic, so the outputs are treated as disabled rather than guessed.
+        wiring.device.setOutputEnable(oe != null && oe <= 0.8);
+        if (clear != null && clear <= 0.8) wiring.device.clearShiftRegister();
+      }
+      for (const device of this.spiDevices) {
+        if (!(device instanceof Sn74hc595Device)) continue;
+        for (const pinId of HC595_OUTPUT_PINS) {
+          const volts = device.analogOut(pinId);
+          if (volts === null) continue; // high impedance drives nothing
+          const netId = this.netOfInstancePin(device.instanceId, pinId);
+          if (netId) setLevel(netId, volts, null, 0);
         }
       }
-      if (!changed) break;
+      propagate();
     }
 
     const levelOf = (netId: string | undefined): NetLevel | undefined =>
@@ -596,6 +818,49 @@ export class CircuitBinding {
                     `${gyroDps.x.toFixed(0)} ${gyroDps.y.toFixed(0)} ${gyroDps.z.toFixed(0)} d/s`,
                   ]
                 : ['sleep'],
+            });
+          } else {
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.hc595': {
+          const device = runner?.spiBus.deviceFor(inst.id);
+          if (device instanceof Sn74hc595Device) {
+            const bits = device.outputs;
+            visuals.set(inst.id, {
+              readout:
+                bits === null
+                  ? ['outputs Hi-Z', 'check OE']
+                  : [`Q7..Q0 ${bits.toString(2).padStart(8, '0')}`, `${device.latchCount} latch`],
+            });
+          } else {
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.sd-card': {
+          const device = runner?.spiBus.deviceFor(inst.id);
+          if (device instanceof SdCardDevice) {
+            this.persistDevice(inst, device.writeCounter, () => {
+              inst.simulationState.sdCard = device.saveState();
+            });
+            visuals.set(inst.id, {
+              readout: [device.isInitialised ? 'card ready' : 'not initialised', `${device.storedBlockCount} blk`],
+            });
+          } else {
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.spi-flash': {
+          const device = runner?.spiBus.deviceFor(inst.id);
+          if (device instanceof SpiFlashDevice) {
+            this.persistDevice(inst, device.writeCounter, () => {
+              inst.simulationState.spiFlash = device.saveState();
+            });
+            visuals.set(inst.id, {
+              readout: [device.busy ? 'busy' : 'ready', device.writeEnableLatch ? 'WEL set' : 'WEL clear'],
             });
           } else {
             visuals.set(inst.id, {});
