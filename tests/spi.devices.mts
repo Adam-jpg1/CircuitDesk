@@ -247,6 +247,43 @@ function run(runner: AVRRunner, binding: CircuitBinding, ms: number) {
   check(restored.readByteAt(0xfe) === 0xa0, 'flash contents survive a save/load round trip');
 }
 
+// ---------- 5b. Chip erase obeys the write-enable latch ----------
+{
+  let t = 0;
+  const chip = new SpiFlashDevice('chip', 'cs', () => t);
+  const send = (bytes: number[]) => {
+    chip.select(true);
+    const out = bytes.map((b) => chip.transfer(b));
+    chip.select(false);
+    return out;
+  };
+
+  // Put something in the array so an erase has visible work to do.
+  send([0x06]);
+  send([0x02, 0, 0, 0, 0x5a]);
+  t += 1000;
+  check(chip.readByteAt(0) === 0x5a, 'a byte is programmed before the chip-erase checks');
+
+  const refusedBefore = chip.refusedWriteCount;
+  send([0xc7]); // chip erase, no write enable
+  check(chip.readByteAt(0) === 0x5a, 'chip erase 0xC7 without write enable leaves the contents alone');
+  check(chip.refusedWriteCount === refusedBefore + 1, `the refused chip erase is recorded (${chip.refusedWriteCount})`);
+  check(!chip.busy, 'a refused chip erase never starts the busy timer');
+
+  // The alternate opcode behaves the same way.
+  send([0x60]);
+  check(chip.readByteAt(0) === 0x5a, 'chip erase 0x60 without write enable also leaves the contents alone');
+
+  send([0x06]);
+  check(chip.writeEnableLatch, 'write enable sets WEL before the chip erase');
+  send([0x60]);
+  check(chip.busy, 'chip erase with write enable starts and sets BUSY');
+  check(!chip.writeEnableLatch, 'WEL clears once the chip erase starts');
+  t += 3_100_000; // past the 3 s typical chip erase time
+  check(!chip.busy, 'BUSY clears after the datasheet chip-erase time');
+  check(chip.readByteAt(0) === 0xff, 'chip erase with write enable restores the erased state');
+}
+
 // ---------- 6. SD card unit behaviour ----------
 {
   const card = new SdCardDevice('sd', 'cs');

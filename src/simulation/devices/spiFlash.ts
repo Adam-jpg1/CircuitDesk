@@ -4,8 +4,9 @@
 // the datasheet, including the two behaviours that catch people out on real
 // hardware and are therefore modelled rather than smoothed over:
 //
-//   • A program or erase is refused unless Write Enable (0x06) was issued
-//     first, and WEL clears again the moment the operation starts.
+//   • A program or erase — sector, block or whole chip — is refused unless
+//     Write Enable (0x06) was issued first, and WEL clears again the moment
+//     the operation starts.
 //   • Programming can only turn 1 bits into 0 bits. Writing 0xFF over a byte
 //     that already holds 0x00 leaves 0x00 — you must erase (which restores
 //     0xFF) before the byte can hold anything else.
@@ -272,7 +273,11 @@ export class SpiFlashDevice implements SpiDevice {
         return 0xff;
       case CMD_CHIP_ERASE_C7:
       case CMD_CHIP_ERASE_60:
-        this.beginErase(0, FLASH_CAPACITY, T_CHIP_ERASE_US, 'chip erase');
+        // Chip erase needs the write-enable latch just like a page program or
+        // a sector erase; without it the part discards the instruction.
+        if (this.requireWriteEnable('chip erase')) {
+          this.beginErase(0, FLASH_CAPACITY, T_CHIP_ERASE_US, 'chip erase');
+        }
         this.phase = 'idle';
         return 0xff;
       case CMD_POWER_DOWN:
