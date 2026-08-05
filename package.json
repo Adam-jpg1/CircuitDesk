@@ -21,7 +21,8 @@
     "test:mega": "tsx tests/mega.runtime.mts",
     "test:leonardo": "tsx tests/leonardo.runtime.mts",
     "build:server": "tsc -p tsconfig.server.build.json",
-    "test:components": "tsx tests/components.i2c.mts"
+    "test:components": "tsx tests/components.i2c.mts",
+    "test:rp2040": "tsx tests/rp2040.spike.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
@@ -44,6 +45,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.0",
     "playwright": "^1.61.1",
+    "rp2040js": "^1.3.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"
