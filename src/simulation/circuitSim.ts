@@ -16,6 +16,11 @@ import { Sn74hc595Device, HC595_OUTPUT_PINS } from './devices/sn74hc595';
 import { SdCardDevice, type SdCardSnapshotData } from './devices/sdCard';
 import { SpiFlashDevice, type SpiFlashSnapshotData } from './devices/spiFlash';
 import { spiPinsFor } from './avr/spiPins';
+import { Lcd1602Device, LCD1602_ADDRESSES } from './devices/lcd1602';
+import { Eeprom24cDevice, EEPROM_ADDRESSES, type Eeprom24cSnapshotData } from './devices/eeprom24c';
+import { Ds3231Device, DS3231_ADDRESS } from './devices/ds3231';
+import { Mcp4725Device, MCP4725_ADDRESSES } from './devices/mcp4725';
+import { Sn74hc165Device, HC165_INPUT_PINS } from './devices/sn74hc165';
 
 export interface NetLevel {
   volts: number | null;
@@ -72,9 +77,22 @@ const POWER_PIN_TYPES = ['power-5v', 'power-3v3', 'power-vin'];
 interface I2cDeviceModel {
   /** 7-bit address used when the instance has no explicit override. */
   defaultAddress: number;
-  create: (instanceId: string, address: number) => I2cDevice;
+  create: (ctx: DeviceCreateContext) => I2cDevice;
   /** Pin that selects the alternate address when strapped to a supply (AD0, …). */
   addressSelect?: { pinId: string; alternateAddress: number };
+}
+
+/** Everything a device model may need at construction time. */
+interface DeviceCreateContext {
+  instanceId: string;
+  /** Resolved 7-bit I2C address (unused by SPI parts). */
+  address: number;
+  /** Supply the part is running from, used for logic and reference levels. */
+  logicVolts: number;
+  /** Emulated microseconds since reset — device timers run off this. */
+  nowUs: () => number;
+  /** Per-instance saved state, so storage parts keep contents across reloads. */
+  saved: Record<string, unknown>;
 }
 
 /**
@@ -85,16 +103,36 @@ interface I2cDeviceModel {
 const I2C_DEVICE_MODELS: Record<string, I2cDeviceModel> = {
   'comp.oled': {
     defaultAddress: SSD1306_ADDRESSES[0],
-    create: (id, address) => new Ssd1306Device(id, address),
+    create: (ctx) => new Ssd1306Device(ctx.instanceId, ctx.address),
   },
   'comp.bmp280': {
     defaultAddress: BMP280_ADDRESSES[0],
-    create: (id, address) => new Bmp280Device(id, address),
+    create: (ctx) => new Bmp280Device(ctx.instanceId, ctx.address),
   },
   'comp.mpu6050': {
     defaultAddress: MPU6050_ADDRESSES[0],
-    create: (id, address) => new Mpu6050Device(id, address),
+    create: (ctx) => new Mpu6050Device(ctx.instanceId, ctx.address),
     addressSelect: { pinId: 'ad0', alternateAddress: MPU6050_ADDRESSES[1] },
+  },
+  'comp.lcd1602': {
+    defaultAddress: LCD1602_ADDRESSES[0],
+    create: (ctx) => new Lcd1602Device(ctx.instanceId, ctx.address),
+  },
+  'comp.eeprom-24c': {
+    defaultAddress: EEPROM_ADDRESSES[0],
+    create: (ctx) => {
+      const device = new Eeprom24cDevice(ctx.instanceId, ctx.address, ctx.nowUs);
+      device.loadState(ctx.saved.eeprom as Eeprom24cSnapshotData | undefined);
+      return device;
+    },
+  },
+  'comp.ds3231': {
+    defaultAddress: DS3231_ADDRESS,
+    create: (ctx) => new Ds3231Device(ctx.instanceId, ctx.address, ctx.nowUs),
+  },
+  'comp.mcp4725': {
+    defaultAddress: MCP4725_ADDRESSES[0],
+    create: (ctx) => new Mcp4725Device(ctx.instanceId, ctx.address, ctx.logicVolts),
   },
 };
 
@@ -111,14 +149,8 @@ interface SpiDeviceModel {
   create: (ctx: SpiCreateContext) => SpiDevice;
 }
 
-interface SpiCreateContext {
-  instanceId: string;
+interface SpiCreateContext extends DeviceCreateContext {
   csPinId: string | null;
-  logicVolts: number;
-  /** Emulated microseconds since reset — device busy timers run off this. */
-  nowUs: () => number;
-  /** Per-instance saved state, so a card keeps its contents across reloads. */
-  saved: Record<string, unknown>;
 }
 
 const SPI_DEVICE_MODELS: Record<string, SpiDeviceModel> = {
@@ -133,6 +165,11 @@ const SPI_DEVICE_MODELS: Record<string, SpiDeviceModel> = {
       device.loadState(ctx.saved.sdCard as SdCardSnapshotData | undefined);
       return device;
     },
+  },
+  'comp.hc165': {
+    // Parallel-in / serial-out: it drives MISO and reads nothing from MOSI.
+    busPins: { sck: 'cp', mosi: null as unknown as string, miso: 'qh', cs: null },
+    create: (ctx) => new Sn74hc165Device(ctx.instanceId),
   },
   'comp.spi-flash': {
     busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'cs' },
@@ -151,6 +188,14 @@ interface Hc595Wiring {
   latchPin: number | null;
   oeNet: string | undefined;
   clearNet: string | undefined;
+}
+
+/** Control and parallel-input wiring for a 74HC165. */
+interface Hc165Wiring {
+  device: Sn74hc165Device;
+  loadNet: string | undefined;
+  enableNet: string | undefined;
+  inputNets: (string | undefined)[];
 }
 
 interface ConductiveEdge {
@@ -206,7 +251,9 @@ export class CircuitBinding {
   }
 
   private hc595 = new Map<string, Hc595Wiring>();
+  private hc165 = new Map<string, Hc165Wiring>();
   private spiDevices: SpiDevice[] = [];
+  private i2cDevices: I2cDevice[] = [];
   private unsubscribeLatches: (() => void)[] = [];
   private persistedWrites = new Map<string, number>();
 
@@ -275,7 +322,9 @@ export class CircuitBinding {
       const powered = netFedBy(this.netOfInstancePin(inst.id, 'vcc'), inst.id, POWER_PIN_TYPES);
       const grounded = netFedBy(this.netOfInstancePin(inst.id, 'gnd'), inst.id, ['ground']);
       const onSck = netHasPin(this.netOfInstancePin(inst.id, model.busPins.sck), busPins.sck);
-      const onMosi = netHasPin(this.netOfInstancePin(inst.id, model.busPins.mosi), busPins.mosi);
+      const onMosi =
+        model.busPins.mosi === null ||
+        netHasPin(this.netOfInstancePin(inst.id, model.busPins.mosi), busPins.mosi);
       const onMiso =
         model.busPins.miso === null ||
         netHasPin(this.netOfInstancePin(inst.id, model.busPins.miso), busPins.miso);
@@ -296,6 +345,7 @@ export class CircuitBinding {
         create: () =>
           model.create({
             instanceId: inst.id,
+            address: 0, // SPI parts are selected by CS, not by address
             csPinId,
             logicVolts,
             nowUs: () => runner.timeMs * 1000,
@@ -334,6 +384,37 @@ export class CircuitBinding {
       this.unsubscribeLatches.push(
         runner.addPinListener((pin, high) => {
           if (pin === latchPin && high) device.latch();
+        }),
+      );
+    }
+
+    this.hc165.clear();
+    for (const device of this.spiDevices) {
+      if (!(device instanceof Sn74hc165Device)) continue;
+      const instId = device.instanceId;
+      const inputNets = HC165_INPUT_PINS.map((pinId) => this.netOfInstancePin(instId, pinId));
+      this.hc165.set(instId, {
+        device,
+        loadNet: this.netOfInstancePin(instId, 'pl'),
+        enableNet: this.netOfInstancePin(instId, 'ce'),
+        inputNets,
+      });
+
+      // Inputs tied straight to a rail are known before the solver ever runs,
+      // and firmware can pulse PL before the first frame — so seed them now.
+      let seeded = 0;
+      inputNets.forEach((netId, bit) => {
+        if (netId && this.supplyNets.has(netId) && !this.groundNets.has(netId)) seeded |= 1 << bit;
+      });
+      device.setInputs(seeded);
+
+      // PL is asynchronous and the pulse is microseconds long: it has to be
+      // watched as an edge, exactly like the 74HC595's latch.
+      const loadPin = boardPinOn(this.netOfInstancePin(instId, 'pl'));
+      if (loadPin === null) continue;
+      this.unsubscribeLatches.push(
+        runner.addPinListener((pin, high) => {
+          if (pin === loadPin) device.setParallelLoad(!high);
         }),
       );
     }
@@ -548,10 +629,17 @@ export class CircuitBinding {
       }
       wanted.push({
         instanceId: inst.id,
-        create: () => model.create(inst.id, address),
+        create: () =>
+          model.create({
+            instanceId: inst.id,
+            address,
+            logicVolts: Number(board.metadata.logicVoltage ?? 5),
+            nowUs: () => runner.timeMs * 1000,
+            saved: inst.simulationState,
+          }),
       });
     }
-    runner.i2cBus.sync(wanted);
+    this.i2cDevices = runner.i2cBus.sync(wanted);
   }
 
   private controlsRef: SimControls | null = null;
@@ -614,25 +702,70 @@ export class CircuitBinding {
     // sources on top of the MCU's pins, so their nets are seeded and the graph
     // is settled a second time. Control inputs are sampled from the first pass,
     // which is where a grounded OE or a firmware-driven line has landed.
-    if (this.hc595.size > 0) {
-      for (const [, wiring] of this.hc595) {
-        const oe = levels.get(wiring.oeNet ?? '')?.volts;
-        const clear = levels.get(wiring.clearNet ?? '')?.volts;
-        // OE is active low. A floating OE is electrically undefined on real HC
-        // logic, so the outputs are treated as disabled rather than guessed.
-        wiring.device.setOutputEnable(oe != null && oe <= 0.8);
-        if (clear != null && clear <= 0.8) wiring.device.clearShiftRegister();
-      }
-      for (const device of this.spiDevices) {
-        if (!(device instanceof Sn74hc595Device)) continue;
-        for (const pinId of HC595_OUTPUT_PINS) {
-          const volts = device.analogOut(pinId);
-          if (volts === null) continue; // high impedance drives nothing
-          const netId = this.netOfInstancePin(device.instanceId, pinId);
-          if (netId) setLevel(netId, volts, null, 0);
+    // Control inputs are sampled from the first pass, which is where a grounded
+    // OE or a firmware-driven line has landed.
+    for (const [, wiring] of this.hc595) {
+      const oe = levels.get(wiring.oeNet ?? '')?.volts;
+      const clear = levels.get(wiring.clearNet ?? '')?.volts;
+      // OE is active low. A floating OE is electrically undefined on real HC
+      // logic, so the outputs are treated as disabled rather than guessed.
+      wiring.device.setOutputEnable(oe != null && oe <= 0.8);
+      if (clear != null && clear <= 0.8) wiring.device.clearShiftRegister();
+    }
+
+    // A 74HC165 reads the world: its parallel inputs come from real net levels,
+    // and PL/CE gate whether it captures and shifts at all.
+    for (const [, wiring] of this.hc165) {
+      let bits = 0;
+      wiring.inputNets.forEach((netId, bit) => {
+        const volts = levels.get(netId ?? '')?.volts;
+        if (volts != null && volts >= 2.0) bits |= 1 << bit;
+      });
+      wiring.device.setInputs(bits);
+      // PL is driven by the edge subscription above, not sampled here: a load
+      // pulse is over long before the next frame.
+      const ce = levels.get(wiring.enableNet ?? '')?.volts;
+      // CE is active low, but an unwired CE on these breakouts is normally
+      // grounded; a floating one is reported as inhibited rather than assumed.
+      wiring.device.setClockEnable(ce == null || ce <= 0.8);
+    }
+
+    // Devices that drive their own output pins (a 74HC595's Q0-Q7, an MCP4725's
+    // VOUT) act as sources on top of the MCU's pins, so their nets are seeded
+    // and the graph is settled a second time.
+    const drivenNets = new Set<string>();
+    const driveOutputs = (device: { instanceId: string; analogOut(pinId: string): number | null }, pinIds: readonly string[]) => {
+      for (const pinId of pinIds) {
+        const volts = device.analogOut(pinId);
+        if (volts === null) continue; // high impedance drives nothing
+        const netId = this.netOfInstancePin(device.instanceId, pinId);
+        if (netId) {
+          setLevel(netId, volts, null, 0);
+          drivenNets.add(netId);
         }
       }
+    };
+    for (const device of this.spiDevices) {
+      if (device instanceof Sn74hc595Device) driveOutputs(device, HC595_OUTPUT_PINS);
+    }
+    for (const device of this.i2cDevices) {
+      if (device instanceof Mcp4725Device) driveOutputs(device, ['vout']);
+    }
+    if (drivenNets.size > 0) {
       propagate();
+      // A device output landing on an analog-capable pin has to reach the
+      // emulator's ADC, or firmware would read 0 from a pin that is genuinely
+      // being driven. Only device-driven nets are fed here, so the sensor
+      // adapters below keep full control of their own channels.
+      if (runner) {
+        for (const netId of drivenNets) {
+          const volts = levels.get(netId)?.volts;
+          if (volts == null) continue;
+          for (const channel of this.netAdcChannels.get(netId) ?? []) {
+            runner.setAnalogVolts(channel, volts);
+          }
+        }
+      }
     }
 
     const levelOf = (netId: string | undefined): NetLevel | undefined =>
@@ -861,6 +994,74 @@ export class CircuitBinding {
             });
             visuals.set(inst.id, {
               readout: [device.busy ? 'busy' : 'ready', device.writeEnableLatch ? 'WEL set' : 'WEL clear'],
+            });
+          } else {
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.lcd1602': {
+          const device = runner?.i2cBus.deviceFor(inst.id);
+          if (device instanceof Lcd1602Device) {
+            visuals.set(inst.id, {
+              readout: device.isFourBitMode ? device.lines : ['not initialised', ''],
+              ledOn: device.isBacklit,
+            });
+          } else {
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.eeprom-24c': {
+          const device = runner?.i2cBus.deviceFor(inst.id);
+          if (device instanceof Eeprom24cDevice) {
+            this.persistDevice(inst, device.writeCounter, () => {
+              inst.simulationState.eeprom = device.saveState();
+            });
+            visuals.set(inst.id, {
+              readout: [device.busy ? 'write cycle' : 'ready', `${device.nackCount} NACK`],
+            });
+          } else {
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.ds3231': {
+          const device = runner?.i2cBus.deviceFor(inst.id);
+          if (device instanceof Ds3231Device) {
+            const t = device.time;
+            const pad = (n: number) => String(n).padStart(2, '0');
+            visuals.set(inst.id, {
+              readout: [`${pad(t.hour)}:${pad(t.minute)}:${pad(t.second)}`, `${t.year}-${pad(t.month)}-${pad(t.date)}`],
+            });
+          } else {
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.mcp4725': {
+          const device = runner?.i2cBus.deviceFor(inst.id);
+          if (device instanceof Mcp4725Device) {
+            visuals.set(inst.id, {
+              readout:
+                device.powerDownMode === 0
+                  ? [`${device.programmedVolts.toFixed(2)} V`, `code ${device.dacCode}`]
+                  : ['powered down', `code ${device.dacCode}`],
+              value: device.programmedVolts,
+            });
+          } else {
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.hc165': {
+          const device = runner?.spiBus.deviceFor(inst.id);
+          if (device instanceof Sn74hc165Device) {
+            visuals.set(inst.id, {
+              readout: [
+                `D7..D0 ${device.parallelInputs.toString(2).padStart(8, '0')}`,
+                device.isClockEnabled ? `${device.captureCount} capture` : 'clock inhibited',
+              ],
             });
           } else {
             visuals.set(inst.id, {});

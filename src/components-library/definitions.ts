@@ -308,10 +308,12 @@ export const LCD1602 = def(
     pin('sda', 'SDA', 10.0, 2.0, { type: 'digital', caps: ['i2c-sda'] }),
     pin('scl', 'SCL', 14.0, 2.0, { type: 'digital', caps: ['i2c-scl'] }),
   ],
-  'validation',
+  'simulated',
   {
+    simulationAdapterId: 'sim.lcd1602',
     validationRules: ['i2c-pins'],
-    description: 'Character LCD with I2C backpack. Wiring/validation-level: I2C pin and pull-up rules are checked; the HD44780 protocol is not decoded yet.',
+    description:
+      'Character LCD on a PCF8574 I2C backpack, decoded end to end: bytes land on the expander pins, the HD44780 latches a nibble on each EN falling edge, and the resulting characters appear at their real DDRAM addresses (line 2 starts at 0x40). Clear, home, entry mode, display/cursor control and DDRAM addressing are implemented; custom CGRAM glyphs are accepted but not rendered. Address 0x27 by default (0x3F for PCF8574A backpacks).',
   },
 );
 
@@ -609,6 +611,92 @@ export const SPI_FLASH = def(
   },
 );
 
+export const EEPROM_24C = def(
+  'comp.eeprom-24c', 'EEPROM (24C256, I2C)', 'Memory', 10, 10, 'eeprom',
+  [
+    pin('a0', 'A0', 1.4, 9.6, { type: 'digital', caps: ['digital-in'] }),
+    pin('a1', 'A1', 3.8, 9.6, { type: 'digital', caps: ['digital-in'] }),
+    pin('a2', 'A2', 6.2, 9.6, { type: 'digital', caps: ['digital-in'] }),
+    pin('gnd', 'GND', 8.6, 9.6, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', 'VCC', 8.6, 0.4, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('wp', 'WP', 6.2, 0.4, { type: 'digital', caps: ['digital-in'] }),
+    pin('scl', 'SCL', 3.8, 0.4, { type: 'digital', caps: ['i2c-scl'] }),
+    pin('sda', 'SDA', 1.4, 0.4, { type: 'digital', caps: ['i2c-sda'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.eeprom-24c',
+    validationRules: ['i2c-pins'],
+    description:
+      '32 KiB serial EEPROM with a two-byte word address. The self-timed write cycle is modelled: after a write the part NACKs its own address for 5 ms, so a sketch that reads back immediately genuinely fails and ACK polling genuinely works. Page writes wrap inside their 64-byte page rather than spilling, as on real silicon. The write-protect pin is wired but its protection behaviour is not modelled.',
+  },
+);
+
+export const DS3231 = def(
+  'comp.ds3231', 'Real-Time Clock (DS3231)', 'Modules', 22, 14, 'rtc',
+  [
+    pin('gnd', 'GND', 2.0, 13.6, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', 'VCC', 6.0, 13.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('sda', 'SDA', 10.0, 13.6, { type: 'digital', caps: ['i2c-sda'] }),
+    pin('scl', 'SCL', 14.0, 13.6, { type: 'digital', caps: ['i2c-scl'] }),
+    pin('sqw', 'SQW', 18.0, 13.6, { caps: ['digital-out'] }),
+    pin('rst', '32K', 20.0, 13.6, { caps: ['digital-out'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.ds3231',
+    validationRules: ['i2c-pins'],
+    description:
+      'Temperature-compensated RTC at the fixed address 0x68. The BCD time registers really advance with simulated time, so reading the seconds register twice a second apart shows it increment, and writing them sets the clock. 12/24-hour mode, the calendar with leap years, and the temperature registers are implemented. Alarms are stored and read back but never drive INT/SQW, and the 32 kHz output is not generated. Note 0x68 collides with an MPU-6050 left on its default address.',
+  },
+);
+
+export const MCP4725 = def(
+  'comp.mcp4725', 'DAC (MCP4725, 12-bit)', 'ICs', 16, 12, 'dac',
+  [
+    pin('gnd', 'GND', 2.0, 11.6, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', 'VCC', 6.0, 11.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('sda', 'SDA', 10.0, 11.6, { type: 'digital', caps: ['i2c-sda'] }),
+    pin('scl', 'SCL', 14.0, 11.6, { type: 'digital', caps: ['i2c-scl'] }),
+    pin('vout', 'VOUT', 2.0, 0.4, { type: 'analog', caps: ['analog-in'] }),
+    pin('a0', 'A0', 14.0, 0.4, { type: 'digital', caps: ['digital-in'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.mcp4725',
+    validationRules: ['i2c-pins'],
+    description:
+      '12-bit DAC whose output is a real voltage on the canvas: wire VOUT to an analog input and firmware reads back what it wrote. Fast-mode and register writes are both decoded, the EEPROM form stores a power-on code, and the three power-down modes genuinely stop driving VOUT. Full scale follows the supply rail. EEPROM write time is not modelled — the ready bit always reads ready.',
+  },
+);
+
+export const HC165 = def(
+  'comp.hc165', 'Shift Register (74HC165)', 'ICs', 10, 18, 'hc165',
+  [
+    pin('pl', 'PL', 1.4, 17.6, { type: 'digital', caps: ['digital-in'] }),
+    pin('cp', 'CP', 3.8, 17.6, { type: 'digital', caps: ['spi-sck'] }),
+    pin('d4', 'D4', 6.2, 17.6, { type: 'digital', caps: ['digital-in'] }),
+    pin('d5', 'D5', 8.6, 17.6, { type: 'digital', caps: ['digital-in'] }),
+    pin('d6', 'D6', 8.6, 14.0, { type: 'digital', caps: ['digital-in'] }),
+    pin('d7', 'D7', 8.6, 10.4, { type: 'digital', caps: ['digital-in'] }),
+    pin('ds', 'DS', 8.6, 6.8, { type: 'digital', caps: ['digital-in'] }),
+    pin('vcc', 'VCC', 8.6, 0.4, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('qh', 'QH', 1.4, 3.2, { type: 'digital', caps: ['spi-miso'] }),
+    pin('ce', 'CE', 1.4, 6.8, { type: 'digital', caps: ['digital-in'] }),
+    pin('d0', 'D0', 1.4, 10.4, { type: 'digital', caps: ['digital-in'] }),
+    pin('d1', 'D1', 1.4, 14.0, { type: 'digital', caps: ['digital-in'] }),
+    pin('d2', 'D2', 3.8, 14.0, { type: 'digital', caps: ['digital-in'] }),
+    pin('d3', 'D3', 6.2, 14.0, { type: 'digital', caps: ['digital-in'] }),
+    pin('gnd', 'GND', 1.4, 0.4, { type: 'ground', caps: ['ground'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.hc165',
+    description:
+      'Parallel-in / serial-out shift register, the mirror of the 74HC595: wire QH to MISO and CP to SCK and SPI.transfer(0) clocks eight real input levels back to the sketch, MSB (D7) first. The parallel load pin is asynchronous and active low, so the register follows D0-D7 while PL is held low and freezes when it rises; CE inhibits the clock entirely. Inputs are read from actual net voltages, so buttons wired to D0-D7 are what firmware sees.',
+  },
+);
+
 export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   BREADBOARD_HALF, BREADBOARD_MINI,
   LED, RGB_LED, RESISTOR, CAPACITOR, DIODE, TRANSISTOR_NPN, MOSFET,
@@ -619,7 +707,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
   GPS, BLUETOOTH, WIFI_ESP01,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
-  HC595, SD_CARD, SPI_FLASH,
+  HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,
   GENERIC_IC, HEADER_CONNECTOR,
 ];
 
