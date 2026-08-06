@@ -175,6 +175,26 @@ function emitMemset(base: number): number[] {
 }
 
 /**
+ * The flash housekeeping routines, which return immediately.
+ *
+ * On silicon these drive the QSPI pads and the XIP cache:
+ * `connect_internal_flash` muxes the pads to the SSI, `flash_exit_xip` takes
+ * the flash out of continuous-read mode, `flash_flush_cache` invalidates the
+ * XIP cache and `flash_enter_cmd_xip` puts the interface back into XIP.
+ *
+ * None of that has an observable effect here, because the emulator models
+ * flash as plain memory: there is no physical QSPI device to reconfigure and
+ * no XIP cache to invalidate. Returning immediately is therefore the
+ * *correct* emulated behaviour, not a shortcut — the memory the firmware then
+ * reads is exactly the memory it would have read on hardware. This is why the
+ * SDK's RAM-resident `flash_do_cmd_cs` can complete: it looks these up through
+ * the ROM table before touching the SSI.
+ */
+function emitReturnImmediately(base: number): number[] {
+  return new Thumb(base).emit(BX_LR).link();
+}
+
+/**
  * rom_table_lookup(table=r0, code=r1) -> r0.
  *
  * The datasheet describes the table as pairs of halfwords — a two-character
@@ -238,6 +258,7 @@ export function buildBootStub(): BootStub {
   const lookupAddr = put(emitTableLookup(cursor));
   const memcpyAddr = put(emitMemcpy(cursor));
   const memsetAddr = put(emitMemset(cursor));
+  const noopAddr = put(emitReturnImmediately(cursor));
 
   // The word-aligned variants have the same contract as the byte versions for
   // any input the aligned callers produce, so they share an implementation.
@@ -247,12 +268,26 @@ export function buildBootStub(): BootStub {
     memcpy44: memcpyAddr,
     memset: memsetAddr,
     memset4: memsetAddr,
+    connect_internal_flash: noopAddr,
+    flash_exit_xip: noopAddr,
+    flash_flush_cache: noopAddr,
+    flash_enter_cmd_xip: noopAddr,
   };
 
   // Function table: (code, address) halfword pairs, zero-terminated. Addresses
   // carry the Thumb bit, as every Thumb function pointer must.
   const tableAddr = cursor;
-  for (const name of ['memcpy', 'memcpy44', 'memset', 'memset4'] as const) {
+  const advertised = [
+    'memcpy',
+    'memcpy44',
+    'memset',
+    'memset4',
+    'connect_internal_flash',
+    'flash_exit_xip',
+    'flash_flush_cache',
+    'flash_enter_cmd_xip',
+  ] as const;
+  for (const name of advertised) {
     dv.setUint16(cursor, ROM_FUNC_CODES[name], true);
     cursor += 2;
     dv.setUint16(cursor, functions[name] | 1, true);

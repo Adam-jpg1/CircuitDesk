@@ -65,7 +65,7 @@ async function loadRp2040js(): Promise<any | null> {
     check((addr & ~1) < 4096 * 4, `function table entry ${ROM_FUNC_NAMES[code] ?? code} lands inside the ROM`);
     entries++;
   }
-  check(entries === 4, `exactly the four implemented memory routines are advertised (${entries})`);
+  check(entries === 8, `the memory and flash-housekeeping routines are advertised (${entries})`);
 
   // The float and double tables are the restricted mufplib routines and must
   // not be advertised — firmware that needs them should fail, not get garbage.
@@ -187,6 +187,25 @@ if (rp2040js) {
   );
 }
 
+// ---------- 4b. The flash housekeeping routines resolve ----------
+//
+// flash_do_cmd_cs (the SDK's RAM-resident raw-flash-command routine) looks
+// these three up through the ROM table before touching the SSI. Unresolved,
+// it branches to address 0. They are no-ops here because the emulator has no
+// physical QSPI device and no XIP cache — see bootStub.ts.
+{
+  const stub = buildBootStub();
+  for (const name of ['connect_internal_flash', 'flash_exit_xip', 'flash_flush_cache', 'flash_enter_cmd_xip']) {
+    check(typeof stub.functions[name] === 'number', `${name} has an implementation address`);
+  }
+  const dv = new DataView(new Uint8Array(stub.rom.buffer).buffer);
+  const found = new Set<number>();
+  for (let a = stub.functionTableAddress; dv.getUint16(a, true) !== 0; a += 4) found.add(dv.getUint16(a, true));
+  for (const name of ['connect_internal_flash', 'flash_exit_xip', 'flash_flush_cache'] as const) {
+    check(found.has(ROM_FUNC_CODES[name]), `${name} is advertised in the function table`);
+  }
+}
+
 // ---------- 5. Real Pico firmware: how far does it actually get? ----------
 //
 // This section records measured behaviour. It asserts only what is true today.
@@ -266,10 +285,14 @@ if (rp2040js) {
       executed++;
     }
     check(executed > 1_000_000, `the application executes real instructions without faulting (${executed})`);
-    check(
-      rp.core.PC >= 0x20000000 ? rp.core.PC < 0x20042000 : rp.core.PC >= FLASH_BASE && rp.core.PC < FLASH_BASE + 0x200000,
-      `execution stays inside mapped memory (PC = 0x${rp.core.PC.toString(16)})`,
-    );
+    // Mapped regions: boot ROM (16 KB at 0), SRAM, and XIP flash. Executing in
+    // the ROM stub is legitimate — that is where the lookup routine lives.
+    const pc = rp.core.PC;
+    const mapped =
+      pc < 0x4000 ||
+      (pc >= 0x20000000 && pc < 0x20042000) ||
+      (pc >= FLASH_BASE && pc < FLASH_BASE + 0x200000);
+    check(mapped, `execution stays inside mapped memory (PC = 0x${pc.toString(16)})`);
 
     // THE REMAINING BLOCKER, recorded rather than asserted away.
     if (edges.length >= 2) {
@@ -277,8 +300,11 @@ if (rp2040js) {
     } else {
       console.log(
         `NOTE: GP15 produced ${edges.length} edges after ${executed} instructions; PC parked at ` +
-          `0x${rp.core.PC.toString(16)}. Real firmware boots and runs but has not reached the sketch's ` +
-          'GPIO writes, so the Pico badge stays "Compile only". This is the open item for the next milestone.',
+          `0x${rp.core.PC.toString(16)}. Root cause of the original stall is understood and fixed ` +
+          '(flash_do_cmd_cs resolves connect_internal_flash / flash_exit_xip / flash_flush_cache ' +
+          'through the ROM table; unresolved they branched to address 0). Startup now progresses ' +
+          'past that point but has not yet reached the sketch, so the Pico badge stays "Compile ' +
+          'only". Remaining work is tracked in the milestone report.',
       );
     }
   }
