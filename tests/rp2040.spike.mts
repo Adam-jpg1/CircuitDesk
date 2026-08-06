@@ -1,19 +1,20 @@
-// RP2040 feasibility spike — executable evidence, not a simulated board.
+// RP2040 ROM and UF2 invariants.
 //
-// This suite locks in what has been *proven* about running real Raspberry Pi
-// Pico firmware inside CircuitDesk, and what is still missing. It deliberately
-// does NOT assert that a Pico blinks, because it does not yet: see the final
-// section, which records the exact point where real firmware still stalls.
+// This suite covers the parts of the RP2040 work that need no toolchain: that
+// the independently written boot ROM stub is self-consistent, that rp2040js
+// ships no ROM image of its own, that Thumb code really executes out of the
+// XIP window, and that the UF2 reader rejects everything malformed.
 //
-// The Pico capability badge is unchanged (Compile only) and no board is routed
-// to an RP2040 adapter. This file exists so the findings are reproducible and
-// so the next milestone starts from measured facts rather than assumptions.
+// Real compiled firmware — blink, GPIO input, UART, reset and bounded
+// execution — is exercised in tests/rp2040.firmware.mts, which needs the
+// compiler backend. The direct ROM ABI unit tests are in
+// tests/rp2040.romabi.mts.
 //
-// Requires rp2040js (MIT, no bundled ROM) and, for the firmware sections, the
-// rp2040:rp2040 Arduino core on the compiler backend. Sections that need
-// either are skipped with a clear message when they are unavailable.
+// Requires rp2040js (MIT, no bundled ROM). Sections needing it are skipped
+// with a clear message when it is unavailable.
 
-import { buildBootStub, ROM_FUNC_CODES, ROM_FUNC_NAMES } from '../src/simulation/rp2040/bootStub';
+import { buildBootStub, ROM_FUNC_CODES, ROM_FUNC_NAMES, ROM_WITHHELD_CODES } from '../src/simulation/rp2040/bootStub';
+import { parseUf2 } from './harness/picoMachine.mts';
 
 const BASE = process.env.CIRCUITDESK_URL ?? 'http://localhost:3411';
 const FLASH_BASE = 0x10000000;
@@ -65,13 +66,22 @@ async function loadRp2040js(): Promise<any | null> {
     check((addr & ~1) < 4096 * 4, `function table entry ${ROM_FUNC_NAMES[code] ?? code} lands inside the ROM`);
     entries++;
   }
-  check(entries === 8, `the memory and flash-housekeeping routines are advertised (${entries})`);
+  check(
+    entries === 12,
+    `the memory, flash-housekeeping and bit-helper routines are advertised (${entries})`,
+  );
 
   // The float and double tables are the restricted mufplib routines and must
   // not be advertised — firmware that needs them should fail, not get garbage.
   const advertised = new Set<number>();
   for (let a = stub.functionTableAddress; dv.getUint16(a, true) !== 0; a += 4) advertised.add(dv.getUint16(a, true));
-  check(!advertised.has(ROM_FUNC_CODES.popcount32), 'no unimplemented routine is advertised as available');
+  for (const [name, value] of Object.entries(ROM_WITHHELD_CODES)) {
+    check(!advertised.has(value), `the restricted ${name} is not advertised`);
+  }
+  // Nor is anything advertised that has no implementation behind it.
+  for (const name of ['flash_range_erase', 'flash_range_program', 'reset_usb_boot', 'wait_for_vector'] as const) {
+    check(!advertised.has(ROM_FUNC_CODES[name]), `${name} is not advertised, because it is not implemented`);
+  }
 }
 
 // ---------- 2. rp2040js is present, MIT, and ships no boot ROM ----------
@@ -127,31 +137,14 @@ if (rp2040js) {
 }
 
 // ---------- 4. UF2 parsing rejects everything it should ----------
+//
+// This exercises the reader the harness and the application share, not a copy
+// of it: a UF2 that is silently mis-parsed produces a firmware image whose
+// failures look like simulator bugs.
 {
-  /** Strict RP2040 UF2 reader used by the spike; the shipped one will match. */
-  function parseUf2(buf: Uint8Array) {
-    if (buf.length === 0 || buf.length % 512 !== 0) throw new Error('UF2 length must be a multiple of 512');
-    const blocks = new Map<number, Uint8Array>();
-    const families = new Set<number>();
-    for (let off = 0; off + 512 <= buf.length; off += 512) {
-      const dv = new DataView(buf.buffer, buf.byteOffset + off, 512);
-      if (dv.getUint32(0, true) !== 0x0a324655) throw new Error('bad UF2 magic 0');
-      if (dv.getUint32(4, true) !== 0x9e5d5157) throw new Error('bad UF2 magic 1');
-      if (dv.getUint32(508, true) !== 0x0ab16f30) throw new Error('bad UF2 final magic');
-      const flags = dv.getUint32(8, true);
-      const addr = dv.getUint32(12, true);
-      const len = dv.getUint32(16, true);
-      if (len > 476) throw new Error('UF2 payload too large');
-      if (flags & 0x2000) families.add(dv.getUint32(28, true));
-      if (flags & 0x0001) continue;
-      if (addr < FLASH_BASE || addr + len > FLASH_BASE + 0x200000) throw new Error('address outside RP2040 flash');
-      blocks.set(addr, buf.slice(off + 32, off + 32 + len));
-    }
-    if (families.size && !families.has(RP2040_FAMILY_ID)) throw new Error('wrong UF2 family id');
-    return { blocks, families };
-  }
-
-  const makeBlock = (over: Partial<{ magic0: number; magic1: number; final: number; addr: number; len: number; family: number }> = {}) => {
+  const makeBlock = (
+    over: Partial<{ magic0: number; magic1: number; final: number; addr: number; len: number; family: number }> = {},
+  ) => {
     const b = new Uint8Array(512);
     const dv = new DataView(b.buffer);
     dv.setUint32(0, over.magic0 ?? 0x0a324655, true);
@@ -175,11 +168,14 @@ if (rp2040js) {
 
   check(!throws(() => parseUf2(makeBlock())), 'a well-formed RP2040 UF2 block parses');
   check(throws(() => parseUf2(makeBlock({ magic0: 0 }))), 'a bad first magic is rejected');
+  check(throws(() => parseUf2(makeBlock({ magic1: 0 }))), 'a bad second magic is rejected');
   check(throws(() => parseUf2(makeBlock({ final: 0 }))), 'a bad final magic is rejected');
   check(throws(() => parseUf2(makeBlock({ family: 0x1c5f21b0 }))), 'a non-RP2040 family id is rejected');
   check(throws(() => parseUf2(makeBlock({ addr: 0x20000000 }))), 'an address outside flash is rejected');
+  check(throws(() => parseUf2(makeBlock({ addr: FLASH_BASE + 0x1ffff00, len: 476 }))), 'a block running past the end of flash is rejected');
   check(throws(() => parseUf2(makeBlock({ len: 500 }))), 'an oversized payload is rejected');
   check(throws(() => parseUf2(new Uint8Array(300))), 'a truncated file is rejected');
+  check(throws(() => parseUf2(new Uint8Array(0))), 'an empty file is rejected');
   // Intel HEX (the AVR artifact format) is text and must never parse as UF2.
   check(
     throws(() => parseUf2(new TextEncoder().encode(':100000000C9434000C943E000C943E000C943E0082\n'.repeat(16)))),
@@ -206,109 +202,13 @@ if (rp2040js) {
   }
 }
 
-// ---------- 5. Real Pico firmware: how far does it actually get? ----------
+// ---------- 5. Real firmware ----------
 //
-// This section records measured behaviour. It asserts only what is true today.
-{
-  let uf2: Uint8Array | null = null;
-  try {
-    const res = await fetch(`${BASE}/api/compiler/compile`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        boardId: 'board.raspberry-pi-pico',
-        fqbn: 'rp2040:rp2040:rpipico',
-        files: [{ name: 'sketch.ino', content: 'void setup(){pinMode(15,OUTPUT);}\nvoid loop(){digitalWrite(15,HIGH);delay(100);digitalWrite(15,LOW);delay(100);}' }],
-      }),
-    });
-    const j = (await res.json()) as { success: boolean; firmware?: { data: string; format: string } };
-    if (j.success && j.firmware?.format === 'uf2') {
-      uf2 = Uint8Array.from(atob(j.firmware.data), (c) => c.charCodeAt(0));
-    }
-  } catch {
-    /* backend unavailable */
-  }
-
-  if (!uf2 || !rp2040js) {
-    skip('real Pico firmware or rp2040js unavailable — execution measurements not taken');
-  } else {
-    check(uf2.length > 0 && uf2.length % 512 === 0, `the Pico target returns a UF2 artifact (${uf2.length} bytes)`);
-
-    const { RP2040 } = rp2040js;
-    const rp = new RP2040();
-    rp.logger = { debug() {}, info() {}, warn() {}, error() {} };
-    rp.loadBootrom(buildBootStub().rom);
-    for (let off = 0; off + 512 <= uf2.length; off += 512) {
-      const dv = new DataView(uf2.buffer, uf2.byteOffset + off, 512);
-      if (dv.getUint32(8, true) & 1) continue;
-      rp.flash.set(uf2.slice(off + 32, off + 32 + dv.getUint32(16, true)), dv.getUint32(12, true) - FLASH_BASE);
-    }
-
-    // The datasheet describes the ROM copying the 256-byte second stage to the
-    // top of SRAM and running it; boot2 is part of the user's own image.
-    const BOOT2_RAM = 0x20041f00;
-    const SENTINEL = 0x00000f00;
-    for (let i = 0; i < 256; i++) rp.writeUint8(BOOT2_RAM + i, rp.readUint8(FLASH_BASE + i));
-    rp.core.SP = 0x20042000;
-    rp.core.registers[14] = SENTINEL | 1;
-    rp.core.PC = BOOT2_RAM;
-
-    const step = () => {
-      const c = rp.core;
-      if (c.waiting) rp.clock.tick?.(rp.clock.nanosToNextAlarm ?? CYCLE_NS);
-      else rp.clock.tick?.((c.executeInstruction() || 1) * CYCLE_NS);
-    };
-
-    let boot2Returned = false;
-    let boot2Instructions = 0;
-    for (let i = 0; i < 2_000_000; i++) {
-      if ((rp.core.PC & ~1) === SENTINEL) {
-        boot2Returned = true;
-        boot2Instructions = i;
-        break;
-      }
-      step();
-    }
-    check(boot2Returned, `the image's own boot2 runs and returns (${boot2Instructions} instructions)`);
-
-    rp.core.SP = rp.readUint32(FLASH_BASE + 0x100);
-    rp.core.PC = rp.readUint32(FLASH_BASE + 0x104) & ~1;
-    check(rp.core.SP >= 0x20000000 && rp.core.SP <= 0x20042000, `the application stack pointer is sane (0x${rp.core.SP.toString(16)})`);
-
-    const edges: number[] = [];
-    rp.gpio[15].addListener((state: unknown) => edges.push(Number(state)));
-
-    let executed = 0;
-    const deadline = Date.now() + 30_000;
-    while (executed < 40_000_000 && Date.now() < deadline && edges.length < 4) {
-      step();
-      executed++;
-    }
-    check(executed > 1_000_000, `the application executes real instructions without faulting (${executed})`);
-    // Mapped regions: boot ROM (16 KB at 0), SRAM, and XIP flash. Executing in
-    // the ROM stub is legitimate — that is where the lookup routine lives.
-    const pc = rp.core.PC;
-    const mapped =
-      pc < 0x4000 ||
-      (pc >= 0x20000000 && pc < 0x20042000) ||
-      (pc >= FLASH_BASE && pc < FLASH_BASE + 0x200000);
-    check(mapped, `execution stays inside mapped memory (PC = 0x${pc.toString(16)})`);
-
-    // THE REMAINING BLOCKER, recorded rather than asserted away.
-    if (edges.length >= 2) {
-      check(true, `GP15 toggled — blink reached the pin (${edges.length} edges)`);
-    } else {
-      console.log(
-        `NOTE: GP15 produced ${edges.length} edges after ${executed} instructions; PC parked at ` +
-          `0x${rp.core.PC.toString(16)}. Root cause of the original stall is understood and fixed ` +
-          '(flash_do_cmd_cs resolves connect_internal_flash / flash_exit_xip / flash_flush_cache ' +
-          'through the ROM table; unresolved they branched to address 0). Startup now progresses ' +
-          'past that point but has not yet reached the sketch, so the Pico badge stays "Compile ' +
-          'only". Remaining work is tracked in the milestone report.',
-      );
-    }
-  }
-}
+// Real compiled firmware is executed in tests/rp2040.firmware.mts: six
+// independently compiled sketches covering GPIO output on two pins at two
+// intervals, GPIO input on the internal pull-up, the full GP0-GP28 range,
+// UART transmission, reset and bounded execution. Duplicating a compile here
+// would double the toolchain time for no additional coverage.
 
 console.log(
   failures === 0

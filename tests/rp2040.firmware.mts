@@ -14,6 +14,7 @@
 // It needs the compiler backend with the rp2040 core installed. Without it,
 // every firmware section skips with a clear message rather than pretending.
 
+import { ROM_WITHHELD_CODES } from '../src/simulation/rp2040/bootStub';
 import { isMappedAddress, loadRp2040js, PicoMachine, parseUf2, FLASH_BASE } from './harness/picoMachine.mts';
 import { traceRomLookups } from './harness/trace.mts';
 
@@ -340,7 +341,7 @@ function periods(times: number[]): number[] {
   // through it — which is why it runs correctly — but a sketch that does
   // floating-point work through the ROM would fail, and that is the honest
   // and intended outcome rather than a silently wrong number.
-  const WITHHELD = ['SF', 'DP'];
+  const WITHHELD = Object.values(ROM_WITHHELD_CODES).map((c) => String.fromCharCode(c & 0xff, (c >> 8) & 0xff));
   const unexpected = rom.summary().filter((r) => !ADVERTISED.includes(r.tag) && !WITHHELD.includes(r.tag));
   check(
     unexpected.length === 0,
