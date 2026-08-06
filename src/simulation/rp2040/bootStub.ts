@@ -14,49 +14,65 @@
 // table during startup, and a zeroed ROM makes it branch to address 0.
 //
 // So this file provides the smallest thing that lets flash firmware run: the
-// documented lookup structure plus byte-wise implementations of the memory
-// routines. Everything here is written from the public RP2040 datasheet's
-// description of the ROM *interface* (section 2.8, "Bootrom"), which documents
-// the table layout and function signatures. No Raspberry Pi source code was
-// consulted, copied, translated or derived — in particular nothing from
-// mufplib. The implementations below are deliberately naive byte loops; they
-// are not, and are not derived from, Raspberry Pi's optimised versions.
+// documented lookup structure, byte-wise implementations of the memory
+// routines, the four integer bit helpers the SDK resolves during startup, and
+// the flash housekeeping entry points. Everything here is written from the
+// public RP2040 datasheet's description of the ROM *interface* (section 2.8,
+// "Bootrom"), which documents the table layout and function signatures. No
+// Raspberry Pi source code was consulted, copied, translated or derived — in
+// particular nothing from mufplib. The implementations below are deliberately
+// naive shift and byte loops; they are not, and are not derived from,
+// Raspberry Pi's optimised versions.
 //
 // WHAT IS DELIBERATELY ABSENT
 //
 // The floating-point and double-precision function tables are the mufplib
-// routines. They are NOT provided. A sketch whose startup path resolves them
-// will fail loudly rather than silently computing wrong numbers — see
-// `unresolvedLookups` on the simulator, which records every code the firmware
-// asked for and did not get.
+// routines. They are NOT provided, so a lookup for them returns the
+// documented 0 and firmware that calls through the returned pointer fails
+// loudly rather than silently computing wrong numbers. tests/harness/trace.mts
+// records every code a firmware asks for, so an unresolved lookup can be
+// named rather than guessed at.
 
 /** The RP2040 boot ROM is 16 KB, which is what rp2040js allocates. */
 export const BOOTROM_WORDS = 4096;
 
 /**
  * Documented ROM function codes: two ASCII characters packed little-endian.
- * Only the memory routines are implemented; the rest are listed so an
- * unresolved lookup can be reported by name instead of as a bare number.
+ * The unimplemented ones are listed so an unresolved lookup can be reported by
+ * name instead of as a bare number.
  */
 export const ROM_FUNC_CODES: Record<string, number> = {
-  // Implemented here.
+  // Memory routines.
   memcpy: code('M', 'C'),
   memcpy44: code('C', '4'),
   memset: code('M', 'S'),
   memset4: code('S', '4'),
-  // Documented but not implemented (see file header).
+  // Integer bit helpers, resolved by the SDK during startup.
   popcount32: code('P', '3'),
   reverse32: code('R', '3'),
   clz32: code('L', '3'),
   ctz32: code('T', '3'),
+  // Flash housekeeping, which has no observable effect on emulated flash.
   connect_internal_flash: code('I', 'F'),
   flash_exit_xip: code('E', 'X'),
-  flash_range_erase: code('R', 'E'),
-  flash_range_program: code('R', 'P'),
   flash_flush_cache: code('F', 'C'),
   flash_enter_cmd_xip: code('C', 'X'),
+  // Documented but not implemented: these write to a real flash device, which
+  // this simulator does not model.
+  flash_range_erase: code('R', 'E'),
+  flash_range_program: code('R', 'P'),
   reset_usb_boot: code('U', 'B'),
   wait_for_vector: code('W', 'V'),
+};
+
+/**
+ * Data-table codes that are deliberately withheld. These point at the mufplib
+ * soft-float routines, which cannot be redistributed here — see the file
+ * header and THIRD_PARTY_NOTICES.md.
+ */
+export const ROM_WITHHELD_CODES: Record<string, number> = {
+  soft_float_table: code('S', 'F'),
+  soft_double_table: code('S', 'D'),
 };
 
 function code(a: string, b: string): number {

@@ -22,7 +22,9 @@
     "test:leonardo": "tsx tests/leonardo.runtime.mts",
     "build:server": "tsc -p tsconfig.server.build.json",
     "test:components": "tsx tests/components.i2c.mts",
-    "test:rp2040": "tsx tests/rp2040.spike.mts"
+    "test:rp2040": "tsx tests/rp2040.spike.mts",
+    "test:rp2040:abi": "tsx tests/rp2040.romabi.mts",
+    "test:rp2040:firmware": "tsx tests/rp2040.firmware.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

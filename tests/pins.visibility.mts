@@ -10,7 +10,11 @@
 
 import { chromium } from 'playwright';
 
-const SCRATCH = '/tmp/claude-0/-home-user-whay/33313529-9d56-5506-bb90-3d0291077577/scratchpad';
+// The fixture lives in the repository rather than in a scratch directory, so
+// this suite still runs on a machine that has never seen this session.
+const FIXTURE = new URL('./fixtures/pinvis.cdproj.json', import.meta.url).pathname;
+/** Screenshots are diagnostics only; they go to a scratch directory. */
+const SCRATCH = process.env.SCRATCH ?? '/tmp';
 const COORDS_ONLY = process.argv.includes('--coords-only');
 
 let failures = 0;
@@ -31,7 +35,7 @@ await page.goto('http://localhost:3411/#/import', { waitUntil: 'load' });
 await page.waitForTimeout(1500);
 const chooser = page.waitForEvent('filechooser');
 await page.locator('.dropzone').click();
-(await chooser).setFiles(`${SCRATCH}/pinvis.cdproj.json`);
+(await chooser).setFiles(FIXTURE);
 await page.waitForTimeout(2000);
 for (let step = 0; step < 5; step++) {
   const importBtn = page.getByRole('button', { name: 'Import', exact: true });
