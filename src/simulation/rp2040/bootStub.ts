@@ -103,8 +103,28 @@ class Thumb {
 
   /** Branch if equal (T1 encoding). */
   beq(label: string): this {
+    return this.cond(label, 0x0);
+  }
+
+  /** Branch if not equal. */
+  bne(label: string): this {
+    return this.cond(label, 0x1);
+  }
+
+  /** Branch if carry set (the bit shifted out was 1). */
+  bcs(label: string): this {
+    return this.cond(label, 0x2);
+  }
+
+  /** Branch if carry clear (the bit shifted out was 0). */
+  bcc(label: string): this {
+    return this.cond(label, 0x3);
+  }
+
+  /** Conditional branch T1: 1101 cond imm8. */
+  private cond(label: string, condition: number): this {
     this.fixups.push({ at: this.code.length, label, kind: 'beq' });
-    return this.emit(0xd000);
+    return this.emit(0xd000 | (condition << 8));
   }
 
   /** Resolves branch offsets; must be called once the labels are all defined. */
@@ -138,6 +158,18 @@ const ADDS_R0_4 = 0x3004;
 const ADDS_R1_1 = 0x3101;
 const SUBS_R2_1 = 0x3a01;
 const MOVS_R0_0 = 0x2000;
+const MOVS_R1_0 = 0x2100;
+const MOVS_R2_0 = 0x2200;
+const MOVS_R3_32 = 0x2320;
+const MOV_R0_R1 = 0x0008; // lsls r0, r1, #0
+const MOV_R0_R2 = 0x0010; // lsls r0, r2, #0
+const LSLS_R0_1 = 0x0040;
+const LSLS_R2_1 = 0x0052;
+const LSRS_R0_1 = 0x0840;
+const ADDS_R1_1_IMM = 0x3101;
+const ADDS_R2_1 = 0x3201;
+const SUBS_R3_1 = 0x3b01;
+const CMP_R1_32 = 0x2920;
 const BX_LR = 0x4770;
 
 /** memcpy(dest=r0, src=r1, n=r2) -> r0. A plain byte loop. */
@@ -192,6 +224,81 @@ function emitMemset(base: number): number[] {
  */
 function emitReturnImmediately(base: number): number[] {
   return new Thumb(base).emit(BX_LR).link();
+}
+
+// ------------------------------------------------- documented bit helpers
+//
+// The SDK resolves these four through the ROM table during startup. They are
+// plain integer routines with published signatures — nothing to do with the
+// restricted floating-point library — and are implemented here from those
+// signatures alone. Cortex-M0+ has no CLZ instruction, so each is a shift
+// loop using the carry flag.
+
+/** clz32(v=r0) -> number of leading zero bits (32 when v is 0). */
+function emitClz32(base: number): number[] {
+  const t = new Thumb(base);
+  t.emit(MOVS_R1_0)
+    .label('loop')
+    .emit(LSLS_R0_1) // MSB falls into the carry flag
+    .bcs('done')
+    .emit(ADDS_R1_1_IMM)
+    .emit(CMP_R1_32)
+    .bne('loop')
+    .label('done')
+    .emit(MOV_R0_R1)
+    .emit(BX_LR);
+  return t.link();
+}
+
+/** ctz32(v=r0) -> number of trailing zero bits (32 when v is 0). */
+function emitCtz32(base: number): number[] {
+  const t = new Thumb(base);
+  t.emit(MOVS_R1_0)
+    .label('loop')
+    .emit(LSRS_R0_1) // LSB falls into the carry flag
+    .bcs('done')
+    .emit(ADDS_R1_1_IMM)
+    .emit(CMP_R1_32)
+    .bne('loop')
+    .label('done')
+    .emit(MOV_R0_R1)
+    .emit(BX_LR);
+  return t.link();
+}
+
+/** popcount32(v=r0) -> number of set bits. */
+function emitPopcount32(base: number): number[] {
+  const t = new Thumb(base);
+  t.emit(MOVS_R1_0)
+    .emit(MOVS_R3_32)
+    .label('loop')
+    .emit(LSRS_R0_1)
+    .bcc('skip')
+    .emit(ADDS_R1_1_IMM)
+    .label('skip')
+    .emit(SUBS_R3_1)
+    .bne('loop')
+    .emit(MOV_R0_R1)
+    .emit(BX_LR);
+  return t.link();
+}
+
+/** reverse32(v=r0) -> the 32 bits in reverse order. */
+function emitReverse32(base: number): number[] {
+  const t = new Thumb(base);
+  t.emit(MOVS_R2_0)
+    .emit(MOVS_R3_32)
+    .label('loop')
+    .emit(LSLS_R2_1)
+    .emit(LSRS_R0_1)
+    .bcc('skip')
+    .emit(ADDS_R2_1)
+    .label('skip')
+    .emit(SUBS_R3_1)
+    .bne('loop')
+    .emit(MOV_R0_R2)
+    .emit(BX_LR);
+  return t.link();
 }
 
 /**
@@ -259,6 +366,10 @@ export function buildBootStub(): BootStub {
   const memcpyAddr = put(emitMemcpy(cursor));
   const memsetAddr = put(emitMemset(cursor));
   const noopAddr = put(emitReturnImmediately(cursor));
+  const clzAddr = put(emitClz32(cursor));
+  const ctzAddr = put(emitCtz32(cursor));
+  const popcountAddr = put(emitPopcount32(cursor));
+  const reverseAddr = put(emitReverse32(cursor));
 
   // The word-aligned variants have the same contract as the byte versions for
   // any input the aligned callers produce, so they share an implementation.
@@ -272,6 +383,10 @@ export function buildBootStub(): BootStub {
     flash_exit_xip: noopAddr,
     flash_flush_cache: noopAddr,
     flash_enter_cmd_xip: noopAddr,
+    clz32: clzAddr,
+    ctz32: ctzAddr,
+    popcount32: popcountAddr,
+    reverse32: reverseAddr,
   };
 
   // Function table: (code, address) halfword pairs, zero-terminated. Addresses
@@ -286,6 +401,10 @@ export function buildBootStub(): BootStub {
     'flash_exit_xip',
     'flash_flush_cache',
     'flash_enter_cmd_xip',
+    'clz32',
+    'ctz32',
+    'popcount32',
+    'reverse32',
   ] as const;
   for (const name of advertised) {
     dv.setUint16(cursor, ROM_FUNC_CODES[name], true);
