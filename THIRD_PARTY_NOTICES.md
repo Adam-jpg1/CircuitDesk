@@ -35,11 +35,24 @@ included, not translated, and not used as a reference.
 
 `src/simulation/rp2040/bootStub.ts` is an independent implementation written
 from the RP2040 datasheet's public description of the boot ROM *interface*
-(the lookup table layout and function signatures). It provides only a function
-lookup table and naive byte-loop `memcpy`/`memset` routines. It contains no
-Raspberry Pi code and is deliberately not derived from the optimised ROM
-implementations. The floating-point routines (which are the mufplib code) are
-not implemented and are not advertised in the function table.
+(the lookup table layout and function signatures). It provides a function
+lookup table and twelve entries behind it:
+
+- `memcpy` / `memcpy44` / `memset` / `memset4` — naive byte loops.
+- `clz32` / `ctz32` / `popcount32` / `reverse32` — integer bit helpers written
+  as carry-flag shift loops, because Cortex-M0+ has no `CLZ` instruction.
+- `connect_internal_flash` / `flash_exit_xip` / `flash_flush_cache` /
+  `flash_enter_cmd_xip` — immediate returns, which is the correct emulated
+  behaviour where flash is plain memory with no QSPI pads and no XIP cache.
+
+It contains no Raspberry Pi code and is deliberately not derived from the
+optimised ROM implementations.
+
+The floating-point and double-precision tables are the mufplib code. They are
+not implemented and not advertised, so a lookup for `SF` or `SD` returns the
+documented `0`. Firmware that calls through the returned pointer will fault
+rather than compute a silently wrong number. Sketches doing floating-point
+work through the ROM are therefore not supported.
 
 ## Arduino cores
 
