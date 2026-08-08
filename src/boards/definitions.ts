@@ -149,7 +149,7 @@ export const PICO = headerBoard({
   logicVoltage: 3.3,
   color: '#1a4232',
   description:
-    'RP2040 board with 3.3 V logic and GP0-GP28 pins (GP26-28 are the ADC channels). Compiles for the real RP2040 target — never through the AVR toolchain. Instruction-level RP2040 simulation is not implemented yet.',
+    'RP2040 board with 3.3 V logic and GP0-GP28 pins (GP26-28 are the ADC channels). Compiles for the real RP2040 target — never through the AVR toolchain — and runs that firmware instruction by instruction, including GPIO, ADC, UART0, I2C and SPI.',
   left: [
     g3('GP0', 'GP0', { caps: ['digital-in', 'digital-out', 'uart-tx', 'i2c-sda', 'pwm'] }),
     g3('GP1', 'GP1', { caps: ['digital-in', 'digital-out', 'uart-rx', 'i2c-scl', 'pwm'] }),
@@ -261,7 +261,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     'visual-only', { usb: 'none', color: '#12262e', description: 'ESP32-CAM — visual reference with pin metadata. Camera behavior is not modeled.' },
   ),
   PICO,
-  { ...PICO, id: 'board.raspberry-pi-pico-w', name: 'Raspberry Pi Pico W', description: 'Pico W (wireless). Wiring and validation supported; no RP2040 or Wi-Fi simulation.', metadata: { ...PICO.metadata } },
+  { ...PICO, id: 'board.raspberry-pi-pico-w', name: 'Raspberry Pi Pico W', description: 'Pico W (wireless). The RP2040 side runs real firmware exactly as the Pico does; the CYW43 Wi-Fi radio is not simulated.', metadata: { ...PICO.metadata } },
   simpleWiringBoard(
     'board.rpi-zero-gpio', 'Raspberry Pi Zero GPIO Header', 'Raspberry Pi', 'BCM2835 (header only)', 65, 30, 3.3,
     [p3v3('3V3_1'), g3('GPIO2', 'GPIO2', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('GPIO3', 'GPIO3', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('GPIO4', 'GPIO4'), gnd('GND1'), g3('GPIO17', 'GPIO17'), g3('GPIO27', 'GPIO27'), g3('GPIO22', 'GPIO22'), p3v3('3V3_2'), g3('GPIO10', 'GPIO10', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }), g3('GPIO9', 'GPIO9', { caps: ['digital-in', 'digital-out', 'spi-miso'] }), g3('GPIO11', 'GPIO11', { caps: ['digital-in', 'digital-out', 'spi-sck'] }), gnd('GND2')],

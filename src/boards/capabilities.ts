@@ -79,18 +79,25 @@ const RP2040_SIM_APIS = [
   'analogRead (GP26/GP27/GP28, 0-3.3 V, 12-bit)',
   'delay/millis/micros',
   'Serial1 (hardware UART0 on GP0/GP1)',
+  'Wire (hardware I2C, including repeated START and NACK)',
+  'SPI (hardware SPI, all four modes, MSB first)',
 ];
 const RP2040_SIM_PERIPHERALS = [
   'SIO and GPIO pads (GP0-GP28, including pad pull resistors)',
   'ADC channels 0-2',
   'UART0',
+  'I2C0 and I2C1',
+  'SPI0 and SPI1',
   'system timer',
   'clock tree (PLLs, clk_sys, clk_peri)',
 ];
 
 /** Shared by both RP2040 boards, so the two texts cannot drift apart. */
 const RP2040_LIMITATION =
-  'The RP2040 CPU, GPIO, ADC and UART0 are simulated by executing the real compiled firmware. ' +
+  'The RP2040 CPU, GPIO, ADC, UART0, I2C and SPI are simulated by executing the real compiled firmware, ' +
+  'and the I2C and SPI device models are the same ones the AVR boards drive. ' +
+  'Buses follow whichever pins the firmware muxes, defaulting to the Arduino-Pico core\'s GP4/GP5 for Wire ' +
+  'and GP18/GP19/GP16 for SPI. ' +
   'Floating-point arithmetic is not available, because the Arduino-Pico core performs it through ' +
   'routines built into the Raspberry Pi boot ROM that CircuitDesk is not licensed to redistribute; ' +
   'this also rules out analogWrite(), which computes its PWM divisor in floating point. ' +
