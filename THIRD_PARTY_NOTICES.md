@@ -17,9 +17,12 @@ Leonardo.
 MIT License. Copyright (c) 2021 Uri Shaked.
 <https://github.com/wokwi/rp2040js>
 
-Present as a development dependency for the RP2040 feasibility work. The
-package contains **no** Raspberry Pi boot ROM: it allocates a zero-filled 4 KB
-ROM region and exposes `loadBootrom()` for the embedder to supply one.
+A runtime dependency: it executes Raspberry Pi Pico firmware in the browser. It
+is loaded lazily, in its own chunk, only when a Pico or Pico W simulation is
+started, so it is absent from the initial application bundle.
+
+The package contains **no** Raspberry Pi boot ROM: it allocates a zero-filled
+4 KB ROM region and exposes `loadBootrom()` for the embedder to supply one.
 
 ## Raspberry Pi boot ROM — NOT distributed
 
@@ -50,9 +53,17 @@ optimised ROM implementations.
 
 The floating-point and double-precision tables are the mufplib code. They are
 not implemented and not advertised, so a lookup for `SF` or `SD` returns the
-documented `0`. Firmware that calls through the returned pointer will fault
-rather than compute a silently wrong number. Sketches doing floating-point
-work through the ROM are therefore not supported.
+documented `0`.
+
+This has a user-visible consequence, and CircuitDesk states it rather than
+hiding it. The Arduino-Pico core is built against the Pico SDK's ROM
+floating-point implementation (`LIB_PICO_FLOAT_PICO`), so every float operation
+in a sketch is dispatched through that table. A sketch that performs
+floating-point arithmetic is stopped with an explanation naming the cause,
+instead of running on fabricated values. `analogWrite()` is affected because it
+computes its PWM divisor in floating point, which is why PWM is not listed among
+the Pico's simulated capabilities. Integer arithmetic, digital I/O,
+`analogRead()` and `Serial1` do not touch these routines and are unaffected.
 
 ## Arduino cores
 
