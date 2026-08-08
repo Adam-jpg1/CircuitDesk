@@ -5,6 +5,7 @@
 import { BOARD_DEFINITIONS, getBoardDefinition, findBoardByIdOrAlias } from '../src/boards/definitions';
 import { AVR_BOARD_PROFILES, arduinoPinNumber } from '../src/boards/pinMaps';
 import { getSimulatorAdapter, registeredSimulatedBoardIds } from '../src/simulation/adapters';
+import { runnerPinIndex } from '../src/simulation/boardRunner';
 import { resolveDefinition } from '../src/project/partsRegistry';
 import { resolveCompileTarget } from '../src/compiler/targets';
 import { buildPinStatesModel, pinStateCell } from '../src/simulation/pinStatesModel';
@@ -50,7 +51,10 @@ function projectWith(boardDefId: string): CircuitProject {
     if (b.supportLevel === 'simulated') {
       if (!b.simulation?.supported) { ok = false; console.log('  simulated badge without simulation support:', b.id); }
       if (!registeredSimulatedBoardIds().includes(b.id)) { ok = false; console.log('  simulated badge without registered adapter:', b.id); }
-      if (!AVR_BOARD_PROFILES[b.id]) { ok = false; console.log('  simulated badge without board-specific pin profile:', b.id); }
+      // An AVR board needs its own avr8js pin profile; an RP2040 board's pins
+      // are the GP pads themselves, resolved through runnerPinIndex.
+      if (b.architecture === 'avr' && !AVR_BOARD_PROFILES[b.id]) { ok = false; console.log('  simulated AVR badge without board-specific pin profile:', b.id); }
+      if (b.architecture === 'rp2040' && runnerPinIndex(b, 'GP0') !== 0) { ok = false; console.log('  simulated RP2040 badge without GP pin resolution:', b.id); }
       if (!getSimulatorAdapter(b)) { ok = false; console.log('  adapter lookup failed:', b.id); }
     }
     if (b.supportLevel === 'compile' && !b.compiler?.supported) { ok = false; console.log('  compile badge without compiler support:', b.id); }
@@ -60,13 +64,27 @@ function projectWith(boardDefId: string): CircuitProject {
   const simulated = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'simulated').map((b) => b.id).sort();
   check(
     JSON.stringify(simulated) ===
-      JSON.stringify(['board.arduino-leonardo', 'board.arduino-mega2560', 'board.arduino-nano', 'board.arduino-uno']),
+      JSON.stringify([
+        'board.arduino-leonardo',
+        'board.arduino-mega2560',
+        'board.arduino-nano',
+        'board.arduino-uno',
+        'board.raspberry-pi-pico',
+        'board.raspberry-pi-pico-w',
+      ]),
     `only boards with passing runtime tests are Simulated (got: ${simulated.join(', ')})`,
   );
+  // Nothing is compile-only any more: the RP2040 boards were the last two, and
+  // they now execute real firmware. A board that compiles but cannot run must
+  // still land in this tier, so the check is that the tier is honest rather
+  // than that it is empty.
   const compileOnly = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'compile').map((b) => b.id).sort();
   check(
-    JSON.stringify(compileOnly) === JSON.stringify(['board.raspberry-pi-pico', 'board.raspberry-pi-pico-w']),
-    `compile tier is Pico and Pico W (got: ${compileOnly.join(', ')})`,
+    compileOnly.every((boardId) => {
+      const def = getBoardDefinition(boardId)!;
+      return def.compiler?.supported === true && def.simulation?.supported !== true;
+    }),
+    `every Compile board compiles for real and claims no simulation (got: ${compileOnly.join(', ') || 'none'})`,
   );
 }
 
@@ -88,7 +106,20 @@ function projectWith(boardDefId: string): CircuitProject {
   check(pico.compiler?.requiredCore === 'rp2040:rp2040', `Pico requires the rp2040:rp2040 core (got ${pico.compiler?.requiredCore})`);
   check(!pico.compiler?.fqbn?.includes('avr'), 'Pico never compiles through arduino:avr');
   check(Number(pico.metadata.logicVoltage) === 3.3, 'Pico logic voltage is 3.3 V');
-  check(!pico.simulation?.supported && pico.supportLevel !== 'simulated', 'Pico is honestly NOT marked Simulated');
+  check(
+    pico.simulation?.supported === true && pico.supportLevel === 'simulated' && pico.simulation.engine === 'rp2040js',
+    `Pico is Simulated through the RP2040 engine (${pico.supportLevel}/${pico.simulation?.engine})`,
+  );
+  // The badge must not be read as a claim about everything the chip can do.
+  check(
+    !pico.simulation?.supportedApis.some((a) => /analogWrite|wifi|usb\b/i.test(a)),
+    'Pico claims no analogWrite, Wi-Fi or USB APIs',
+  );
+  check(
+    // Word-bounded, so "GPIO pads" is not mistaken for a PIO claim.
+    !pico.simulation?.supportedPeripherals.some((p) => /\bPIO\b|USB|Wi-?Fi|second core|PWM/i.test(p)),
+    'Pico claims no PIO, USB, Wi-Fi, second core or PWM peripheral',
+  );
   // Pico GP pins never resolve to Arduino pin numbers (no D0-D13 interpretation)
   check(arduinoPinNumber(pico, 'GP0') === undefined && arduinoPinNumber(pico, 'GP26') === undefined,
     'Pico GP pins never resolve to AVR Arduino pin numbers');
@@ -97,8 +128,9 @@ function projectWith(boardDefId: string): CircuitProject {
   check(res.ok && res.fqbn === 'rp2040:rp2040:rpipico', `Pico project compile target is the Arduino-Pico core (got ${res.ok ? res.fqbn : res.reason})`);
   // and never binds to the AVR simulator
   const binding = new CircuitBinding(projectWith('board.raspberry-pi-pico'), null);
-  check(binding.boardInstance === null && binding.boardDef === null, 'Pico circuit binding refuses the AVR simulator (no fallback board)');
-  check(getSimulatorAdapter(pico) === null, 'no simulator adapter is returned for the Pico');
+  check(binding.boardDef?.id === 'board.raspberry-pi-pico', 'Pico circuit binding attaches to the Pico itself');
+  check(getSimulatorAdapter(pico)?.engine === 'rp2040js', 'the Pico resolves to the RP2040 adapter, never avr8js');
+  check(!AVR_BOARD_PROFILES['board.raspberry-pi-pico'], 'the Pico has no AVR pin profile to fall back to');
 }
 
 // ---------- 4. Per-board metadata correctness ----------
@@ -172,7 +204,16 @@ function projectWith(boardDefId: string): CircuitProject {
     'Pin States (Nano): includes A6/A7 as ADC-only rows');
   const pico = getBoardDefinition('board.raspberry-pi-pico')!;
   const picoModel = buildPinStatesModel(pico);
-  check(picoModel.kind === 'not-simulated', 'Pin States (Pico): live states honestly unavailable — never shows D0-D13/A0-A5');
+  const picoLabels = picoModel.kind === 'pins' ? picoModel.rows.map((r) => r.label) : [];
+  check(picoModel.kind === 'pins', 'Pin States (Pico): live rows, now that the Pico genuinely runs firmware');
+  check(
+    picoLabels.length === 26 && picoLabels.every((l) => /^GP\d+$/.test(l)),
+    `Pin States (Pico): only GP pins (${picoLabels.length} rows)`,
+  );
+  check(
+    !picoLabels.some((l) => /^D\d+$/.test(l) || /^A\d+$/.test(l)),
+    'Pin States (Pico): never shows D0-D13 or A0-A5',
+  );
   check(buildPinStatesModel(null).kind === 'no-board', 'Pin States: no board → no fake pins');
   const mega = getBoardDefinition('board.arduino-mega2560')!;
   const megaModel = buildPinStatesModel(mega);
@@ -378,11 +419,11 @@ function projectWith(boardDefId: string): CircuitProject {
     'current FQBNs resolve to their own boards',
   );
 
-  // Tier is unchanged: still compile-only, still not simulated.
+  // Both RP2040 boards run real firmware on the RP2040 engine.
   for (const [name, def] of [['Pico', pico], ['Pico W', picow]] as const) {
     check(
-      def.supportLevel === 'compile' && def.simulation?.supported === false && def.simulation?.engine === 'none',
-      `${name} remains Compile only and not simulated (${def.supportLevel}/${def.simulation?.engine})`,
+      def.supportLevel === 'simulated' && def.simulation?.supported === true && def.simulation?.engine === 'rp2040js',
+      `${name} is Simulated on the RP2040 engine (${def.supportLevel}/${def.simulation?.engine})`,
     );
   }
 }

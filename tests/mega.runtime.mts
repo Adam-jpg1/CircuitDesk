@@ -268,7 +268,7 @@ void loop(){
   const unoProject: CircuitProject = { ...emptyProject('swap'), boardInstances: [inst('board.arduino-uno')] };
   const megaProject: CircuitProject = { ...emptyProject('swap'), boardInstances: [inst('board.arduino-mega2560')] };
 
-  simulationController.loadFirmware(unoHex, unoProject, 'board.arduino-uno');
+  simulationController.loadFirmware({ data: unoHex, format: 'intel-hex' }, unoProject, 'board.arduino-uno');
   simulationController.start();
   for (let i = 0; i < 200 && useSimulationStore.getState().status !== 'running'; i++) {
     await new Promise((r) => setTimeout(r, 10));
