@@ -247,9 +247,34 @@ export class CircuitBinding {
     this.indexNets();
     this.buildEdges();
     if (runner) this.setupUltrasonic(runner);
-    if (runner) this.setupI2cDevices(runner);
-    if (runner) this.setupSpiDevices(runner);
+    if (runner) this.rebindBuses(runner);
   }
+
+  /** Attaches device models to whichever pins the buses are currently on. */
+  private rebindBuses(runner: BoardRunner): void {
+    this.boundBusPins = this.busPinSignature(runner);
+    this.setupI2cDevices(runner);
+    this.setupSpiDevices(runner);
+  }
+
+  /** Identifies the current bus pin assignment, for change detection. */
+  private busPinSignature(runner: BoardRunner): string {
+    if (!runner.activeI2cPins && !runner.activeSpiPins) return 'static';
+    const i2c = runner.activeI2cPins?.() ?? {};
+    const spi = runner.activeSpiPins?.() ?? {};
+    return `${i2c.sda ?? '-'}/${i2c.scl ?? '-'}|${spi.sck ?? '-'}/${spi.mosi ?? '-'}/${spi.miso ?? '-'}`;
+  }
+
+  /**
+   * The bus pins the last device binding was built against.
+   *
+   * On an RP2040 the buses do not exist until the firmware muxes them, which
+   * happens inside `Wire.begin()` / `SPI.begin()` — after the circuit has been
+   * bound. Re-binding when the assignment changes is what lets devices attach
+   * at the moment the sketch actually opens the bus, without polling anything
+   * expensive: this is two integer comparisons per frame.
+   */
+  private boundBusPins = '';
 
   private hc595 = new Map<string, Hc595Wiring>();
   private hc165 = new Map<string, Hc165Wiring>();
@@ -291,8 +316,15 @@ export class CircuitBinding {
       spiBus.sync([]);
       return;
     }
+    // Where this board's SPI lines are. An AVR bonds SCK/MOSI/MISO to fixed
+    // port pins, so they come from the MCU; an RP2040 can mux them onto several
+    // pin groups, so the runner reports the ones the firmware actually chose.
     const profile = avrProfileFor(board);
-    const busPins = profile ? spiPinsFor(profile) : { sck: undefined, mosi: undefined, miso: undefined };
+    const busPins = runner.activeSpiPins
+      ? runner.activeSpiPins()
+      : profile
+        ? spiPinsFor(profile)
+        : { sck: undefined, mosi: undefined, miso: undefined };
     const logicVolts = Number(board.metadata.logicVoltage ?? 5);
 
     const netHasPin = (netId: string | undefined, pin: number | undefined): boolean =>
@@ -571,18 +603,29 @@ export class CircuitBinding {
       i2cBus.sync([]);
       return;
     }
-    // Board-side SDA/SCL as emulator pin numbers (A4/A5 on Uno, D20/D21 on
-    // Mega, D2/D3 on Leonardo — taken from the board's own metadata).
-    const i2cPinIds = (board.metadata.i2cPins as string[] | undefined) ?? [];
+    // Board-side SDA/SCL as runner pin indices. An AVR's TWI lines are fixed
+    // silicon, so they come from the board's own metadata (A4/A5 on Uno,
+    // D20/D21 on Mega, D2/D3 on Leonardo). An RP2040 can put I2C on several
+    // pin pairs and a sketch may call Wire.setSDA(), so the runner reports
+    // whichever pads are currently muxed to the I2C function.
     const busPins = new Set<number>();
-    for (const pinId of i2cPinIds) {
-      const n = runnerPinIndex(board, pinId);
-      if (n !== undefined) busPins.add(n);
+    let sdaPin: number | undefined;
+    let sclPin: number | undefined;
+    if (runner.activeI2cPins) {
+      const active = runner.activeI2cPins();
+      sdaPin = active.sda;
+      sclPin = active.scl;
+      if (sdaPin !== undefined) busPins.add(sdaPin);
+      if (sclPin !== undefined) busPins.add(sclPin);
+    } else {
+      const i2cPinIds = (board.metadata.i2cPins as string[] | undefined) ?? [];
+      for (const pinId of i2cPinIds) {
+        const n = runnerPinIndex(board, pinId);
+        if (n !== undefined) busPins.add(n);
+      }
+      sdaPin = i2cPinIds[0] ? runnerPinIndex(board, i2cPinIds[0]) : undefined;
+      sclPin = i2cPinIds[1] ? runnerPinIndex(board, i2cPinIds[1]) : undefined;
     }
-    const sdaId = i2cPinIds[0];
-    const sclId = i2cPinIds[1];
-    const sdaPin = sdaId ? runnerPinIndex(board, sdaId) : undefined;
-    const sclPin = sclId ? runnerPinIndex(board, sclId) : undefined;
 
     const netHasPin = (netId: string | undefined, pin: number | undefined): boolean =>
       netId !== undefined && pin !== undefined && (this.netBoardPins.get(netId) ?? []).includes(pin);
@@ -660,6 +703,11 @@ export class CircuitBinding {
   } {
     this.controlsRef = controls;
     const runner = this.runner;
+    // A sketch opens its buses during setup(), which is after this binding was
+    // built, so the device attachment follows the pins rather than preceding
+    // them. sync() keeps existing devices by instance id, so re-binding does
+    // not wipe an SSD1306's display RAM or an EEPROM's contents.
+    if (runner && this.busPinSignature(runner) !== this.boundBusPins) this.rebindBuses(runner);
     const highVolts = Number(this.boardDef?.metadata.logicVoltage ?? 5);
     // A CMOS input switches around half the supply, so the threshold comes
     // from the board rather than being fixed at an AVR's 2.5 V.
