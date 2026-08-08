@@ -6,8 +6,9 @@
 
 import type { BoardDefinition, CircuitProject, ComponentInstance } from '../types';
 import { buildCircuitGraph, splitNode, type CircuitGraph } from '../circuit/nets';
-import type { AVRRunner } from './avrRunner';
-import { arduinoPinNumber, avrProfileFor } from '../boards/pinMaps';
+import type { BoardRunner } from './boardRunner';
+import { runnerPinIndex, runnerAdcChannel, boardAdcReference } from './boardRunner';
+import { avrProfileFor } from '../boards/pinMaps';
 import { Ssd1306Device, SSD1306_ADDRESSES } from './devices/ssd1306';
 import { Bmp280Device, BMP280_ADDRESSES } from './devices/bmp280';
 import { Mpu6050Device, MPU6050_ADDRESSES } from './devices/mpu6050';
@@ -229,7 +230,7 @@ export class CircuitBinding {
 
   constructor(
     readonly project: CircuitProject,
-    readonly runner: AVRRunner | null,
+    readonly runner: BoardRunner | null,
   ) {
     this.graph = buildCircuitGraph(project);
     // Bind ONLY to a board whose definition declares genuine simulation
@@ -279,10 +280,15 @@ export class CircuitBinding {
    * attached at all, so firmware talking to it reads back an idle bus rather
    * than a fabricated reply.
    */
-  private setupSpiDevices(runner: AVRRunner): void {
+  private setupSpiDevices(runner: BoardRunner): void {
     const board = this.boardDef;
+    // Engines whose hardware SPI controller is not yet bridged to the shared
+    // device models expose no bus. Attaching nothing is the honest outcome:
+    // firmware talking to SPI reads an idle bus rather than a fabricated reply.
+    const spiBus = runner.spiBus;
+    if (!spiBus) return;
     if (!board) {
-      runner.spiBus.sync([]);
+      spiBus.sync([]);
       return;
     }
     const profile = avrProfileFor(board);
@@ -354,16 +360,16 @@ export class CircuitBinding {
       });
     }
 
-    this.spiDevices = runner.spiBus.sync(wanted);
+    this.spiDevices = spiBus.sync(wanted);
 
     // Chip select changes between transactions, when no byte is being clocked,
     // so it has to be watched as a pin edge. Polling once per frame would let a
     // device miss its own deselect and treat the next command as a continuation.
-    const csPins = new Set(runner.spiBus.chipSelectPins);
+    const csPins = new Set(spiBus.chipSelectPins);
     if (csPins.size > 0) {
       this.unsubscribeLatches.push(
         runner.addPinListener((pin) => {
-          if (csPins.has(pin)) runner.spiBus.refreshSelection((p) => runner.digitalPinLevel(p));
+          if (csPins.has(pin)) spiBus.refreshSelection((p) => runner.digitalPinLevel(p));
         }),
       );
     }
@@ -428,16 +434,15 @@ export class CircuitBinding {
         const pin = def?.pins.find((p) => p.id === pinId);
         if (!pin) continue;
         if (def?.isBoard && instId === this.boardInstance?.id && this.boardDef) {
-          const arduinoPin = arduinoPinNumber(this.boardDef, pinId);
-          if (arduinoPin !== undefined) {
+          // Resolved through the board's own architecture: an RP2040 pad is
+          // GP15, not "Arduino pin 15", and never resolves through the AVR map.
+          const runnerPin = runnerPinIndex(this.boardDef, pinId);
+          if (runnerPin !== undefined) {
             const arr = this.netBoardPins.get(net.id) ?? [];
-            arr.push(arduinoPin);
+            arr.push(runnerPin);
             this.netBoardPins.set(net.id, arr);
           }
-          const profile = avrProfileFor(this.boardDef);
-          const channel =
-            (arduinoPin !== undefined ? profile?.portMap[arduinoPin]?.adcChannel : undefined) ??
-            profile?.adcOnlyChannels?.[pinId];
+          const channel = runnerAdcChannel(this.boardDef, pinId);
           if (channel !== undefined) {
             const chans = this.netAdcChannels.get(net.id) ?? [];
             chans.push(channel);
@@ -508,7 +513,7 @@ export class CircuitBinding {
     }
   }
 
-  private setupUltrasonic(runner: AVRRunner): void {
+  private setupUltrasonic(runner: BoardRunner): void {
     for (const inst of this.graph.instances) {
       const def = this.graph.definitions.get(inst.id);
       if (def?.id !== 'comp.ultrasonic') continue;
@@ -556,10 +561,14 @@ export class CircuitBinding {
    * power, is not attached at all — so firmware addressing it gets a NACK,
    * exactly as it would on a breadboard.
    */
-  private setupI2cDevices(runner: AVRRunner): void {
+  private setupI2cDevices(runner: BoardRunner): void {
     const board = this.boardDef;
+    // See setupSpiDevices: an engine with no bridged I2C controller attaches
+    // no devices rather than pretending they replied.
+    const i2cBus = runner.i2cBus;
+    if (!i2cBus) return;
     if (!board) {
-      runner.i2cBus.sync([]);
+      i2cBus.sync([]);
       return;
     }
     // Board-side SDA/SCL as emulator pin numbers (A4/A5 on Uno, D20/D21 on
@@ -567,13 +576,13 @@ export class CircuitBinding {
     const i2cPinIds = (board.metadata.i2cPins as string[] | undefined) ?? [];
     const busPins = new Set<number>();
     for (const pinId of i2cPinIds) {
-      const n = arduinoPinNumber(board, pinId);
+      const n = runnerPinIndex(board, pinId);
       if (n !== undefined) busPins.add(n);
     }
     const sdaId = i2cPinIds[0];
     const sclId = i2cPinIds[1];
-    const sdaPin = sdaId ? arduinoPinNumber(board, sdaId) : undefined;
-    const sclPin = sclId ? arduinoPinNumber(board, sclId) : undefined;
+    const sdaPin = sdaId ? runnerPinIndex(board, sdaId) : undefined;
+    const sclPin = sclId ? runnerPinIndex(board, sclId) : undefined;
 
     const netHasPin = (netId: string | undefined, pin: number | undefined): boolean =>
       netId !== undefined && pin !== undefined && (this.netBoardPins.get(netId) ?? []).includes(pin);
@@ -639,7 +648,7 @@ export class CircuitBinding {
           }),
       });
     }
-    this.i2cDevices = runner.i2cBus.sync(wanted);
+    this.i2cDevices = i2cBus.sync(wanted);
   }
 
   private controlsRef: SimControls | null = null;
@@ -651,6 +660,10 @@ export class CircuitBinding {
   } {
     this.controlsRef = controls;
     const runner = this.runner;
+    const highVolts = Number(this.boardDef?.metadata.logicVoltage ?? 5);
+    // A CMOS input switches around half the supply, so the threshold comes
+    // from the board rather than being fixed at an AVR's 2.5 V.
+    const inputThreshold = highVolts / 2;
     const levels = new Map<string, NetLevel>();
     const setLevel = (netId: string, volts: number, sourcePin: number | null, seriesOhms: number) => {
       const existing = levels.get(netId);
@@ -667,7 +680,6 @@ export class CircuitBinding {
 
     // MCU-driven nets from real emulator pin states.
     if (runner) {
-      const highVolts = Number(this.boardDef?.metadata.logicVoltage ?? 5);
       for (const [netId, pins] of this.netBoardPins) {
         for (const pin of pins) {
           const level = runner.digitalPinLevel(pin);
@@ -779,9 +791,12 @@ export class CircuitBinding {
           const state = runner.digitalPinLevel(pin);
           if (state === 'input' || state === 'input-pullup') {
             if (level?.volts != null) {
-              runner.setDigitalInput(pin, level.volts >= 2.5);
-            } else if (state === 'input-pullup') {
-              runner.setDigitalInput(pin, true); // floating + internal pull-up reads high
+              runner.setDigitalInput(pin, level.volts >= inputThreshold);
+            } else {
+              // Nothing on the canvas is holding this pad, so its own
+              // configuration decides: an enabled pull-up reads high, and a
+              // plain floating input keeps whatever it had.
+              runner.setDigitalInput(pin, null);
             }
           }
         }
@@ -914,7 +929,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.ssd1306': {
-          const device = runner?.i2cBus.deviceFor(inst.id);
+          const device = runner?.i2cBus?.deviceFor(inst.id);
           if (device instanceof Ssd1306Device) {
             visuals.set(inst.id, {
               display: { pixels: device.ram, on: device.isOn, revision: device.revision },
@@ -927,7 +942,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.bmp280': {
-          const device = runner?.i2cBus.deviceFor(inst.id);
+          const device = runner?.i2cBus?.deviceFor(inst.id);
           if (device instanceof Bmp280Device) {
             visuals.set(inst.id, {
               readout: device.isMeasuring
@@ -941,7 +956,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.mpu6050': {
-          const device = runner?.i2cBus.deviceFor(inst.id);
+          const device = runner?.i2cBus?.deviceFor(inst.id);
           if (device instanceof Mpu6050Device) {
             const { accelG, gyroDps } = device.motion;
             visuals.set(inst.id, {
@@ -958,7 +973,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.hc595': {
-          const device = runner?.spiBus.deviceFor(inst.id);
+          const device = runner?.spiBus?.deviceFor(inst.id);
           if (device instanceof Sn74hc595Device) {
             const bits = device.outputs;
             visuals.set(inst.id, {
@@ -973,7 +988,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.sd-card': {
-          const device = runner?.spiBus.deviceFor(inst.id);
+          const device = runner?.spiBus?.deviceFor(inst.id);
           if (device instanceof SdCardDevice) {
             this.persistDevice(inst, device.writeCounter, () => {
               inst.simulationState.sdCard = device.saveState();
@@ -987,7 +1002,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.spi-flash': {
-          const device = runner?.spiBus.deviceFor(inst.id);
+          const device = runner?.spiBus?.deviceFor(inst.id);
           if (device instanceof SpiFlashDevice) {
             this.persistDevice(inst, device.writeCounter, () => {
               inst.simulationState.spiFlash = device.saveState();
@@ -1001,7 +1016,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.lcd1602': {
-          const device = runner?.i2cBus.deviceFor(inst.id);
+          const device = runner?.i2cBus?.deviceFor(inst.id);
           if (device instanceof Lcd1602Device) {
             visuals.set(inst.id, {
               readout: device.isFourBitMode ? device.lines : ['not initialised', ''],
@@ -1013,7 +1028,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.eeprom-24c': {
-          const device = runner?.i2cBus.deviceFor(inst.id);
+          const device = runner?.i2cBus?.deviceFor(inst.id);
           if (device instanceof Eeprom24cDevice) {
             this.persistDevice(inst, device.writeCounter, () => {
               inst.simulationState.eeprom = device.saveState();
@@ -1027,7 +1042,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.ds3231': {
-          const device = runner?.i2cBus.deviceFor(inst.id);
+          const device = runner?.i2cBus?.deviceFor(inst.id);
           if (device instanceof Ds3231Device) {
             const t = device.time;
             const pad = (n: number) => String(n).padStart(2, '0');
@@ -1040,7 +1055,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.mcp4725': {
-          const device = runner?.i2cBus.deviceFor(inst.id);
+          const device = runner?.i2cBus?.deviceFor(inst.id);
           if (device instanceof Mcp4725Device) {
             visuals.set(inst.id, {
               readout:
@@ -1055,7 +1070,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.hc165': {
-          const device = runner?.spiBus.deviceFor(inst.id);
+          const device = runner?.spiBus?.deviceFor(inst.id);
           if (device instanceof Sn74hc165Device) {
             visuals.set(inst.id, {
               readout: [

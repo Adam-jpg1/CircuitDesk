@@ -2,7 +2,8 @@
 // Boards without genuine simulation support never display fake live states.
 
 import type { BoardDefinition } from '../types';
-import { arduinoPinNumber, avrProfileFor } from '../boards/pinMaps';
+import { avrProfileFor } from '../boards/pinMaps';
+import { runnerPinIndex, runnerAdcChannel } from './boardRunner';
 
 export interface PinStateRow {
   /** Emulator pin index (index into the live PinSnapshot arrays), if live-capable. */
@@ -24,17 +25,22 @@ export function buildPinStatesModel(board: BoardDefinition | null | undefined): 
   const profile = avrProfileFor(board);
   const seen = new Set<number>();
   const rows: PinStateRow[] = [];
-  // Two passes so canonical D#/A# names win over aliases (SDA/SCL → A4/A5).
+  // Two passes so canonical names win over aliases (SDA/SCL → A4/A5 on AVR).
+  // An RP2040 has no D#/A# names at all, so its GP pins simply pass through in
+  // definition order and are then sorted by index below.
   const ordered = [
     ...board.pins.filter((p) => /^[DA]\d+$/.test(p.id)),
     ...board.pins.filter((p) => !/^[DA]\d+$/.test(p.id)),
   ];
   for (const pin of ordered) {
-    const n = arduinoPinNumber(board, pin.id);
-    if (n !== undefined && profile?.portMap[n] && !seen.has(n)) {
-      seen.add(n);
+    // The pin index is resolved through the board's own architecture, so an
+    // RP2040 row is GP15 → runner index 15 and never an AVR Arduino number.
+    const n = runnerPinIndex(board, pin.id);
+    const isLive = n !== undefined && (board.architecture === 'rp2040' || profile?.portMap[n] !== undefined);
+    if (isLive && !seen.has(n!)) {
+      seen.add(n!);
       rows.push({ pin: n, label: pin.id });
-    } else if (profile?.adcOnlyChannels?.[pin.id] !== undefined) {
+    } else if (n === undefined && runnerAdcChannel(board, pin.id) !== undefined) {
       rows.push({ label: pin.id, adcOnly: true });
     }
   }
