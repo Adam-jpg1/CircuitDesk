@@ -70,6 +70,17 @@ export interface BoardRunner {
   readonly i2cBus?: I2cBus;
   readonly spiBus?: SpiBus;
 
+  /**
+   * The bus pins the firmware has actually muxed, in runner pin indices.
+   *
+   * Implemented by engines whose buses are not bonded to fixed pins. An AVR's
+   * TWI and SPI lines are fixed silicon, so it omits these and the binding
+   * falls back to the board's own map; an RP2040 can put either bus on several
+   * pin groups, and a sketch chooses with Wire.setSDA() or SPI.setSCK().
+   */
+  activeI2cPins?(): { sda?: number; scl?: number };
+  activeSpiPins?(): { sck?: number; mosi?: number; miso?: number; cs?: number };
+
   reset?(): void;
   dispose?(): void;
 }

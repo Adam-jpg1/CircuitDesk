@@ -20,6 +20,17 @@ import { PadPullResolver } from './gpioPulls';
 import { Rp2040ClockTree } from './clockTree';
 import { installSioFifo } from './sioFifo';
 import { FLASH_BASE, parseRp2040Uf2, type Uf2Image } from './uf2';
+import {
+  readI2cPins,
+  readSpiPins,
+  ARDUINO_PICO_DEFAULT_I2C,
+  ARDUINO_PICO_DEFAULT_SPI,
+  type I2cPinAssignment,
+  type SpiPinAssignment,
+} from './busPins';
+import { I2cBus } from '../devices/i2cBus';
+import { SpiBus, type SpiController } from '../devices/spiBus';
+import type { SpiMode } from '../devices/types';
 import type { PinSnapshot } from '../boardRunner';
 
 /** GP0..GP29 exist on the die; a Pico brings out GP0..GP28. */
@@ -68,6 +79,18 @@ const MAX_INSTRUCTIONS_PER_CALL = 20_000_000;
 const ADC_FIRST_GPIO = 26;
 export const RP2040_ADC_CHANNELS = 4;
 
+/**
+ * PL022 SSPCR0 bits used to derive the datasheet SPI mode.
+ *
+ * rp2040js exposes a `spiMode` getter, but it returns 3 for CPOL=1/CPHA=0 and
+ * 2 for CPOL=1/CPHA=1 — modes 2 and 3 swapped relative to the datasheet. The
+ * control register is read directly instead, the same way the AVR runner works
+ * around the equivalent defect in avr8js (which swaps modes 1 and 2).
+ */
+const SSPCR0_OFFSET = 0x00;
+const SSPCR0_SPO = 1 << 6; // CPOL
+const SSPCR0_SPH = 1 << 7; // CPHA
+
 /** The RP2040's ADC is 3.3 V full scale and 12 bits. */
 export const RP2040_ADC_VREF = 3.3;
 export const RP2040_ADC_MAX_CODE = 4095;
@@ -96,6 +119,18 @@ export class Rp2040Runner {
   private externalDrive = new Map<number, boolean>();
   private disposed = false;
 
+  /**
+   * I2C and SPI devices on the canvas attach to these, exactly as they do on
+   * the AVR runner. The device models are shared, not duplicated: an SSD1306
+   * driven by Pico firmware is the same object an Uno would drive.
+   *
+   * They live on the runner rather than on the machine so their contents
+   * survive a circuit re-bind — a wiring edit is not a power cycle.
+   */
+  readonly i2cBus = new I2cBus();
+  readonly spiBus = new SpiBus();
+  private readonly spiCtrl: SpiController;
+
   /** Bytes the firmware transmits on UART0, which is Serial1 on a Pico. */
   onSerialByte: ((byte: number) => void) | null = null;
   onPinChange: ((pin: number, high: boolean) => void) | null = null;
@@ -107,6 +142,19 @@ export class Rp2040Runner {
   constructor(firmware: Uint8Array | Uf2Image, options: { clockHz?: number } = {}) {
     this.image = firmware instanceof Uint8Array ? parseRp2040Uf2(firmware) : firmware;
     this.startupCycleNs = 1e9 / (options.clockHz ?? DEFAULT_CLOCK_HZ);
+    // Read lazily through the runner, so the mode reflects whatever the
+    // firmware has SSPCR0 set to at the moment of each transfer.
+    const runner = this;
+    this.spiCtrl = {
+      get mode(): SpiMode {
+        return runner.currentSpiMode;
+      },
+      // The PL022 in Motorola SPI format transmits most-significant bit first
+      // and offers no alternative, so unlike an AVR there is no DORD to read.
+      get bitOrder(): 'msbFirst' | 'lsbFirst' {
+        return 'msbFirst';
+      },
+    };
     this.build();
   }
 
@@ -147,6 +195,7 @@ export class Rp2040Runner {
       rp.gpio[index].addListener(() => this.padChanged(index));
     }
     rp.uart[0].onByte = (byte: number) => this.onSerialByte?.(byte);
+    this.attachBuses(rp);
 
     for (const [pin, level] of this.externalDrive) this.pads.drive(pin, level);
     this.bootFromFlash();
@@ -332,6 +381,73 @@ export class Rp2040Runner {
     if (value === null) this.externalDrive.delete(pin);
     else this.externalDrive.set(pin, value);
     this.pads.drive(pin, value);
+  }
+
+  // ------------------------------------------------------------ I2C and SPI
+
+  /**
+   * Connects both hardware I2C controllers and both SPI controllers to the
+   * shared device buses.
+   *
+   * rp2040js reports what the firmware's `Wire` and `SPI` calls actually do on
+   * the wire, and the bus decides who — if anyone — answers. With no device
+   * attached, the bus NACKs every address, which is the honest result for a
+   * bus with nothing on it: `Wire.endTransmission()` returns 2, exactly as on
+   * hardware.
+   *
+   * Both controller instances are wired, because the Arduino-Pico core's
+   * `Wire` and `Wire1` (and `SPI` and `SPI1`) map onto different silicon, and
+   * which one a sketch uses is its own choice.
+   */
+  private attachBuses(rp: RP2040): void {
+    for (const controller of rp.i2c) {
+      const handler = this.i2cBus.handler(controller);
+      controller.onStart = (repeatedStart: boolean) => handler.start(repeatedStart);
+      // rp2040js reports the direction as an I2CMode enum where Read is 1; the
+      // bus speaks in terms of "is this a write".
+      controller.onConnect = (address: number, mode: number) => handler.connectToSlave(address, mode === 0);
+      controller.onWriteByte = (value: number) => handler.writeByte(value);
+      controller.onReadByte = (ack: boolean) => handler.readByte(ack);
+      controller.onStop = () => handler.stop();
+    }
+
+    for (const controller of rp.spi) {
+      controller.onTransmit = (mosi: number) => {
+        const miso = this.spiBus.transferByte(mosi, this.spiCtrl, (pin) => this.digitalPinLevel(pin));
+        controller.completeTransmit(miso);
+      };
+    }
+  }
+
+  /**
+   * The datasheet SPI mode `(CPOL << 1) | CPHA`, read from SSPCR0.
+   *
+   * Uses whichever controller the firmware has muxed to pins; falls back to
+   * SPI0 when nothing is muxed yet, which is only reached before `SPI.begin()`.
+   */
+  private get currentSpiMode(): SpiMode {
+    const instance = this.activeSpiPins().instance ?? 0;
+    const control0 = this.rp.spi[instance]?.readUint32(SSPCR0_OFFSET) ?? 0;
+    return ((((control0 & SSPCR0_SPO) ? 1 : 0) << 1) | ((control0 & SSPCR0_SPH) ? 1 : 0)) as SpiMode;
+  }
+
+  /**
+   * The GP pins carrying I2C.
+   *
+   * The live mux wins whenever the firmware has established one. Before that —
+   * which is every moment up to `Wire.begin()` — the installed core's
+   * documented default is used, so a device wired on the canvas can answer a
+   * transaction issued in the same `setup()` that opened the bus.
+   */
+  activeI2cPins(): I2cPinAssignment {
+    const live = readI2cPins(this.rp.gpio);
+    return live.sda !== undefined && live.scl !== undefined ? live : ARDUINO_PICO_DEFAULT_I2C;
+  }
+
+  /** The GP pins carrying SPI, with the same live-then-default rule. */
+  activeSpiPins(): SpiPinAssignment {
+    const live = readSpiPins(this.rp.gpio);
+    return live.sck !== undefined ? live : ARDUINO_PICO_DEFAULT_SPI;
   }
 
   // ------------------------------------------------------------------- ADC
