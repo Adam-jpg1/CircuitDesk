@@ -40,7 +40,9 @@ export function buildPinStatesModel(board: BoardDefinition | null | undefined): 
     if (isLive && !seen.has(n!)) {
       seen.add(n!);
       rows.push({ pin: n, label: pin.id });
-    } else if (n === undefined && runnerAdcChannel(board, pin.id) !== undefined) {
+    } else if (!isLive && runnerAdcChannel(board, pin.id) !== undefined) {
+      // A pin with no digital state but a real ADC channel — the Nano's
+      // A6/A7, which are analog-only inputs with no port bit behind them.
       rows.push({ label: pin.id, adcOnly: true });
     }
   }
