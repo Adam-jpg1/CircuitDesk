@@ -31,9 +31,12 @@ export async function compileAction(run: boolean): Promise<boolean> {
         (result.memory ? ` — flash ${result.memory.flashBytes} B` : ''),
       'success',
     );
+    // Firmware is handed to the board's own engine, in that engine's own
+    // artifact format: Intel HEX for AVR, UF2 for the RP2040. A mismatch is
+    // refused by the adapter rather than run on the wrong architecture.
     const adapter = getSimulatorAdapter(target.board);
-    if (result.firmware?.format === 'intel-hex' && adapter) {
-      simulationController.loadFirmware(result.firmware.data, project, target.boardId);
+    if (adapter && result.firmware?.format === adapter.firmwareFormat) {
+      simulationController.loadFirmware(result.firmware, project, target.boardId);
       if (run) {
         simulationController.start();
         s.setBottomTab('serial');

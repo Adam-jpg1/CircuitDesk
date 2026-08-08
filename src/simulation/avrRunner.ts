@@ -63,6 +63,7 @@ interface DutyTracker {
 }
 
 export class AVRRunner {
+  readonly engine = 'avr8js' as const;
   readonly cpu: CPU;
   readonly usart: AVRUSART;
   readonly adc: AVRADC;
@@ -253,9 +254,21 @@ export class AVRRunner {
     return s === PinState.High || s === PinState.Low;
   }
 
-  setDigitalInput(pin: number, value: boolean): void {
+  /**
+   * Drives an input pin from the circuit.
+   *
+   * `null` means nothing outside the chip is holding the pin, so the pad falls
+   * back to its own configuration: an input with the internal pull-up enabled
+   * reads high, and a plain input is left as it was, because a floating AVR
+   * input genuinely has no defined level.
+   */
+  setDigitalInput(pin: number, value: boolean | null): void {
     const ref = this.profile.portMap[pin];
     if (!ref) return;
+    if (value === null) {
+      if (this.pinState(pin) === PinState.InputPullUp) this.ports.get(ref.port)?.setPin(ref.index, true);
+      return;
+    }
     this.ports.get(ref.port)?.setPin(ref.index, value);
   }
 
@@ -303,6 +316,17 @@ export class AVRRunner {
         throw new Error('Simulation stopped: the firmware executed an excessive number of instructions without advancing time.');
       }
     }
+  }
+
+  /**
+   * Advances the simulation by a slice of simulated time.
+   *
+   * The engine-neutral entry point the simulation controller drives, so it
+   * never has to know that this architecture measures progress in clock
+   * cycles while another measures it in nanoseconds.
+   */
+  runFor(simMs: number): void {
+    this.runToCycles(this.cpu.cycles + Math.round((simMs / 1000) * F_CPU));
   }
 
   get timeMs(): number {

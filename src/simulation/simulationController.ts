@@ -6,17 +6,22 @@
 // adapter produce a clear status message — they are never run on another
 // board's engine or pin profile. Engines are loaded lazily on first start.
 
-import type { AVRRunner } from './avrRunner';
+import type { BoardRunner } from './boardRunner';
 import { CircuitBinding, emptyControls, type SimControls } from './circuitSim';
-import { getSimulatorAdapter, assertFirmwareMatchesBoard } from './adapters';
+import { getSimulatorAdapter, assertFirmwareMatchesBoard, type FirmwareArtifact } from './adapters';
 import { resolveDefinition } from '../project/partsRegistry';
 import { useSimulationStore } from './simulationStore';
 import type { BoardDefinition, CircuitProject } from '../types';
 
-const F_CPU = 16_000_000;
 const TICK_MS = 12;
-/** Max cycles executed per tick — keeps the UI responsive if the machine can't keep up. */
-const MAX_CYCLES_PER_TICK = (F_CPU / 1000) * 40;
+/**
+ * Most simulated milliseconds a single tick may advance.
+ *
+ * This is the responsiveness budget: if the host cannot keep up with real
+ * time, the simulation runs slower rather than blocking the UI thread. It is
+ * expressed in simulated time so it means the same thing on every engine.
+ */
+const MAX_SIM_MS_PER_TICK = 40;
 const PUBLISH_EVERY_MS = 33;
 
 function findSimulatedBoard(project: CircuitProject): BoardDefinition | null {
@@ -28,28 +33,28 @@ function findSimulatedBoard(project: CircuitProject): BoardDefinition | null {
 }
 
 class SimulationController {
-  private runner: AVRRunner | null = null;
+  private runner: BoardRunner | null = null;
   private binding: CircuitBinding | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastTickWall = 0;
   private lastPublishWall = 0;
   private serialDecoder = new TextDecoder();
-  private hex: string | null = null;
+  private firmware: FirmwareArtifact | null = null;
   private compiledForBoardId: string | null = null;
   private project: CircuitProject | null = null;
-  private executedRecently = 0;
+  private simMsRecently = 0;
   private wallRecently = 0;
   private starting = false;
 
-  loadFirmware(hex: string, project: CircuitProject, compiledForBoardId: string): void {
+  loadFirmware(firmware: FirmwareArtifact, project: CircuitProject, compiledForBoardId: string): void {
     this.stop();
-    this.hex = hex;
+    this.firmware = firmware;
     this.compiledForBoardId = compiledForBoardId;
     this.project = project;
   }
 
   get hasFirmware(): boolean {
-    return this.hex !== null;
+    return this.firmware !== null;
   }
 
   /**
@@ -86,7 +91,7 @@ class SimulationController {
 
   start(): void {
     const store = useSimulationStore.getState();
-    if (!this.hex || !this.project) {
+    if (!this.firmware || !this.project) {
       store.setStatus('error', 'No compiled firmware loaded. Compile the sketch first.');
       return;
     }
@@ -97,10 +102,11 @@ class SimulationController {
     }
     if (this.starting) return;
     this.starting = true;
+    const previous = this.runner;
     void this.createRunner()
       .then((runner) => {
         if (!runner) return;
-        this.attachRunner(runner);
+        this.attachRunner(previous, runner);
         useSimulationStore.getState().clearSerial();
         useSimulationStore.getState().setStatus('running');
         this.resumeLoop();
@@ -111,7 +117,7 @@ class SimulationController {
   }
 
   /** Creates a runner through the board's registered adapter — or reports why not. */
-  private async createRunner(): Promise<AVRRunner | null> {
+  private async createRunner(): Promise<BoardRunner | null> {
     const store = useSimulationStore.getState();
     const project = this.project!;
     const boardDef = findSimulatedBoard(project);
@@ -130,7 +136,7 @@ class SimulationController {
     const adapter = getSimulatorAdapter(boardDef)!;
     try {
       assertFirmwareMatchesBoard(this.compiledForBoardId ?? '', boardDef);
-      return await adapter.createRunner(this.hex!, boardDef);
+      return await adapter.createRunner(this.firmware!, boardDef);
     } catch (err) {
       console.error('[CircuitDesk] simulator init failed:', err);
       store.setStatus('error', err instanceof Error ? err.message : 'Failed to load firmware into the simulator.');
@@ -138,7 +144,11 @@ class SimulationController {
     }
   }
 
-  private attachRunner(runner: AVRRunner): void {
+  private attachRunner(previous: BoardRunner | null, runner: BoardRunner): void {
+    // Release the outgoing machine before the new one starts, so a stopped
+    // project cannot keep listeners alive or leak peripheral state into the
+    // next run.
+    previous?.dispose?.();
     this.runner = runner;
     runner.onSerialByte = (byte) => {
       const text = this.serialDecoder.decode(new Uint8Array([byte]), { stream: true });
@@ -161,7 +171,7 @@ class SimulationController {
     this.stopLoop();
     this.lastTickWall = performance.now();
     this.lastPublishWall = 0;
-    this.executedRecently = 0;
+    this.simMsRecently = 0;
     this.wallRecently = 0;
     this.timer = setInterval(() => this.tick(), TICK_MS);
   }
@@ -174,14 +184,14 @@ class SimulationController {
     const elapsedMs = Math.min(100, now - this.lastTickWall);
     this.lastTickWall = now;
 
-    const targetCycles = Math.min(Math.round((elapsedMs / 1000) * F_CPU), MAX_CYCLES_PER_TICK);
-    const before = runner.cpu.cycles;
+    const targetSimMs = Math.min(elapsedMs, MAX_SIM_MS_PER_TICK);
+    const before = runner.timeMs;
     try {
       // Interleave execution with circuit updates so inputs land promptly.
-      const slice = Math.max(1000, Math.floor(targetCycles / 4));
+      const slice = targetSimMs / 4;
       const controls = this.controls();
-      for (let executed = 0; executed < targetCycles; executed += slice) {
-        runner.runToCycles(before + Math.min(targetCycles, executed + slice));
+      for (let done = 0; done < targetSimMs; done += slice) {
+        runner.runFor(Math.min(slice, targetSimMs - done));
         binding.update(controls);
       }
     } catch (err) {
@@ -189,7 +199,7 @@ class SimulationController {
       useSimulationStore.getState().setStatus('error', err instanceof Error ? err.message : 'Simulation crashed.');
       return;
     }
-    this.executedRecently += runner.cpu.cycles - before;
+    this.simMsRecently += runner.timeMs - before;
     this.wallRecently += elapsedMs;
 
     if (now - this.lastPublishWall >= PUBLISH_EVERY_MS) {
@@ -203,9 +213,8 @@ class SimulationController {
     const binding = this.binding;
     if (!runner || !binding) return;
     const { visuals } = binding.update(this.controls());
-    const speedFactor =
-      this.wallRecently > 0 ? this.executedRecently / ((this.wallRecently / 1000) * F_CPU) : 1;
-    this.executedRecently = 0;
+    const speedFactor = this.wallRecently > 0 ? this.simMsRecently / this.wallRecently : 1;
+    this.simMsRecently = 0;
     this.wallRecently = 0;
     useSimulationStore.getState().publishFrame({
       simTimeMs: runner.timeMs,
@@ -222,13 +231,13 @@ class SimulationController {
     useSimulationStore.getState().setStatus('paused');
   }
 
-  /** Executes a fixed number of cycles while paused (single-step). */
-  step(cycles = 16_000): void {
+  /** Advances a fixed slice of simulated time while paused (single-step). */
+  step(simMs = 1): void {
     const store = useSimulationStore.getState();
     if (!this.runner || !this.binding) return;
     if (store.status === 'running') this.pause();
     try {
-      this.runner.runToCycles(this.runner.cpu.cycles + cycles);
+      this.runner.runFor(simMs);
       this.binding.update(this.controls());
       this.publish();
       store.setStatus('paused');
@@ -241,10 +250,11 @@ class SimulationController {
     const store = useSimulationStore.getState();
     const wasRunning = store.status === 'running';
     this.stopLoop();
-    if (!this.hex || !this.project) return;
+    if (!this.firmware || !this.project) return;
+    const previous = this.runner;
     void this.createRunner().then((runner) => {
       if (!runner) return;
-      this.attachRunner(runner);
+      this.attachRunner(previous, runner);
       useSimulationStore.getState().clearSerial();
       if (wasRunning) {
         this.resumeLoop();
@@ -258,6 +268,7 @@ class SimulationController {
 
   stop(): void {
     this.stopLoop();
+    this.runner?.dispose?.();
     this.runner = null;
     this.binding = null;
     const store = useSimulationStore.getState();

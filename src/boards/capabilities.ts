@@ -54,6 +54,48 @@ const LEONARDO_SIM_APIS = [
 ];
 const AVR_SIM_PERIPHERALS = ['GPIO ports', 'Timer0/1/2', 'USART0', 'ADC'];
 
+/**
+ * The RP2040 lists are written from what the integration tests actually
+ * exercise on real compiled firmware, not from what the chip can do.
+ *
+ * Deliberately absent, because nothing here tests them: Wi-Fi, USB (including
+ * the USB-CDC `Serial` object, which is why only `Serial1` is claimed), PIO,
+ * the second core, and hardware I2C/SPI device support.
+ *
+ * `analogWrite()` is absent for a licensing reason rather than an engineering
+ * one. The Arduino-Pico core is built against the Pico SDK's ROM floating-point
+ * implementation, so every float operation is dispatched through a table in
+ * the Raspberry Pi boot ROM. That table is the third-party mufplib code
+ * CircuitDesk is not licensed to redistribute (see THIRD_PARTY_NOTICES.md), and
+ * `analogWrite()` computes its PWM divisor in floating point. A sketch that
+ * needs those routines is stopped with an explanation rather than allowed to
+ * run on fabricated values. Integer arithmetic, digital I/O, `analogRead()`
+ * and `Serial1` do not touch them.
+ */
+const RP2040_SIM_APIS = [
+  'pinMode (INPUT, OUTPUT, INPUT_PULLUP)',
+  'digitalWrite',
+  'digitalRead',
+  'analogRead (GP26/GP27/GP28, 0-3.3 V, 12-bit)',
+  'delay/millis/micros',
+  'Serial1 (hardware UART0 on GP0/GP1)',
+];
+const RP2040_SIM_PERIPHERALS = [
+  'SIO and GPIO pads (GP0-GP28, including pad pull resistors)',
+  'ADC channels 0-2',
+  'UART0',
+  'system timer',
+  'clock tree (PLLs, clk_sys, clk_peri)',
+];
+
+/** Shared by both RP2040 boards, so the two texts cannot drift apart. */
+const RP2040_LIMITATION =
+  'The RP2040 CPU, GPIO, ADC and UART0 are simulated by executing the real compiled firmware. ' +
+  'Floating-point arithmetic is not available, because the Arduino-Pico core performs it through ' +
+  'routines built into the Raspberry Pi boot ROM that CircuitDesk is not licensed to redistribute; ' +
+  'this also rules out analogWrite(), which computes its PWM divisor in floating point. ' +
+  'USB (the Serial object), PIO, the second core and hardware I2C/SPI device support are not simulated.';
+
 const avrCliCompiler = (fqbn: string): BoardCompilerInfo => ({
   provider: 'arduino-cli',
   fqbn,
@@ -181,10 +223,15 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       supported: true,
       note: 'Requires the rp2040:rp2040 (Arduino-Pico) core on the compiler service, installed in the production image. Never compiled through arduino:avr.',
     },
-    // Every RP2040 GPIO can be routed to a PWM slice.
+    simulation: {
+      engine: 'rp2040js',
+      supported: true,
+      supportedApis: RP2040_SIM_APIS,
+      supportedPeripherals: RP2040_SIM_PERIPHERALS,
+    },
+    // Every RP2040 GPIO can be routed to a PWM slice on the real chip.
     extraPinCaps: [{ pattern: /^GP\d+$/, add: ['pwm'] }],
-    limitation:
-      'RP2040 instruction-level simulation is not implemented — the Pico never runs on the AVR engine. Compile support targets the real board.',
+    limitation: RP2040_LIMITATION,
   },
   'board.raspberry-pi-pico-w': {
     architecture: 'rp2040',
@@ -196,8 +243,15 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       supported: true,
       note: 'Built as a Pico W in its own right (rp2040:rp2040:rpipicow), not as a plain Pico. The CYW43 Wi-Fi APIs are not included in this toolchain.',
     },
+    simulation: {
+      engine: 'rp2040js',
+      supported: true,
+      supportedApis: RP2040_SIM_APIS,
+      supportedPeripherals: RP2040_SIM_PERIPHERALS,
+    },
     extraPinCaps: [{ pattern: /^GP\d+$/, add: ['pwm'] }],
-    limitation: 'Same RP2040 silicon as the Pico, built for its own target; Wi-Fi is not compiled or simulated.',
+    limitation:
+      'The CYW43 Wi-Fi radio and all network functionality are NOT simulated. ' + RP2040_LIMITATION,
   },
 
   // ---------------- Espressif (variants are distinct) ----------------
