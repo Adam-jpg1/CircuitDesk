@@ -720,7 +720,10 @@ const intcSetType: RomHandler = ({ args, bus }) => {
 const intcSetPriority: RomHandler = ({ args, bus }) => {
   const [interrupt, priority] = args;
   if (interrupt < 1 || interrupt > 31) return 0;
-  bus.writeUint32((INTERRUPT_MATRIX_BASE + INTC_PRIORITY_BASE + (interrupt - 1) * 4) >>> 0, priority >>> 0);
+  // The priority words start at line 0 and run one per line, so a line's word
+  // is at its own index. Offsetting by one puts every priority on the wrong
+  // interrupt, which the firmware's own dispatcher then reads back.
+  bus.writeUint32((INTERRUPT_MATRIX_BASE + INTC_PRIORITY_BASE + interrupt * 4) >>> 0, priority >>> 0);
   return 0;
 };
 

@@ -11,6 +11,7 @@
 // the memory map.
 
 import { Rv32Core, type Bus } from '../riscv/rv32Core';
+import { isInterrupting, InterruptMatrix, type InterruptingPeripheral } from './interrupts';
 import type { EspApplicationImage } from './espImage';
 import {
   ARG_REGISTER_BASE,
@@ -195,6 +196,12 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
   private readonly memory = new SparseMemory();
   private readonly romTable: Map<number, RomFunction>;
   private readonly peripherals: Peripheral[] = [];
+  private readonly interruptSources: InterruptingPeripheral[] = [];
+  private interruptMatrix: InterruptMatrix | undefined;
+  private pendingInterruptLines = 0;
+  /** Simulated time at which a peripheral said its interrupt state may change. */
+  private nextInterruptCheckNanos: number | undefined;
+  private interruptsDirty = true;
   private image: EspApplicationImage | null = null;
 
   /** Symbol names by address, for diagnostics. Populated from an ELF if one is available. */
@@ -205,6 +212,8 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
     this.romState = createRomMachineState(options.resetReason ?? ResetReason.PowerOn);
     this.core = new Rv32Core(this);
     this.core.customCsrRead = (number_) => this.readChipCsr(number_);
+    this.core.selectInterrupt = (mask) => this.chooseInterrupt(mask);
+    this.core.customPendingInterrupts = () => this.pendingInterruptLines;
   }
 
   /**
@@ -228,6 +237,47 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
   /** Registers a peripheral. Later registrations win for overlapping ranges. */
   addPeripheral(peripheral: Peripheral): void {
     this.peripherals.push(peripheral);
+    if (peripheral instanceof InterruptMatrix) this.interruptMatrix = peripheral;
+    if (isInterrupting(peripheral)) this.interruptSources.push(peripheral);
+    // A new source could already be asserting, so the next step has to look.
+    this.interruptsDirty = true;
+  }
+
+  // ------------------------------------------------------ interrupt delivery
+
+  /**
+   * Re-derives which CPU interrupt line is pending, and tells the core.
+   *
+   * Doing this after every instruction would be correct but wasteful, so it is
+   * driven by the two things that can change the answer: a write to any
+   * peripheral register, and simulated time reaching a moment a peripheral said
+   * it would assert at. Nothing else can move an interrupt line, so nothing
+   * else needs to trigger a look.
+   */
+  private refreshInterrupts(): void {
+    this.interruptsDirty = false;
+    const matrix = this.interruptMatrix;
+    if (!matrix) return;
+
+    const asserted: number[] = [];
+    let soonest: number | undefined;
+    for (const source of this.interruptSources) {
+      for (const number_ of source.assertedInterruptSources()) asserted.push(number_);
+      const at = source.nextInterruptChangeNanos?.();
+      if (at !== undefined && (soonest === undefined || at < soonest)) soonest = at;
+    }
+    this.nextInterruptCheckNanos = soonest;
+    this.pendingInterruptLines = matrix.evaluate(asserted);
+
+    // The controller has already applied routing and its own enable mask, so
+    // what is left is what the CPU may take. It is mirrored into `mip` as
+    // well, because that is where a debugger or a trace looks for it.
+    this.core.setPendingMask(this.pendingInterruptLines);
+  }
+
+  /** Which line the controller would deliver, for the core to trap into. */
+  private chooseInterrupt(pendingAndEnabled: number): number | undefined {
+    return this.interruptMatrix?.select(pendingAndEnabled);
   }
 
   peripheralAt(address: number): Peripheral | undefined {
@@ -284,6 +334,9 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
   /** Returns the machine to its power-on state and boots the same image again. */
   reset(): void {
     this.elapsedNanos = 0;
+    this.pendingInterruptLines = 0;
+    this.nextInterruptCheckNanos = undefined;
+    this.interruptsDirty = true;
     this.romState.cpuFrequencyMhz = 160;
     this.romState.pendingDelayUs = 0;
     for (const peripheral of this.peripherals) peripheral.reset?.();
@@ -303,6 +356,12 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
    * caller can advance a cycle counter.
    */
   step(): number {
+    if (
+      this.interruptsDirty ||
+      (this.nextInterruptCheckNanos !== undefined && this.elapsedNanos >= this.nextInterruptCheckNanos)
+    ) {
+      this.refreshInterrupts();
+    }
     const period = 1000 / Math.max(1, this.romState.cpuFrequencyMhz);
     const pc = this.core.pc >>> 0;
     if (isRomAddress(pc)) {
@@ -443,6 +502,9 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
     const peripheral = this.peripheralAt(a);
     if (peripheral) {
       peripheral.writeUint32(a - peripheral.base, value >>> 0);
+      // Any peripheral write can enable, mask, route, raise or clear an
+      // interrupt, so the next step re-derives what is pending.
+      this.interruptsDirty = true;
       return;
     }
     this.options.onUnclaimedMmio?.({ address: a, value: value >>> 0, write: true, peripheral: undefined, pc: this.core.pc >>> 0 });

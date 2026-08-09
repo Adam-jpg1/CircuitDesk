@@ -17,7 +17,11 @@
 // on invented data.
 
 import type { Peripheral, SimulatedClock } from './esp32c3Machine';
+import { RegisterFile } from './registerFile';
 import { SpiMemController, SPI_MEM_BASE } from './spiMem';
+import { InterruptMatrix, INTERRUPT_SOURCE, SystemRegisters, type InterruptingPeripheral } from './interrupts';
+
+export { RegisterFile } from './registerFile';
 import type { SerialNorFlash } from './spiFlash';
 
 /** Documented ESP32-C3 peripheral base addresses. */
@@ -35,49 +39,6 @@ export const PERIPHERAL_BASE = {
   extMem: 0x600c4000,
   apbCtrl: 0x60026000,
 } as const;
-
-/**
- * A peripheral whose registers hold whatever was written to them.
- *
- * Subclasses override `onWrite` and `onRead` for the registers hardware
- * drives; everything else behaves as storage.
- */
-export class RegisterFile implements Peripheral {
-  protected readonly registers = new Map<number, number>();
-
-  constructor(
-    readonly name: string,
-    readonly base: number,
-    readonly size: number,
-  ) {}
-
-  readUint32(offset: number): number {
-    const handled = this.onRead(offset);
-    if (handled !== undefined) return handled >>> 0;
-    return (this.registers.get(offset) ?? 0) >>> 0;
-  }
-
-  writeUint32(offset: number, value: number): void {
-    this.registers.set(offset, value >>> 0);
-    this.onWrite(offset, value >>> 0);
-  }
-
-  /** Return a value to override plain storage, or undefined to use it. */
-  protected onRead(_offset: number): number | undefined {
-    return undefined;
-  }
-
-  protected onWrite(_offset: number, _value: number): void {}
-
-  reset(): void {
-    this.registers.clear();
-  }
-
-  /** Raw stored value, for tests and diagnostics. */
-  peek(offset: number): number {
-    return (this.registers.get(offset) ?? 0) >>> 0;
-  }
-}
 
 // ------------------------------------------------------------- timer group
 
@@ -220,7 +181,7 @@ interface SysTimerComparator {
   armed: boolean;
 }
 
-export class SysTimer extends RegisterFile {
+export class SysTimer extends RegisterFile implements InterruptingPeripheral {
   private readonly units: SysTimerUnit[] = [];
   private readonly comparators: SysTimerComparator[] = [];
 
@@ -280,6 +241,39 @@ export class SysTimer extends RegisterFile {
   /** Interrupt lines this peripheral is currently asserting. */
   pendingInterrupts(): number {
     return (this.rawInterrupts() & this.peek(SYSTIMER_INT_ENA)) >>> 0;
+  }
+
+  assertedInterruptSources(): number[] {
+    const pending = this.pendingInterrupts();
+    const sources: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      if ((pending & (1 << i)) !== 0) sources.push(INTERRUPT_SOURCE.systimerTarget0 + i);
+    }
+    return sources;
+  }
+
+  /**
+   * When the next armed comparator reaches its target.
+   *
+   * Comparators fire as time passes rather than when firmware writes, so the
+   * machine cannot know to look without being told. Returning the moment it
+   * next needs to look — rather than making it check after every instruction —
+   * is what keeps interrupt delivery both exact and cheap.
+   */
+  nextInterruptChangeNanos(): number | undefined {
+    const conf = this.peek(SYSTIMER_CONF);
+    const enabled = this.peek(SYSTIMER_INT_ENA);
+    let soonest: number | undefined;
+    for (let i = 0; i < 3; i++) {
+      const comparator = this.comparators[i];
+      if (!comparator.armed || (conf & TARGET_WORK_EN[i]) === 0 || (enabled & (1 << i)) === 0) continue;
+      const unit = (this.peek(SYSTIMER_TARGET_CONF[i]) & TARGET_UNIT_SEL) !== 0 ? 1 : 0;
+      const remaining = comparator.next - this.counter(unit);
+      // Already past its target: the machine should look immediately.
+      const at = remaining <= 0 ? this.clock.nanos : this.clock.nanos + (remaining * 1e9) / SYSTIMER_TICK_HZ;
+      if (soonest === undefined || at < soonest) soonest = at;
+    }
+    return soonest;
   }
 
   protected override onRead(offset: number): number | undefined {
@@ -426,8 +420,10 @@ export function createStartupPeripherals(clock: SimulatedClock, flash?: SerialNo
     new TimerGroup('timg0', PERIPHERAL_BASE.timg0),
     new TimerGroup('timg1', PERIPHERAL_BASE.timg1),
     new RegisterFile('rtc_cntl', PERIPHERAL_BASE.rtcCntl, 0x1000),
-    new RegisterFile('system', PERIPHERAL_BASE.systemRegisters, 0x1000),
-    new RegisterFile('interrupt_matrix', PERIPHERAL_BASE.interruptMatrix, 0x1000),
+    // The system block spans everything up to the interrupt matrix, and it
+    // carries the software interrupts a CPU raises on itself.
+    new SystemRegisters(PERIPHERAL_BASE.systemRegisters, PERIPHERAL_BASE.interruptMatrix - PERIPHERAL_BASE.systemRegisters),
+    new InterruptMatrix(),
     new RegisterFile('extmem', PERIPHERAL_BASE.extMem, 0x1000),
     new SystemConfiguration(),
     new SysTimer(clock),

@@ -103,6 +103,28 @@ export class Rv32Core {
   /** Returns true when the chip handled the write itself. */
   customCsrWrite?: (number_: number, value: number) => boolean;
 
+  /**
+   * Chooses which pending interrupt to take, when the chip does not use the
+   * standard three.
+   *
+   * RISC-V leaves the meaning and relative priority of the remaining `mip`
+   * bits to the implementation, and parts use them: the ESP32-C3 presents
+   * thirty-one interrupt lines of its own there and expects `mcause` to name
+   * the line. Returning undefined falls back to the standard ordering.
+   */
+  selectInterrupt?: (pendingAndEnabled: number) => number | undefined;
+
+  /**
+   * Replaces the standard `mie & mip` gate.
+   *
+   * Some parts do the enabling and masking in their own interrupt controller
+   * rather than in `mie` — the ESP32-C3 gates entirely on its controller's
+   * enable register and `mstatus.MIE`, and never touches `mie` at all. Such a
+   * chip supplies the already-gated set of asserted lines here, and modelling
+   * it as an `mie` the firmware never writes would be inventing a register.
+   */
+  customPendingInterrupts?: () => number;
+
   constructor(readonly bus: Bus) {
     this.reset(0);
   }
@@ -206,7 +228,26 @@ export class Rv32Core {
   get interruptPending(): boolean {
     const status = this.readCsr(CSR_MSTATUS);
     if (((status >> 3) & 1) === 0) return false;
-    return (this.readCsr(CSR_MIE) & this.readCsr(CSR_MIP)) !== 0;
+    return this.enabledInterrupts() !== 0;
+  }
+
+  /** The interrupts eligible to be taken, however this part gates them. */
+  private enabledInterrupts(): number {
+    const custom = this.customPendingInterrupts?.();
+    if (custom !== undefined) return custom >>> 0;
+    return (this.readCsr(CSR_MIE) & this.readCsr(CSR_MIP)) >>> 0;
+  }
+
+  /**
+   * Replaces the whole pending mask at once.
+   *
+   * A chip whose interrupt controller owns every line recomputes them
+   * together, and setting them one bit at a time would be both slower and
+   * wrong in between.
+   */
+  setPendingMask(mask: number): void {
+    this.writeCsr(CSR_MIP, mask | 0);
+    if (mask !== 0) this.waiting = false;
   }
 
   /** Sets or clears a machine interrupt pending bit. */
@@ -225,7 +266,12 @@ export class Rv32Core {
    */
   step(): number {
     if (this.interruptPending) {
-      const mask = this.readCsr(CSR_MIE) & this.readCsr(CSR_MIP);
+      const mask = this.enabledInterrupts();
+      const chosen = this.selectInterrupt?.(mask);
+      if (chosen !== undefined) {
+        this.trap(chosen, 0, true);
+        return 0;
+      }
       // Machine external (11), timer (7) and software (3), highest first.
       for (const bit of [11, 7, 3]) {
         if (mask & (1 << bit)) {
