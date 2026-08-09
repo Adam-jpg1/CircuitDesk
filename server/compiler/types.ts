@@ -161,6 +161,23 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     flashMaxBytes: 2_093_056,
     ramMaxBytes: 262_144,
   },
+  // The ESP32-C3 is RISC-V, not Xtensa, so it is its own target rather than a
+  // variant of the ESP32 entries. The FQBN is the Espressif core's generic C3
+  // entry ("ESP32C3 Dev Module"), which is what every Espressif C3 development
+  // board is built as; the flash ceiling is that entry's own default partition
+  // layout rather than the raw 4 MB the module carries.
+  {
+    id: 'board.esp32-c3',
+    fqbn: 'esp32:esp32:esp32c3',
+    name: 'ESP32-C3 (RISC-V RV32IMC)',
+    arch: 'esp32c3',
+    core: 'esp32:esp32',
+    mcu: 'esp32c3',
+    variant: 'esp32c3',
+    fCpuHz: 160_000_000,
+    flashMaxBytes: 1_310_720,
+    ramMaxBytes: 327_680,
+  },
 ];
 
 export function findTarget(idOrFqbn: string, boardId?: string): BoardTarget | undefined {
