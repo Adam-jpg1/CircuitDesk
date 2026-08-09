@@ -17,6 +17,8 @@
 // on invented data.
 
 import type { Peripheral, SimulatedClock } from './esp32c3Machine';
+import { SpiMemController, SPI_MEM_BASE } from './spiMem';
+import type { SerialNorFlash } from './spiFlash';
 
 /** Documented ESP32-C3 peripheral base addresses. */
 export const PERIPHERAL_BASE = {
@@ -363,21 +365,71 @@ export class SysTimer extends RegisterFile {
   }
 }
 
+// ------------------------------------------------------- system configuration
+
+/** Offset of the random number register within the system configuration block. */
+const SYSCON_RND_DATA = 0x0b0;
+
+/**
+ * The system configuration block, which is also where the random number
+ * generator presents its output.
+ *
+ * On hardware that output comes from amplified analog noise. A simulator has
+ * no physical noise source, so this produces a deterministic sequence instead:
+ * a run reproduces exactly, which is what makes a failing simulation
+ * debuggable, and inventing a claim of true randomness would be worse than
+ * saying plainly that this is not one.
+ *
+ * That distinction matters beyond debugging. Firmware that generates keys or
+ * nonces from `esp_random()` gets values CircuitDesk can reproduce, so results
+ * from a simulated run say nothing about the security of the same sketch on
+ * real hardware.
+ *
+ * The sequence itself is xorshift32, which is full-period over its 32-bit
+ * state, so successive reads never repeat within a run.
+ */
+export class SystemConfiguration extends RegisterFile {
+  private randomState = 0x2545f491;
+
+  constructor() {
+    super('apb_ctrl', PERIPHERAL_BASE.apbCtrl, 0x1000);
+  }
+
+  override reset(): void {
+    super.reset();
+    this.randomState = 0x2545f491;
+  }
+
+  protected override onRead(offset: number): number | undefined {
+    if (offset !== SYSCON_RND_DATA) return undefined;
+    let x = this.randomState;
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    this.randomState = x | 0;
+    return this.randomState >>> 0;
+  }
+}
+
 /**
  * Builds the peripheral set an ESP32-C3 machine needs to start.
  *
  * Blocks are added as startup proves it touches them; each one is either
  * modelled or left as a register file, and nothing is added speculatively.
  */
-export function createStartupPeripherals(clock: SimulatedClock): Peripheral[] {
+export function createStartupPeripherals(clock: SimulatedClock, flash?: SerialNorFlash): Peripheral[] {
   return [
+    // SPI0 belongs to the cache. Firmware configures it but runs no
+    // transactions through it, so its registers only need to read back.
+    new RegisterFile('spi0', SPI_MEM_BASE.spi0, 0x1000),
+    ...(flash ? [new SpiMemController(flash)] : []),
     new TimerGroup('timg0', PERIPHERAL_BASE.timg0),
     new TimerGroup('timg1', PERIPHERAL_BASE.timg1),
     new RegisterFile('rtc_cntl', PERIPHERAL_BASE.rtcCntl, 0x1000),
     new RegisterFile('system', PERIPHERAL_BASE.systemRegisters, 0x1000),
     new RegisterFile('interrupt_matrix', PERIPHERAL_BASE.interruptMatrix, 0x1000),
     new RegisterFile('extmem', PERIPHERAL_BASE.extMem, 0x1000),
-    new RegisterFile('apb_ctrl', PERIPHERAL_BASE.apbCtrl, 0x1000),
+    new SystemConfiguration(),
     new SysTimer(clock),
     new RegisterFile('io_mux', PERIPHERAL_BASE.ioMux, 0x1000),
   ];

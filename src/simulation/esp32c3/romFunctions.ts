@@ -70,7 +70,7 @@ export interface RomMachineState {
   /** The analog/clock register file written through regi2c. */
   regi2c: Map<number, number>;
   /** Recorded cache configuration, for diagnostics and tests. */
-  cache: { iCacheEnabled: boolean; iromMmuSize: number; dromMmuSize: number };
+  cache: { iCacheEnabled: boolean; iCacheFrozen: boolean; iromMmuSize: number; dromMmuSize: number };
   /** What ets_get_cpu_frequency() reports, in MHz. */
   cpuFrequencyMhz: number;
   /** Microseconds a ROM delay asked for, which the runner turns into time. */
@@ -79,6 +79,8 @@ export interface RomMachineState {
   putc1: number;
   /** Lock handles the application gave the ROM's C library, if it has yet. */
   newlibLocks: { common: number; recursive: number } | null;
+  /** Callbacks the ROM was given to guard its APB backup DMA, if any. */
+  apbBackupLock: { lock: number; unlock: number } | null;
   /**
    * eFuse values this runtime reports.
    *
@@ -99,11 +101,12 @@ export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMac
   return {
     resetReason,
     regi2c: new Map<number, number>(),
-    cache: { iCacheEnabled: false, iromMmuSize: 0, dromMmuSize: 0 },
+    cache: { iCacheEnabled: false, iCacheFrozen: false, iromMmuSize: 0, dromMmuSize: 0 },
     cpuFrequencyMhz: 160,
     pendingDelayUs: 0,
     putc1: 0,
     newlibLocks: null,
+    apbBackupLock: null,
     efuse: { flashGpioInfo: 0, flashWpGpio: 0x3f },
     romConsole: [],
     romConsoleRx: [],
@@ -403,6 +406,164 @@ const delayUs: RomHandler = ({ args, machine }) => {
  */
 const installPutc1: RomHandler = ({ args, machine }) => {
   machine.putc1 = args[0] >>> 0;
+};
+
+// ---------------------------------------------------------------------- MD5
+//
+// ESP-IDF hashes partition contents with the MD5 implementation in the mask
+// ROM. MD5 is a published algorithm — RFC 1321 — so this is written from the
+// specification rather than from anything of Espressif's, and it operates
+// directly on the caller's context structure so the firmware's own state is
+// the real state. The layout is the documented three-field context: four
+// digest words, a 64-bit bit count, and a 64-byte input buffer.
+
+const MD5_BUFFER_OFFSET = 0;
+const MD5_BITS_OFFSET = 16;
+const MD5_INPUT_OFFSET = 24;
+const MD5_BLOCK_SIZE = 64;
+
+/** Per-round shift amounts, from RFC 1321. */
+const MD5_SHIFTS = [
+  7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+  4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15,
+  21,
+];
+
+/** The additive constants, which RFC 1321 defines as a function of sine. */
+const MD5_SINE = new Uint32Array(64);
+for (let i = 0; i < 64; i++) MD5_SINE[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 0x100000000) >>> 0;
+
+function md5Transform(state: Uint32Array, block: Uint8Array): void {
+  const words = new Uint32Array(16);
+  for (let i = 0; i < 16; i++) {
+    words[i] = (block[i * 4] | (block[i * 4 + 1] << 8) | (block[i * 4 + 2] << 16) | (block[i * 4 + 3] << 24)) >>> 0;
+  }
+  let [a, b, c, d] = state;
+  for (let i = 0; i < 64; i++) {
+    let f: number;
+    let g: number;
+    if (i < 16) {
+      f = (b & c) | (~b & d);
+      g = i;
+    } else if (i < 32) {
+      f = (d & b) | (~d & c);
+      g = (5 * i + 1) % 16;
+    } else if (i < 48) {
+      f = b ^ c ^ d;
+      g = (3 * i + 5) % 16;
+    } else {
+      f = c ^ (b | ~d);
+      g = (7 * i) % 16;
+    }
+    const sum = (a + f + MD5_SINE[i] + words[g]) >>> 0;
+    const shift = MD5_SHIFTS[i];
+    a = d;
+    d = c;
+    c = b;
+    b = (b + (((sum << shift) | (sum >>> (32 - shift))) >>> 0)) >>> 0;
+  }
+  state[0] = (state[0] + a) >>> 0;
+  state[1] = (state[1] + b) >>> 0;
+  state[2] = (state[2] + c) >>> 0;
+  state[3] = (state[3] + d) >>> 0;
+}
+
+/** Reads the four digest words out of a caller's context. */
+function md5ReadState(bus: Bus, context: number): Uint32Array {
+  const state = new Uint32Array(4);
+  for (let i = 0; i < 4; i++) state[i] = bus.readUint32((context + MD5_BUFFER_OFFSET + i * 4) >>> 0) >>> 0;
+  return state;
+}
+
+function md5WriteState(bus: Bus, context: number, state: Uint32Array): void {
+  for (let i = 0; i < 4; i++) bus.writeUint32((context + MD5_BUFFER_OFFSET + i * 4) >>> 0, state[i] >>> 0);
+}
+
+/** The bit count is a 64-bit value in two little-endian words. */
+function md5ReadBitCount(bus: Bus, context: number): number {
+  const low = bus.readUint32((context + MD5_BITS_OFFSET) >>> 0) >>> 0;
+  const high = bus.readUint32((context + MD5_BITS_OFFSET + 4) >>> 0) >>> 0;
+  return high * 0x100000000 + low;
+}
+
+function md5WriteBitCount(bus: Bus, context: number, bits: number): void {
+  bus.writeUint32((context + MD5_BITS_OFFSET) >>> 0, bits >>> 0);
+  bus.writeUint32((context + MD5_BITS_OFFSET + 4) >>> 0, Math.floor(bits / 0x100000000) >>> 0);
+}
+
+/** `MD5Init(context)` — the initialisation vector RFC 1321 specifies. */
+const md5Init: RomHandler = ({ args, bus }) => {
+  const context = args[0] >>> 0;
+  md5WriteState(bus, context, Uint32Array.from([0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476]));
+  md5WriteBitCount(bus, context, 0);
+};
+
+/** `MD5Update(context, data, length)`. */
+const md5Update: RomHandler = ({ args, bus }) => {
+  const context = args[0] >>> 0;
+  const source = args[1] >>> 0;
+  const length = args[2] >>> 0;
+  const state = md5ReadState(bus, context);
+  const bits = md5ReadBitCount(bus, context);
+  let used = (bits / 8) % MD5_BLOCK_SIZE;
+
+  const block = new Uint8Array(MD5_BLOCK_SIZE);
+  for (let i = 0; i < used; i++) block[i] = bus.readUint8((context + MD5_INPUT_OFFSET + i) >>> 0);
+
+  for (let i = 0; i < length; i++) {
+    block[used++] = bus.readUint8((source + i) >>> 0);
+    if (used === MD5_BLOCK_SIZE) {
+      md5Transform(state, block);
+      used = 0;
+    }
+  }
+
+  for (let i = 0; i < used; i++) bus.writeUint8((context + MD5_INPUT_OFFSET + i) >>> 0, block[i]);
+  md5WriteState(bus, context, state);
+  md5WriteBitCount(bus, context, bits + length * 8);
+};
+
+/** `MD5Final(digest, context)` — pads, appends the length, and writes 16 bytes. */
+const md5Final: RomHandler = ({ args, bus }) => {
+  const digest = args[0] >>> 0;
+  const context = args[1] >>> 0;
+  const state = md5ReadState(bus, context);
+  const bits = md5ReadBitCount(bus, context);
+  const used = (bits / 8) % MD5_BLOCK_SIZE;
+
+  const block = new Uint8Array(MD5_BLOCK_SIZE);
+  for (let i = 0; i < used; i++) block[i] = bus.readUint8((context + MD5_INPUT_OFFSET + i) >>> 0);
+  block[used] = 0x80;
+  // The length needs eight bytes at the end of a block; if they do not fit,
+  // this block is flushed and the length goes in the next one.
+  if (used >= MD5_BLOCK_SIZE - 8) {
+    md5Transform(state, block);
+    block.fill(0);
+  }
+  for (let i = 0; i < 8; i++) block[MD5_BLOCK_SIZE - 8 + i] = Math.floor(bits / 2 ** (8 * i)) & 0xff;
+  md5Transform(state, block);
+
+  for (let i = 0; i < 4; i++) {
+    for (let b = 0; b < 4; b++) bus.writeUint8((digest + i * 4 + b) >>> 0, (state[i] >>> (b * 8)) & 0xff);
+  }
+  // The context is wiped, as the reference implementation does, so a caller
+  // reusing it without re-initialising gets a clean failure rather than a
+  // digest that silently continues an old one.
+  md5WriteState(bus, context, new Uint32Array(4));
+  md5WriteBitCount(bus, context, 0);
+  for (let i = 0; i < MD5_BLOCK_SIZE; i++) bus.writeUint8((context + MD5_INPUT_OFFSET + i) >>> 0, 0);
+};
+
+/**
+ * `ets_apb_backup_init_lock_func(lock, unlock)`
+ *
+ * Hands the ROM a pair of callbacks it should use to guard the APB backup DMA
+ * while it runs. Recorded for the same reason as the C library's lock handles:
+ * nothing in this runtime executes the ROM code those callbacks would protect,
+ * and the pointers are the whole observable effect of the call.
+ */
+const apbBackupInitLockFunc: RomHandler = ({ args, machine }) => {
+  machine.apbBackupLock = { lock: args[0] >>> 0, unlock: args[1] >>> 0 };
 };
 
 /**
@@ -786,6 +947,157 @@ const strlcpy: RomHandler = ({ args, bus }) => {
   return text.length;
 };
 
+/** `memchr(block, byte, length)` — first match, or null. */
+const memchr: RomHandler = ({ args, bus }) => {
+  const [block, , length] = args.map((v) => v >>> 0);
+  const wanted = args[1] & 0xff;
+  for (let i = 0; i < length; i++) {
+    if (bus.readUint8((block + i) >>> 0) === wanted) return (block + i) >>> 0;
+  }
+  return 0;
+};
+
+/** `memrchr(block, byte, length)` — last match, or null. */
+const memrchr: RomHandler = ({ args, bus }) => {
+  const [block, , length] = args.map((v) => v >>> 0);
+  const wanted = args[1] & 0xff;
+  for (let i = length - 1; i >= 0; i--) {
+    if (bus.readUint8((block + i) >>> 0) === wanted) return (block + i) >>> 0;
+  }
+  return 0;
+};
+
+/**
+ * `memccpy(dest, source, byte, length)`
+ *
+ * Copies until the byte has been copied or the length runs out, and returns
+ * the address just past the copied byte — or null when it never appeared.
+ */
+const memccpy: RomHandler = ({ args, bus }) => {
+  const [dest, source, , length] = args.map((v) => v >>> 0);
+  const wanted = args[2] & 0xff;
+  for (let i = 0; i < length; i++) {
+    const byte = bus.readUint8((source + i) >>> 0);
+    bus.writeUint8((dest + i) >>> 0, byte);
+    if (byte === wanted) return (dest + i + 1) >>> 0;
+  }
+  return 0;
+};
+
+const strnlen: RomHandler = ({ args, bus }) => {
+  const [address, limit] = args.map((v) => v >>> 0);
+  let length = 0;
+  while (length < limit && bus.readUint8((address + length) >>> 0) !== 0) length++;
+  return length;
+};
+
+const strrchr: RomHandler = ({ args, bus }) => {
+  const address = args[0] >>> 0;
+  const text = readCString(bus, address);
+  const wanted = args[1] & 0xff;
+  if (wanted === 0) return (address + text.length) >>> 0;
+  const at = text.lastIndexOf(String.fromCharCode(wanted));
+  return at < 0 ? 0 : (address + at) >>> 0;
+};
+
+/** `strcasestr` — substring search ignoring ASCII case. */
+const strcasestr: RomHandler = ({ args, bus }) => {
+  const address = args[0] >>> 0;
+  const at = readCString(bus, address).toLowerCase().indexOf(readCString(bus, args[1] >>> 0).toLowerCase());
+  return at < 0 ? 0 : (address + at) >>> 0;
+};
+
+/** `strspn` — length of the run of characters that are all in the accept set. */
+const strspn: RomHandler = ({ args, bus }) => {
+  const text = readCString(bus, args[0] >>> 0);
+  const accept = new Set(readCString(bus, args[1] >>> 0));
+  let length = 0;
+  while (length < text.length && accept.has(text[length])) length++;
+  return length;
+};
+
+/** `strcspn` — length of the run before any character in the reject set. */
+const strcspn: RomHandler = ({ args, bus }) => {
+  const text = readCString(bus, args[0] >>> 0);
+  const reject = new Set(readCString(bus, args[1] >>> 0));
+  let length = 0;
+  while (length < text.length && !reject.has(text[length])) length++;
+  return length;
+};
+
+/** `strlcat(dst, src, size)` -> the length the result would have had. */
+const strlcat: RomHandler = ({ args, bus }) => {
+  const [dest, source, size] = args.map((v) => v >>> 0);
+  const existing = readCString(bus, dest);
+  const addition = readCString(bus, source);
+  // When the destination is already longer than the buffer, the standard says
+  // the result is the buffer size plus the source length, and nothing is copied.
+  if (existing.length >= size) return size + addition.length;
+  const room = size - existing.length - 1;
+  writeCString(bus, (dest + existing.length) >>> 0, addition.slice(0, room));
+  return existing.length + addition.length;
+};
+
+/**
+ * `strsep(&string, delimiters)`
+ *
+ * Splits in place: the delimiter found is replaced by a terminator and the
+ * caller's pointer is advanced past it, or set to null on the last field.
+ */
+const strsep: RomHandler = ({ args, bus }) => {
+  const holder = args[0] >>> 0;
+  const start = bus.readUint32(holder) >>> 0;
+  if (start === 0) return 0;
+  const text = readCString(bus, start);
+  const delimiters = new Set(readCString(bus, args[1] >>> 0));
+  for (let i = 0; i < text.length; i++) {
+    if (!delimiters.has(text[i])) continue;
+    bus.writeUint8((start + i) >>> 0, 0);
+    bus.writeUint32(holder, (start + i + 1) >>> 0);
+    return start;
+  }
+  bus.writeUint32(holder, 0);
+  return start;
+};
+
+/**
+ * `strtok_r(string, delimiters, &saved)`
+ *
+ * Skips leading delimiters, terminates the token, and leaves the resumption
+ * point in the caller's own state so concurrent tokenisations do not collide.
+ */
+const strtokR: RomHandler = ({ args, bus }) => {
+  const saveSlot = args[2] >>> 0;
+  let position = (args[0] >>> 0) || bus.readUint32(saveSlot) >>> 0;
+  if (position === 0) return 0;
+  const delimiters = new Set(readCString(bus, args[1] >>> 0));
+
+  for (;;) {
+    const byte = bus.readUint8(position);
+    if (byte === 0) {
+      bus.writeUint32(saveSlot, 0);
+      return 0;
+    }
+    if (!delimiters.has(String.fromCharCode(byte))) break;
+    position = (position + 1) >>> 0;
+  }
+
+  const start = position;
+  for (;;) {
+    const byte = bus.readUint8(position);
+    if (byte === 0) {
+      bus.writeUint32(saveSlot, position);
+      return start;
+    }
+    if (delimiters.has(String.fromCharCode(byte))) {
+      bus.writeUint8(position, 0);
+      bus.writeUint32(saveSlot, (position + 1) >>> 0);
+      return start;
+    }
+    position = (position + 1) >>> 0;
+  }
+};
+
 const bzero: RomHandler = ({ args, bus }) => {
   const [dest, length] = args.map((v) => v >>> 0);
   for (let i = 0; i < length; i++) bus.writeUint8((dest + i) >>> 0, 0);
@@ -821,6 +1133,30 @@ const isalnum: RomHandler = ({ args }) => (/[0-9a-z]/i.test(String.fromCharCode(
 const isspace: RomHandler = ({ args }) => (/[ \t\n\v\f\r]/.test(String.fromCharCode(args[0] & 0xff)) ? 1 : 0);
 const toupper: RomHandler = ({ args }) => String.fromCharCode(args[0] & 0xff).toUpperCase().charCodeAt(0);
 const tolower: RomHandler = ({ args }) => String.fromCharCode(args[0] & 0xff).toLowerCase().charCodeAt(0);
+
+// The remaining classifications, over the C locale's ASCII definitions.
+const isascii: RomHandler = ({ args }) => ((args[0] | 0) >= 0 && (args[0] | 0) <= 0x7f ? 1 : 0);
+const toascii: RomHandler = ({ args }) => args[0] & 0x7f;
+const isblank: RomHandler = ({ args }) => ((args[0] & 0xff) === 0x20 || (args[0] & 0xff) === 0x09 ? 1 : 0);
+const iscntrl: RomHandler = ({ args }) => {
+  const c = args[0] & 0xff;
+  return c < 0x20 || c === 0x7f ? 1 : 0;
+};
+/** Printable and not a space. */
+const isgraph: RomHandler = ({ args }) => {
+  const c = args[0] & 0xff;
+  return c > 0x20 && c < 0x7f ? 1 : 0;
+};
+const isprint: RomHandler = ({ args }) => {
+  const c = args[0] & 0xff;
+  return c >= 0x20 && c < 0x7f ? 1 : 0;
+};
+/** Printable, not a space, and not alphanumeric. */
+const ispunct: RomHandler = ({ args }) => {
+  const c = args[0] & 0xff;
+  if (c <= 0x20 || c >= 0x7f) return 0;
+  return /[0-9a-z]/i.test(String.fromCharCode(c)) ? 0 : 1;
+};
 
 /**
  * `rand()` and `srand(seed)`
@@ -1087,6 +1423,24 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
   { address: 0x400003fc, name: 'strncat', handler: strncat, rationale: 'Bounded append.' },
   { address: 0x400003f0, name: 'strlcpy', handler: strlcpy, rationale: 'Returns the source length so truncation is detectable.' },
   { address: 0x4000037c, name: 'bzero', handler: bzero, rationale: 'Clears a range byte-wise.' },
+  { address: 0x400003c8, name: 'memchr', handler: memchr, rationale: 'First occurrence of a byte in a bounded block.' },
+  { address: 0x400003cc, name: 'memrchr', handler: memrchr, rationale: 'Last occurrence of a byte in a bounded block.' },
+  { address: 0x400003c4, name: 'memccpy', handler: memccpy, rationale: 'Copies up to and including a stop byte.' },
+  { address: 0x40000404, name: 'strnlen', handler: strnlen, rationale: 'Length without reading past the limit.' },
+  { address: 0x40000408, name: 'strrchr', handler: strrchr, rationale: 'Last match, and the terminator when asked for NUL.' },
+  { address: 0x400003d4, name: 'strcasestr', handler: strcasestr, rationale: 'Substring search ignoring ASCII case.' },
+  { address: 0x40000410, name: 'strspn', handler: strspn, rationale: 'Length of the leading accepted run.' },
+  { address: 0x400003e4, name: 'strcspn', handler: strcspn, rationale: 'Length of the run before any rejected character.' },
+  { address: 0x400003ec, name: 'strlcat', handler: strlcat, rationale: 'Bounded append returning the length it would have needed.' },
+  { address: 0x4000040c, name: 'strsep', handler: strsep, rationale: "Splits in place and advances the caller's pointer." },
+  { address: 0x40000414, name: 'strtok_r', handler: strtokR, rationale: "Tokenises with the resumption point in the caller's state." },
+  { address: 0x40000390, name: 'isascii', handler: isascii, rationale: 'ASCII classification.' },
+  { address: 0x400003c0, name: 'toascii', handler: toascii, rationale: 'ASCII truncation.' },
+  { address: 0x40000394, name: 'isblank', handler: isblank, rationale: 'ASCII classification.' },
+  { address: 0x40000398, name: 'iscntrl', handler: iscntrl, rationale: 'ASCII classification.' },
+  { address: 0x400003a4, name: 'isgraph', handler: isgraph, rationale: 'ASCII classification.' },
+  { address: 0x400003a8, name: 'isprint', handler: isprint, rationale: 'ASCII classification.' },
+  { address: 0x400003ac, name: 'ispunct', handler: ispunct, rationale: 'ASCII classification.' },
   { address: 0x40000424, name: 'abs', handler: absHandler, rationale: 'Absolute value of a 32-bit integer.' },
   { address: 0x4000042c, name: 'labs', handler: absHandler, rationale: 'long is 32 bits here, so labs is abs.' },
   { address: 0x40000428, name: 'div', handler: divHandler, rationale: 'Quotient in a0 and remainder in a1, both truncated toward zero.' },
@@ -1199,6 +1553,64 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
     rationale: 'Pairs with Cache_Suspend_ICache; recorded rather than ignored.',
   },
   {
+    address: 0x4000052c,
+    name: 'Cache_Freeze_ICache_Enable',
+    handler: ({ machine }) => {
+      machine.cache.iCacheFrozen = true;
+    },
+    rationale: 'Freezing stops the cache fetching new lines while flash is written; nothing here fetches.',
+  },
+  {
+    address: 0x40000530,
+    name: 'Cache_Freeze_ICache_Disable',
+    handler: ({ machine }) => {
+      machine.cache.iCacheFrozen = false;
+    },
+    rationale: 'The other half of the pair, recorded so an unbalanced freeze is visible.',
+  },
+  {
+    address: 0x400004d8,
+    name: 'Cache_Invalidate_ICache_All',
+    handler: () => 0,
+    rationale: 'There are no cached lines to discard: flash-mapped memory is read through directly.',
+  },
+  {
+    address: 0x400004d4,
+    name: 'Cache_Invalidate_Addr',
+    handler: () => 0,
+    rationale: 'Discarding a range of cached lines, when no line is ever held, changes nothing.',
+  },
+  {
+    address: 0x40000614,
+    name: 'MD5Init',
+    handler: md5Init,
+    rationale: "RFC 1321 initialisation vector, written into the caller's context.",
+  },
+  {
+    address: 0x40000618,
+    name: 'MD5Update',
+    handler: md5Update,
+    rationale: 'Buffers and transforms whole blocks, carrying the bit count in the context.',
+  },
+  {
+    address: 0x4000061c,
+    name: 'MD5Final',
+    handler: md5Final,
+    rationale: 'Pads, appends the bit length, and emits the 16-byte digest.',
+  },
+  {
+    address: 0x40000060,
+    name: 'ets_apb_backup_init_lock_func',
+    handler: apbBackupInitLockFunc,
+    rationale: 'Records the guard callbacks the ROM was handed for its APB backup DMA.',
+  },
+  {
+    address: 0x400018ac,
+    name: 'esp_coex_rom_version_get',
+    handler: () => ROM_COEX_VERSION_ADDRESS,
+    rationale: 'Returns the version string ESP-IDF logs when the coexistence arbiter starts.',
+  },
+  {
     address: 0x40001954,
     name: 'esp_rom_regi2c_read',
     handler: regi2cRead,
@@ -1293,6 +1705,35 @@ export function installRomLayout(bus: Bus): void {
  * declared, which is how the Arduino core is compiled.
  */
 const ROM_LAYOUT_FIELD_COUNT = 40;
+
+/**
+ * Where the coexistence version string is placed.
+ *
+ * It sits in the ROM window, past every implemented entry point, because that
+ * is where the real string lives — the window is only dispatched as code when
+ * the program counter enters it, so a data read here reads memory.
+ */
+export const ROM_COEX_VERSION_ADDRESS = 0x4005ff00;
+
+/**
+ * What `esp_coex_rom_version_get()` reports.
+ *
+ * ESP-IDF logs this while the Wi-Fi/Bluetooth coexistence arbiter initialises,
+ * which every boot runs whether or not the radio is ever used. There is no
+ * Espressif ROM here, so quoting one of its build identifiers would be a false
+ * claim; the string names what is actually providing those primitives instead,
+ * and a user reading the boot log can see at once that this is not silicon.
+ */
+export const ROM_COEX_VERSION = 'circuitdesk';
+
+/** Installs the constants the ROM publishes for the application to read. */
+export function installRomData(bus: Bus): void {
+  installRomLayout(bus);
+  for (let i = 0; i < ROM_COEX_VERSION.length; i++) {
+    bus.writeUint8((ROM_COEX_VERSION_ADDRESS + i) >>> 0, ROM_COEX_VERSION.charCodeAt(i));
+  }
+  bus.writeUint8((ROM_COEX_VERSION_ADDRESS + ROM_COEX_VERSION.length) >>> 0, 0);
+}
 
 /** Address range the ESP32-C3 maps its mask ROM into. */
 export const ROM_START = 0x40000000;

@@ -406,5 +406,151 @@ function call(name: string, args: number[], state = createRomMachineState(), bus
   check(unset === 0, `all ${40} layout fields are populated (${unset} left at zero)`);
 }
 
+// ---------- 9. MD5, against the digests RFC 1321 publishes ----------
+//
+// The test vectors are the ones in the RFC itself, so a wrong round constant,
+// a wrong shift or a wrong padding rule shows up immediately rather than as a
+// partition that silently fails to verify.
+{
+  const memory = new Memory();
+  const CONTEXT = 0x2000;
+  const DIGEST = 0x2100;
+  const INPUT = 0x2200;
+
+  const call = (name: string, args: number[]): void => {
+    const entry = ESP32C3_ROM_FUNCTIONS.find((f) => f.name === name)!;
+    entry.handler({
+      args: [...args, 0, 0, 0, 0].slice(0, 6),
+      bus: memory,
+      machine: createRomMachineState(),
+      registers: new Int32Array(32),
+      callGuest: () => ({ value: 0, high: 0, instructions: 0 }),
+    });
+  };
+
+  /** Hashes a string the way firmware would, one ROM call at a time. */
+  const digestOf = (text: string, chunkSize?: number): string => {
+    const chunk = Math.max(1, chunkSize ?? text.length);
+    for (let i = 0; i < text.length; i++) memory.writeUint8(INPUT + i, text.charCodeAt(i));
+    call('MD5Init', [CONTEXT]);
+    for (let at = 0; at < text.length; at += chunk) {
+      call('MD5Update', [CONTEXT, INPUT + at, Math.min(chunk, text.length - at)]);
+    }
+    call('MD5Final', [DIGEST, CONTEXT]);
+    let out = '';
+    for (let i = 0; i < 16; i++) out += memory.readUint8(DIGEST + i).toString(16).padStart(2, '0');
+    return out;
+  };
+
+  check(digestOf('') === 'd41d8cd98f00b204e9800998ecf8427e', `MD5 of the empty string (${digestOf('')})`);
+  check(digestOf('a') === '0cc175b9c0f1b6a831c399e269772661', `MD5 of "a" (${digestOf('a')})`);
+  check(digestOf('abc') === '900150983cd24fb0d6963f7d28e17f72', `MD5 of "abc" (${digestOf('abc')})`);
+  check(
+    digestOf('message digest') === 'f96b697d7cb7938d525a2f31aaf161d0',
+    `MD5 of "message digest" (${digestOf('message digest')})`,
+  );
+  check(
+    digestOf('abcdefghijklmnopqrstuvwxyz') === 'c3fcd3d76192e4007dfb496cca67e13b',
+    'MD5 of the lowercase alphabet',
+  );
+  check(
+    digestOf('12345678901234567890123456789012345678901234567890123456789012345678901234567890') ===
+      '57edf4a22be3c955ac49da2e2107b67a',
+    'MD5 of eighty digits, which spans more than one block',
+  );
+
+  // The same input hashed in small pieces has to give the same answer, which
+  // is what proves the context really carries state between calls.
+  const whole = digestOf('abcdefghijklmnopqrstuvwxyz');
+  check(digestOf('abcdefghijklmnopqrstuvwxyz', 1) === whole, 'hashing one byte at a time gives the same digest');
+  check(digestOf('abcdefghijklmnopqrstuvwxyz', 7) === whole, 'and so does hashing in sevens');
+}
+
+// ---------- 10. the string and classification routines ----------
+{
+  const memory = new Memory();
+  const A = 0x3000;
+  const B = 0x3100;
+  const SLOT = 0x3200;
+
+  const put = (address: number, text: string): number => {
+    for (let i = 0; i < text.length; i++) memory.writeUint8(address + i, text.charCodeAt(i));
+    memory.writeUint8(address + text.length, 0);
+    return address;
+  };
+  const get = (address: number): string => {
+    let out = '';
+    for (let i = 0; memory.readUint8(address + i) !== 0; i++) out += String.fromCharCode(memory.readUint8(address + i));
+    return out;
+  };
+  const call = (name: string, args: number[]): number => {
+    const entry = ESP32C3_ROM_FUNCTIONS.find((f) => f.name === name)!;
+    const result = entry.handler({
+      args: [...args, 0, 0, 0, 0].slice(0, 6),
+      bus: memory,
+      machine: createRomMachineState(),
+      registers: new Int32Array(32),
+      callGuest: () => ({ value: 0, high: 0, instructions: 0 }),
+    });
+    return typeof result === 'number' ? result : 0;
+  };
+
+  put(A, 'hello world');
+  check(call('memchr', [A, 'o'.charCodeAt(0), 11]) === A + 4, 'memchr finds the first match');
+  check(call('memrchr', [A, 'o'.charCodeAt(0), 11]) === A + 7, 'memrchr finds the last');
+  check(call('memchr', [A, 'z'.charCodeAt(0), 11]) === 0, 'and a byte that is absent gives null');
+  check(call('memchr', [A, 'w'.charCodeAt(0), 4]) === 0, 'memchr respects its length rather than the terminator');
+
+  check(call('strnlen', [A, 100]) === 11, 'strnlen measures a string shorter than its limit');
+  check(call('strnlen', [A, 4]) === 4, 'and stops at the limit otherwise');
+
+  check(call('strrchr', [A, 'l'.charCodeAt(0)]) === A + 9, 'strrchr finds the last match');
+  check(call('strrchr', [A, 0]) === A + 11, 'and finds the terminator when asked for NUL');
+
+  put(B, 'WORLD');
+  check(call('strcasestr', [A, B]) === A + 6, 'strcasestr ignores case');
+
+  put(A, 'aaabbbccc');
+  put(B, 'ab');
+  check(call('strspn', [A, B]) === 6, 'strspn measures the accepted run');
+  put(B, 'c');
+  check(call('strcspn', [A, B]) === 6, 'strcspn measures the run before a rejected character');
+
+  put(A, 'one,two,three');
+  memory.writeUint32(SLOT, A);
+  const first = call('strsep', [SLOT, put(B, ',')]);
+  check(get(first) === 'one', `strsep returns the first field (${get(first)})`);
+  const second = call('strsep', [SLOT, B]);
+  check(get(second) === 'two', 'and the next one after it');
+
+  put(A, '  alpha beta  ');
+  put(B, ' ');
+  const token = call('strtok_r', [A, B, SLOT]);
+  check(get(token) === 'alpha', `strtok_r skips leading delimiters (${get(token)})`);
+  check(get(call('strtok_r', [0, B, SLOT])) === 'beta', 'and resumes from the saved position');
+  check(call('strtok_r', [0, B, SLOT]) === 0, 'then reports the end');
+
+  put(A, 'abc');
+  check(call('strlcat', [A, put(B, 'def'), 16]) === 6, 'strlcat returns the combined length');
+  check(get(A) === 'abcdef', 'and appends');
+  put(A, 'abc');
+  check(call('strlcat', [A, B, 5]) === 6, 'a truncating append still reports what it would have needed');
+  check(get(A) === 'abcd', 'and writes only what fits');
+
+  put(A, 'stop here');
+  const end = call('memccpy', [B, A, 'p'.charCodeAt(0), 9]);
+  check(end === B + 4, 'memccpy returns the address past the stop byte');
+  check(String.fromCharCode(memory.readUint8(B), memory.readUint8(B + 3)) === 'sp', 'and copied up to it');
+  check(call('memccpy', [B, A, 'z'.charCodeAt(0), 9]) === 0, 'a stop byte that never appears gives null');
+
+  const classify = (name: string, c: string): number => call(name, [c.charCodeAt(0)]);
+  check(classify('isprint', ' ') === 1 && classify('isgraph', ' ') === 0, 'a space prints but is not graphic');
+  check(classify('ispunct', ',') === 1 && classify('ispunct', 'a') === 0, 'punctuation excludes letters');
+  check(classify('iscntrl', '\n') === 1 && classify('iscntrl', 'a') === 0, 'control characters are recognised');
+  check(classify('isblank', '\t') === 1 && classify('isblank', '\n') === 0, 'blank means space or tab only');
+  check(call('isascii', [0x80]) === 0 && classify('isascii', 'a') === 1, 'isascii rejects the high half');
+  check(call('toascii', [0xe1]) === 0x61, 'toascii keeps the low seven bits');
+}
+
 console.log(failures === 0 ? '\nESP32-C3 ROM checks passed.' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -17,7 +17,7 @@ import {
   buildRomTable,
   createRomMachineState,
   isRomAddress,
-  installRomLayout,
+  installRomData,
   ResetReason,
   UnimplementedRomCallError,
   type RomFunction,
@@ -67,6 +67,12 @@ export const ROM_STACK_TOP = 0x3fcde710;
  * what makes the boundary unambiguous.
  */
 export const GUEST_RETURN_SENTINEL = 0x40000004;
+
+/**
+ * The C3's machine performance counter, in RISC-V's implementation-defined CSR
+ * range. ESP-IDF reads it as the CPU cycle count.
+ */
+export const CSR_PCCR_MACHINE = 0x7e2;
 
 /** Raised when a guest callback misbehaves, always naming what went wrong. */
 export class GuestCallError extends Error {
@@ -198,6 +204,25 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
     this.romTable = buildRomTable(options.romFunctions);
     this.romState = createRomMachineState(options.resetReason ?? ResetReason.PowerOn);
     this.core = new Rv32Core(this);
+    this.core.customCsrRead = (number_) => this.readChipCsr(number_);
+  }
+
+  /**
+   * The ESP32-C3's own control registers, in the range RISC-V reserves for a
+   * chip to define.
+   *
+   * `esp_cpu_get_cycle_count()` reads the performance counter, and ESP-IDF
+   * uses the difference between two readings as a delay — `esp_random()` spins
+   * until enough cycles have passed. A counter stuck at zero makes that spin
+   * for ever, so this has to be a real, advancing count rather than storage.
+   */
+  private readChipCsr(number_: number): number | undefined {
+    switch (number_) {
+      case CSR_PCCR_MACHINE:
+        return this.core.instructionsRetired | 0;
+      default:
+        return undefined;
+    }
   }
 
   /** Registers a peripheral. Later registrations win for overlapping ranges. */
@@ -249,7 +274,7 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
     }
     // The ROM publishes constants the application reads directly, so they have
     // to exist before it runs.
-    installRomLayout(this);
+    installRomData(this);
     this.core.reset(image.entryPoint);
     // The application is entered on the ROM's stack, exactly as it would be on
     // hardware. x2 is sp in the RISC-V calling convention.
@@ -264,6 +289,7 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
     for (const peripheral of this.peripherals) peripheral.reset?.();
     this.romState.regi2c.clear();
     this.romState.cache.iCacheEnabled = false;
+    this.romState.cache.iCacheFrozen = false;
     this.romState.cache.iromMmuSize = 0;
     this.romState.cache.dromMmuSize = 0;
     if (this.image) this.loadImage(this.image);
