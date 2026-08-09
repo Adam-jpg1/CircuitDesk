@@ -72,9 +72,13 @@ export interface EspSegment {
   data: Uint8Array;
   /** Which documented region this segment lands in. */
   region: string;
+  /** Byte offset of this segment's payload within the image file. */
+  fileOffset: number;
 }
 
 export interface EspApplicationImage {
+  /** The whole image file, needed to model the flash mapping. */
+  raw: Uint8Array;
   entryPoint: number;
   chipId: number;
   chipName: string;
@@ -163,7 +167,7 @@ export function parseEspApplicationImage(
         `Segment ${i} loads at 0x${loadAddress.toString(16)} (${length} bytes), which is not inside any ${expectChip} memory region.`,
       );
     }
-    segments.push({ loadAddress, data: buffer.slice(offset, offset + length), region: region.name });
+    segments.push({ loadAddress, data: buffer.slice(offset, offset + length), region: region.name, fileOffset: offset });
     byteLength += length;
     offset += length;
   }
@@ -182,7 +186,7 @@ export function parseEspApplicationImage(
     );
   }
 
-  return { entryPoint, chipId, chipName: expectChip, segments, byteLength, hashAppended };
+  return { raw: buffer, entryPoint, chipId, chipName: expectChip, segments, byteLength, hashAppended };
 }
 
 /**

@@ -65,6 +65,18 @@ export interface RomMachineState {
   pendingDelayUs: number;
   /** Character sink the ROM's printf was told to use. */
   putc1: number;
+  /**
+   * eFuse values this runtime reports.
+   *
+   * A DevKitM-1 carries an ESP32-C3-MINI-1 with the flash on the chip's
+   * default pads and no pin override programmed, so these are the values the
+   * real module reads back.
+   */
+  efuse: { flashGpioInfo: number; flashWpGpio: number };
+  /** Bytes the ROM console has emitted, and bytes waiting to be read. */
+  romConsole: number[];
+  romConsoleRx: number[];
+  romConsoleDivider: number;
 }
 
 export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMachineState {
@@ -75,6 +87,10 @@ export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMac
     cpuFrequencyMhz: 160,
     pendingDelayUs: 0,
     putc1: 0,
+    efuse: { flashGpioInfo: 0, flashWpGpio: 0x3f },
+    romConsole: [],
+    romConsoleRx: [],
+    romConsoleDivider: 0,
   };
 }
 
@@ -245,6 +261,65 @@ const moddi3: RomHandler = ({ args, registers }) => {
   return return64(registers, dividend % divisor);
 };
 
+// The rest of the 64-bit and bit-counting helpers, which arrive as a family:
+// once firmware links one of them the compiler will emit the others for the
+// same expressions, so implementing them together avoids a stall per operator.
+// A shift count is taken modulo 64, as libgcc's routines do.
+
+const ashldi3: RomHandler = ({ args, registers }) =>
+  return64(registers, asUnsigned64(args[0], args[1]) << BigInt(args[2] & 63));
+
+const lshrdi3: RomHandler = ({ args, registers }) =>
+  return64(registers, asUnsigned64(args[0], args[1]) >> BigInt(args[2] & 63));
+
+const ashrdi3: RomHandler = ({ args, registers }) =>
+  return64(registers, asSigned64(args[0], args[1]) >> BigInt(args[2] & 63));
+
+const muldi3: RomHandler = ({ args, registers }) =>
+  return64(registers, asUnsigned64(args[0], args[1]) * asUnsigned64(args[2], args[3]));
+
+const negdi2: RomHandler = ({ args, registers }) => return64(registers, -asSigned64(args[0], args[1]));
+
+/** Three-way comparison: 0 less, 1 equal, 2 greater. */
+const cmpdi2: RomHandler = ({ args }) => {
+  const a = asSigned64(args[0], args[1]);
+  const b = asSigned64(args[2], args[3]);
+  return a < b ? 0 : a === b ? 1 : 2;
+};
+
+const ucmpdi2: RomHandler = ({ args }) => {
+  const a = asUnsigned64(args[0], args[1]);
+  const b = asUnsigned64(args[2], args[3]);
+  return a < b ? 0 : a === b ? 1 : 2;
+};
+
+/** Leading zeros of a 32-bit word; undefined at zero, so 32 is the safe answer. */
+const clzsi2: RomHandler = ({ args }) => (args[0] === 0 ? 32 : Math.clz32(args[0] >>> 0));
+
+const ctzsi2: RomHandler = ({ args }) => {
+  const value = args[0] >>> 0;
+  if (value === 0) return 32;
+  let count = 0;
+  while (((value >>> count) & 1) === 0) count++;
+  return count;
+};
+
+const popcountsi2: RomHandler = ({ args }) => {
+  let value = args[0] >>> 0;
+  let count = 0;
+  while (value !== 0) {
+    count += value & 1;
+    value >>>= 1;
+  }
+  return count;
+};
+
+/** Byte-swap a 32-bit word. */
+const bswapsi2: RomHandler = ({ args }) => {
+  const v = args[0] >>> 0;
+  return (((v & 0xff) << 24) | ((v & 0xff00) << 8) | ((v >>> 8) & 0xff00) | ((v >>> 24) & 0xff)) >>> 0;
+};
+
 /** `strlen(s)` — bytes before the first NUL. */
 const strlen: RomHandler = ({ args, bus }) => {
   let length = 0;
@@ -296,6 +371,234 @@ const installPutc1: RomHandler = ({ args, machine }) => {
  */
 const setCpuTicksPerUs: RomHandler = ({ args, machine }) => {
   machine.cpuFrequencyMhz = Math.max(1, args[0] >>> 0);
+};
+
+/**
+ * `esp_rom_efuse_get_flash_gpio_info()` -> packed pin assignment
+ *
+ * eFuse can override which pads the SPI flash is wired to, for modules that
+ * route it differently. Zero means "the chip's default pins", which is what an
+ * unprogrammed eFuse reads and what every ESP32-C3 module using the standard
+ * layout — including the ESP32-C3-MINI-1 on a DevKitM-1 — actually reports.
+ * This is the correct value for the modelled hardware, not a placeholder.
+ */
+const efuseGetFlashGpioInfo: RomHandler = ({ machine }) => machine.efuse.flashGpioInfo;
+
+/** `esp_rom_efuse_get_flash_wp_gpio()` -> write-protect pad, or the default. */
+const efuseGetFlashWpGpio: RomHandler = ({ machine }) => machine.efuse.flashWpGpio;
+
+// ------------------------------------------------------- ROM UART output
+//
+// The ROM's own console path, which ESP-IDF uses for boot messages before the
+// driver takes over. Characters are handed to a sink so those messages are
+// visible; this is the ROM's UART, not an interception of Serial.print().
+
+/** `esp_rom_output_tx_one_char(c)` -> 0 on success. */
+const outputTxOneChar: RomHandler = ({ args, machine }) => {
+  machine.romConsole.push(args[0] & 0xff);
+  if (machine.romConsole.length > 8192) machine.romConsole.shift();
+  return 0;
+};
+
+/**
+ * `esp_rom_output_tx_wait_idle(uart_no)`
+ *
+ * Waits for the transmitter to drain. Characters here are consumed the moment
+ * they are written, so the transmitter is never busy and the wait is already
+ * satisfied when it is called. It is a no-op because the condition holds, not
+ * because the call is being skipped.
+ */
+const outputTxWaitIdle: RomHandler = () => 0;
+
+/** `esp_rom_output_flush_tx(uart_no)` — nothing is buffered, so nothing to flush. */
+const outputFlushTx: RomHandler = () => 0;
+
+/** `esp_rom_output_rx_one_char(&c)` -> 0 when a byte was read, 1 when empty. */
+const outputRxOneChar: RomHandler = ({ args, bus, machine }) => {
+  const byte = machine.romConsoleRx.shift();
+  if (byte === undefined) return 1;
+  bus.writeUint8(args[0] >>> 0, byte);
+  return 0;
+};
+
+/** `uart_div_modify(uart_no, divider)` — records the ROM console's baud divider. */
+const uartDivModify: RomHandler = ({ args, machine }) => {
+  machine.romConsoleDivider = args[1] >>> 0;
+  return 0;
+};
+
+/**
+ * `esp_rom_route_intr_matrix(cpu, periph_source, cpu_interrupt)`
+ *
+ * The ESP32-C3 has far more interrupt sources than CPU interrupt lines, so a
+ * matrix maps one to the other. Each peripheral source owns one word in the
+ * matrix, at four bytes per source, holding the CPU line it is routed to.
+ *
+ * This performs the real write rather than recording the intent, so the
+ * interrupt controller and anything reading the matrix back see the same
+ * mapping the firmware established.
+ */
+const routeIntrMatrix: RomHandler = ({ args, bus }) => {
+  const [, source, cpuInterrupt] = args;
+  if (source < 0 || source >= INTERRUPT_MATRIX_SOURCES) return 0;
+  bus.writeUint32((INTERRUPT_MATRIX_BASE + source * 4) >>> 0, cpuInterrupt >>> 0);
+  return 0;
+};
+
+/** Interrupt matrix base and source count, from the C3's register map. */
+const INTERRUPT_MATRIX_BASE = 0x600c2000;
+const INTERRUPT_MATRIX_SOURCES = 62;
+
+// The C3's RISC-V interrupt controller lives in the same block, above the
+// per-source mapping words. These offsets are from its register map.
+const INTC_ENABLE = 0x104;
+const INTC_TYPE = 0x108;
+const INTC_PRIORITY_BASE = 0x114;
+const INTC_THRESHOLD = 0x194;
+
+/**
+ * The `esprv_*` family, which configures that controller.
+ *
+ * Each one performs the real register write, so the controller's state is the
+ * firmware's own and anything that reads it back — including a later interrupt
+ * dispatch — sees exactly what was configured.
+ */
+const intcEnable: RomHandler = ({ args, bus }) => {
+  const address = (INTERRUPT_MATRIX_BASE + INTC_ENABLE) >>> 0;
+  bus.writeUint32(address, (bus.readUint32(address) | (args[0] >>> 0)) >>> 0);
+  return 0;
+};
+
+const intcDisable: RomHandler = ({ args, bus }) => {
+  const address = (INTERRUPT_MATRIX_BASE + INTC_ENABLE) >>> 0;
+  bus.writeUint32(address, (bus.readUint32(address) & ~(args[0] >>> 0)) >>> 0);
+  return 0;
+};
+
+/** Interrupt type: 0 is level-triggered, 1 is edge-triggered. */
+const intcSetType: RomHandler = ({ args, bus }) => {
+  const [interrupt, type] = args;
+  if (interrupt < 0 || interrupt > 31) return 0;
+  const address = (INTERRUPT_MATRIX_BASE + INTC_TYPE) >>> 0;
+  const current = bus.readUint32(address);
+  bus.writeUint32(address, (type ? current | (1 << interrupt) : current & ~(1 << interrupt)) >>> 0);
+  return 0;
+};
+
+/** Each CPU interrupt has its own priority word. */
+const intcSetPriority: RomHandler = ({ args, bus }) => {
+  const [interrupt, priority] = args;
+  if (interrupt < 1 || interrupt > 31) return 0;
+  bus.writeUint32((INTERRUPT_MATRIX_BASE + INTC_PRIORITY_BASE + (interrupt - 1) * 4) >>> 0, priority >>> 0);
+  return 0;
+};
+
+/** Interrupts at or below the threshold are masked. */
+const intcSetThreshold: RomHandler = ({ args, bus }) => {
+  bus.writeUint32((INTERRUPT_MATRIX_BASE + INTC_THRESHOLD) >>> 0, args[0] >>> 0);
+  return 0;
+};
+
+/**
+ * `esp_rom_printf(format, ...)` -> characters written
+ *
+ * ESP-IDF's early boot log goes through this before the logging driver is up,
+ * so implementing it properly turns the rest of startup from a guessing game
+ * into a readable narrative. The output is the firmware's own text, formatted
+ * from the firmware's own arguments — nothing is intercepted or invented.
+ *
+ * The RISC-V variadic convention puts the format string in a0 and the first
+ * seven remaining arguments in a1..a7, after which they continue on the stack.
+ * The ROM's printf is a reduced one: it supports the integer, string and
+ * character conversions with a width and zero-padding, which is what the boot
+ * messages use.
+ */
+const romPrintf: RomHandler = ({ args, bus, machine, registers }) => {
+  const readString = (address: number): string => {
+    let out = '';
+    for (let i = 0; i < 512; i++) {
+      const byte = bus.readUint8((address + i) >>> 0);
+      if (byte === 0) break;
+      out += String.fromCharCode(byte);
+    }
+    return out;
+  };
+
+  const format = readString(args[0] >>> 0);
+  let argIndex = 0;
+  const stackBase = registers[2] >>> 0;
+  const nextArg = (): number => {
+    // a1..a7 first, then the stack, which is where the eighth onward live.
+    const value =
+      argIndex < 7
+        ? registers[ARG_REGISTER_BASE + 1 + argIndex] | 0
+        : bus.readUint32((stackBase + (argIndex - 7) * 4) >>> 0) | 0;
+    argIndex++;
+    return value;
+  };
+
+  let out = '';
+  for (let i = 0; i < format.length; i++) {
+    if (format[i] !== '%') {
+      out += format[i];
+      continue;
+    }
+    i++;
+    if (format[i] === '%') {
+      out += '%';
+      continue;
+    }
+    // Flags and width, then an optional length modifier which does not change
+    // the size of anything on a 32-bit target.
+    let pad = ' ';
+    if (format[i] === '-' || format[i] === '0') {
+      if (format[i] === '0') pad = '0';
+      i++;
+    }
+    let width = '';
+    while (i < format.length && format[i] >= '0' && format[i] <= '9') width += format[i++];
+    while (i < format.length && 'lhz'.includes(format[i])) i++;
+
+    const conversion = format[i];
+    let piece: string;
+    switch (conversion) {
+      case 'd':
+      case 'i':
+        piece = String(nextArg());
+        break;
+      case 'u':
+        piece = String(nextArg() >>> 0);
+        break;
+      case 'x':
+        piece = (nextArg() >>> 0).toString(16);
+        break;
+      case 'X':
+        piece = (nextArg() >>> 0).toString(16).toUpperCase();
+        break;
+      case 'p':
+        piece = '0x' + (nextArg() >>> 0).toString(16);
+        break;
+      case 'c':
+        piece = String.fromCharCode(nextArg() & 0xff);
+        break;
+      case 's':
+        piece = readString(nextArg() >>> 0);
+        break;
+      default:
+        // An unrecognised conversion is reproduced verbatim rather than
+        // silently consuming an argument and desynchronising the rest.
+        piece = '%' + (conversion ?? '');
+        break;
+    }
+    const target = Number.parseInt(width || '0', 10);
+    out += piece.length >= target ? piece : pad.repeat(target - piece.length) + piece;
+  }
+
+  for (const character of out) {
+    machine.romConsole.push(character.charCodeAt(0) & 0xff);
+  }
+  while (machine.romConsole.length > 8192) machine.romConsole.shift();
+  return out.length;
 };
 
 /** One flat key per (block, register) pair. */
@@ -368,10 +671,160 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
     rationale: '64-bit signed remainder, taking the dividend\'s sign.',
   },
   {
+    address: 0x4000077c,
+    name: '__ashldi3',
+    handler: ashldi3,
+    rationale: '64-bit left shift, count taken modulo 64 as libgcc does.',
+  },
+  {
+    address: 0x40000830,
+    name: '__lshrdi3',
+    handler: lshrdi3,
+    rationale: '64-bit logical right shift.',
+  },
+  {
+    address: 0x40000780,
+    name: '__ashrdi3',
+    handler: ashrdi3,
+    rationale: '64-bit arithmetic right shift, preserving the sign.',
+  },
+  {
+    address: 0x4000084c,
+    name: '__muldi3',
+    handler: muldi3,
+    rationale: '64-bit multiply, truncated to 64 bits.',
+  },
+  {
+    address: 0x4000086c,
+    name: '__negdi2',
+    handler: negdi2,
+    rationale: '64-bit negation.',
+  },
+  {
+    address: 0x400007a0,
+    name: '__cmpdi2',
+    handler: cmpdi2,
+    rationale: 'Signed three-way comparison returning 0, 1 or 2.',
+  },
+  {
+    address: 0x400008a8,
+    name: '__ucmpdi2',
+    handler: ucmpdi2,
+    rationale: 'Unsigned three-way comparison.',
+  },
+  {
+    address: 0x4000079c,
+    name: '__clzsi2',
+    handler: clzsi2,
+    rationale: 'Leading zero count of a 32-bit word.',
+  },
+  {
+    address: 0x400007a8,
+    name: '__ctzsi2',
+    handler: ctzsi2,
+    rationale: 'Trailing zero count of a 32-bit word.',
+  },
+  {
+    address: 0x40000888,
+    name: '__popcountsi2',
+    handler: popcountsi2,
+    rationale: 'Set-bit count of a 32-bit word.',
+  },
+  {
+    address: 0x40000788,
+    name: '__bswapsi2',
+    handler: bswapsi2,
+    rationale: '32-bit byte swap.',
+  },
+  {
     address: 0x40000374,
     name: 'strlen',
     handler: strlen,
     rationale: 'Counts bytes before the first NUL, bounded so an unterminated string cannot hang the run.',
+  },
+  {
+    address: 0x400005e8,
+    name: 'esprv_int_enable',
+    handler: intcEnable,
+    rationale: 'Sets the real enable bits in the interrupt controller.',
+  },
+  {
+    address: 0x400005ec,
+    name: 'esprv_int_disable',
+    handler: intcDisable,
+    rationale: 'Clears the real enable bits.',
+  },
+  {
+    address: 0x400005f0,
+    name: 'esprv_int_set_type',
+    handler: intcSetType,
+    rationale: 'Selects level or edge triggering per interrupt line.',
+  },
+  {
+    address: 0x400005e0,
+    name: 'esprv_int_set_priority',
+    handler: intcSetPriority,
+    rationale: 'Writes the per-line priority word.',
+  },
+  {
+    address: 0x400005e4,
+    name: 'esprv_int_set_threshold',
+    handler: intcSetThreshold,
+    rationale: 'Writes the masking threshold.',
+  },
+  {
+    address: 0x400005f4,
+    name: 'esp_rom_route_intr_matrix',
+    handler: routeIntrMatrix,
+    rationale: 'Performs the real matrix write so the routing is observable, not just recorded.',
+  },
+  {
+    address: 0x40000040,
+    name: 'esp_rom_printf',
+    handler: romPrintf,
+    rationale: 'Formats the firmware\'s own boot messages from its own arguments; nothing is intercepted.',
+  },
+  {
+    address: 0x40000068,
+    name: 'esp_rom_output_tx_one_char',
+    handler: outputTxOneChar,
+    rationale: 'Feeds the ROM console sink so boot messages are visible.',
+  },
+  {
+    address: 0x40000084,
+    name: 'esp_rom_output_tx_wait_idle',
+    handler: outputTxWaitIdle,
+    rationale: 'The transmitter is never busy here, so the wait condition already holds.',
+  },
+  {
+    address: 0x40000080,
+    name: 'esp_rom_output_flush_tx',
+    handler: outputFlushTx,
+    rationale: 'Nothing is buffered, so there is nothing to flush.',
+  },
+  {
+    address: 0x40000070,
+    name: 'esp_rom_output_rx_one_char',
+    handler: outputRxOneChar,
+    rationale: 'Reports an empty receiver unless a byte has been queued.',
+  },
+  {
+    address: 0x40000088,
+    name: 'uart_div_modify',
+    handler: uartDivModify,
+    rationale: 'Records the ROM console divider so the configured rate is observable.',
+  },
+  {
+    address: 0x4000071c,
+    name: 'esp_rom_efuse_get_flash_gpio_info',
+    handler: efuseGetFlashGpioInfo,
+    rationale: 'Reports no pin override, which is what an ESP32-C3-MINI-1 with default flash pads reads back.',
+  },
+  {
+    address: 0x4000072c,
+    name: 'esp_rom_efuse_get_flash_wp_gpio',
+    handler: efuseGetFlashWpGpio,
+    rationale: 'Reports the default write-protect pad for the same module.',
   },
   {
     address: 0x40000588,

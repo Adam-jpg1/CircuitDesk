@@ -150,6 +150,25 @@ export class Esp32C3Machine implements Bus {
   loadImage(image: EspApplicationImage): void {
     this.image = image;
     this.memory.clear();
+    // The flash MMU maps the application partition into the IROM and DROM
+    // windows, so the whole image file — header included — is visible there,
+    // not just the segment payloads. ESP-IDF's cpu_start re-reads that header
+    // to validate the image it is running, and reports "Invalid app image
+    // header" if it is missing.
+    //
+    // A flash-mapped segment appears at its load address, and it sits at a
+    // known offset inside the file, so the file's own start is visible at
+    // `loadAddress - fileOffset`. Mapping from there reproduces what the MMU
+    // does without needing to model page tables.
+    for (const segment of image.segments) {
+      const flashMapped = segment.loadAddress >= MEMORY_MAP.drom.start && segment.loadAddress < MEMORY_MAP.drom.end;
+      const iromMapped = segment.loadAddress >= MEMORY_MAP.irom.start && segment.loadAddress < MEMORY_MAP.irom.end;
+      if (!flashMapped && !iromMapped) continue;
+      const fileBase = (segment.loadAddress - segment.fileOffset) >>> 0;
+      for (let i = 0; i < image.raw.length; i++) this.writeByte(fileBase + i, image.raw[i]);
+    }
+    // Segment payloads are written after the mapping so a RAM segment always
+    // wins over anything the mapping happened to cover.
     for (const segment of image.segments) {
       for (let i = 0; i < segment.data.length; i++) this.writeByte(segment.loadAddress + i, segment.data[i]);
     }
