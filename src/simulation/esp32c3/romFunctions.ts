@@ -77,6 +77,8 @@ export interface RomMachineState {
   pendingDelayUs: number;
   /** Character sink the ROM's printf was told to use. */
   putc1: number;
+  /** Lock handles the application gave the ROM's C library, if it has yet. */
+  newlibLocks: { common: number; recursive: number } | null;
   /**
    * eFuse values this runtime reports.
    *
@@ -101,6 +103,7 @@ export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMac
     cpuFrequencyMhz: 160,
     pendingDelayUs: 0,
     putc1: 0,
+    newlibLocks: null,
     efuse: { flashGpioInfo: 0, flashWpGpio: 0x3f },
     romConsole: [],
     romConsoleRx: [],
@@ -319,6 +322,32 @@ const ctzsi2: RomHandler = ({ args }) => {
   return count;
 };
 
+/**
+ * Find-first-set: one plus the index of the least significant set bit.
+ *
+ * Unlike the count-trailing-zeros helpers above this one is fully defined at
+ * zero, where libgcc specifies a return of zero. That one-based result is the
+ * whole difference between the two, and getting it wrong shifts every caller's
+ * answer by one.
+ */
+function lowestSetBit(value: number): number {
+  const word = value >>> 0;
+  if (word === 0) return -1;
+  let index = 0;
+  while (((word >>> index) & 1) === 0) index++;
+  return index;
+}
+
+const ffssi2: RomHandler = ({ args }) => lowestSetBit(args[0]) + 1;
+
+/** The same, over a 64-bit value passed in a register pair. */
+const ffsdi2: RomHandler = ({ args }) => {
+  const low = lowestSetBit(args[0]);
+  if (low >= 0) return low + 1;
+  const high = lowestSetBit(args[1]);
+  return high < 0 ? 0 : high + 33;
+};
+
 const popcountsi2: RomHandler = ({ args }) => {
   let value = args[0] >>> 0;
   let count = 0;
@@ -374,6 +403,32 @@ const delayUs: RomHandler = ({ args, machine }) => {
  */
 const installPutc1: RomHandler = ({ args, machine }) => {
   machine.putc1 = args[0] >>> 0;
+};
+
+/**
+ * `esp_rom_newlib_init_common_mutexes(lock, rlock)`
+ *
+ * The C library in the mask ROM has two global lock handles, and this call
+ * hands it the ones the application wants it to use. ESP-IDF calls it during
+ * libc initialisation with pointers to its own handles, so that ROM-resident
+ * libc functions serialise against the same locks the application's do.
+ *
+ * The handles are read through and recorded. That is the whole observable
+ * effect available to this runtime: the ROM's own copies live in ROM data
+ * whose addresses Espressif does not publish, and nothing here executes ROM
+ * libc code — every C library function firmware calls into the ROM window is
+ * dispatched to an implementation in this file, which runs to completion
+ * without yielding and so cannot interleave with anything the locks protect.
+ *
+ * Recording rather than discarding matters because it keeps the handles
+ * available to any later ROM function that needs them, and makes what the
+ * firmware asked for visible in diagnostics.
+ */
+const newlibInitCommonMutexes: RomHandler = ({ args, bus, machine }) => {
+  machine.newlibLocks = {
+    common: bus.readUint32(args[0] >>> 0) >>> 0,
+    recursive: bus.readUint32(args[1] >>> 0) >>> 0,
+  };
 };
 
 /**
@@ -737,6 +792,31 @@ const bzero: RomHandler = ({ args, bus }) => {
 };
 
 const absHandler: RomHandler = ({ args }) => Math.abs(args[0] | 0) | 0;
+
+/**
+ * `div(numerator, denominator)` and its `long` twin `ldiv`.
+ *
+ * Both return a two-int struct, which on RV32 is small enough to come back in
+ * a0 and a1 rather than through memory — so the remainder is written to a1
+ * directly. C requires the quotient to be truncated toward zero and the
+ * remainder to carry the numerator's sign, which is what a division rounded
+ * toward zero gives; rounding the other way would leave -7/2 as -4 rather
+ * than -3.
+ *
+ * `long` is 32 bits on this target, so `ldiv` is the same computation.
+ */
+const divHandler: RomHandler = ({ args, registers }) => {
+  const numerator = args[0] | 0;
+  const denominator = args[1] | 0;
+  if (denominator === 0) {
+    // Division by zero is undefined in C, and the hardware would fault. Report
+    // it rather than inventing a quotient.
+    throw new RangeError('The sketch called div() with a zero denominator, which has no defined result.');
+  }
+  const quotient = Math.trunc(numerator / denominator) | 0;
+  registers[ARG_REGISTER_BASE + 1] = (numerator - quotient * denominator) | 0;
+  return quotient;
+};
 const isalnum: RomHandler = ({ args }) => (/[0-9a-z]/i.test(String.fromCharCode(args[0] & 0xff)) ? 1 : 0);
 const isspace: RomHandler = ({ args }) => (/[ \t\n\v\f\r]/.test(String.fromCharCode(args[0] & 0xff)) ? 1 : 0);
 const toupper: RomHandler = ({ args }) => String.fromCharCode(args[0] & 0xff).toUpperCase().charCodeAt(0);
@@ -927,6 +1007,18 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
     rationale: 'Trailing zero count of a 32-bit word.',
   },
   {
+    address: 0x400007d4,
+    name: '__ffssi2',
+    handler: ffssi2,
+    rationale: 'One-based index of the lowest set bit; zero for a zero argument.',
+  },
+  {
+    address: 0x400007d0,
+    name: '__ffsdi2',
+    handler: ffsdi2,
+    rationale: 'The same over a 64-bit register pair.',
+  },
+  {
     address: 0x40000888,
     name: '__popcountsi2',
     handler: popcountsi2,
@@ -996,6 +1088,9 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
   { address: 0x400003f0, name: 'strlcpy', handler: strlcpy, rationale: 'Returns the source length so truncation is detectable.' },
   { address: 0x4000037c, name: 'bzero', handler: bzero, rationale: 'Clears a range byte-wise.' },
   { address: 0x40000424, name: 'abs', handler: absHandler, rationale: 'Absolute value of a 32-bit integer.' },
+  { address: 0x4000042c, name: 'labs', handler: absHandler, rationale: 'long is 32 bits here, so labs is abs.' },
+  { address: 0x40000428, name: 'div', handler: divHandler, rationale: 'Quotient in a0 and remainder in a1, both truncated toward zero.' },
+  { address: 0x40000430, name: 'ldiv', handler: divHandler, rationale: 'Identical to div on a 32-bit long.' },
   { address: 0x40000388, name: 'isalnum', handler: isalnum, rationale: 'ASCII classification.' },
   { address: 0x400003b0, name: 'isspace', handler: isspace, rationale: 'ASCII classification.' },
   { address: 0x400003b8, name: 'toupper', handler: toupper, rationale: 'ASCII case conversion.' },
@@ -1073,6 +1168,12 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
     name: 'esp_rom_delay_us',
     handler: delayUs,
     rationale: 'Records the requested delay; the runner advances simulated time instead of spinning.',
+  },
+  {
+    address: 0x40000350,
+    name: 'esp_rom_newlib_init_common_mutexes',
+    handler: newlibInitCommonMutexes,
+    rationale: "Records the lock handles the application hands the ROM's C library.",
   },
   {
     address: 0x40000044,
