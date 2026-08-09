@@ -9,6 +9,12 @@ import {
   ESP32C3_ROM_FUNCTIONS,
   buildRomTable,
   createRomMachineState,
+  installRomLayout,
+  ETS_ROM_LAYOUT_ADDRESS,
+  ETS_ROM_LAYOUT_POINTER,
+  SOC_DRAM_HIGH,
+  SOC_DRAM_LOW,
+  SOC_ROM_STACK_START,
   isRomAddress,
   regi2cKey,
   ResetReason,
@@ -340,6 +346,64 @@ function call(name: string, args: number[], state = createRomMachineState(), bus
     [0, 1, 2, 3].map((i) => machine.readUint8(DATA + i)).join(',') === '1,2,3,4',
     `qsort respects an element width of one byte (${[0, 1, 2, 3].map((i) => machine.readUint8(DATA + i)).join(',')})`,
   );
+}
+
+// ---------- 8. the ROM layout structure ESP-IDF reads before creating the heap ----------
+//
+// This reproduces the exact failure it fixes. ESP-IDF's
+// soc_get_available_memory_regions() reserves
+// [ets_rom_layout_p->dram0_rtos_reserved_start, SOC_DRAM_HIGH). With no
+// structure present, the pointer reads zero, the dereference reads address 4,
+// and the reservation comes out as [0, SOC_DRAM_HIGH) — a region covering all
+// of memory, which overlaps every other reservation and panics startup.
+{
+  /** What ESP-IDF actually computes, expressed as the two loads it performs. */
+  const readReservedStart = (bus: Bus): number => {
+    const layout = bus.readUint32(ETS_ROM_LAYOUT_POINTER);
+    return bus.readUint32((layout + 4) >>> 0);
+  };
+
+  const bare = new Memory();
+  check(
+    readReservedStart(bare) === 0,
+    'without the structure the reservation starts at 0x00000000 — the panic this fixes',
+  );
+
+  const memory = new Memory();
+  installRomLayout(memory);
+
+  const pointer = memory.readUint32(ETS_ROM_LAYOUT_POINTER);
+  check(pointer === ETS_ROM_LAYOUT_ADDRESS, 'ets_rom_layout_p points at the installed structure');
+
+  const reservedStart = readReservedStart(memory);
+  check(reservedStart !== 0, 'the reserved region no longer starts at zero');
+  check(
+    reservedStart > SOC_DRAM_LOW && reservedStart < SOC_DRAM_HIGH,
+    `dram0_rtos_reserved_start lies inside DRAM (0x${reservedStart.toString(16)})`,
+  );
+  check(
+    reservedStart === SOC_ROM_STACK_START,
+    'and equals the documented ROM stack start, the boundary above which ROM memory sits',
+  );
+
+  // The reservation must leave usable heap below it, or startup would find no
+  // memory even though the check passed.
+  check(SOC_ROM_STACK_START - SOC_DRAM_LOW > 0x30000, 'the reservation leaves the bulk of DRAM allocatable');
+
+  // The ROM stack itself has to sit inside the region being reserved,
+  // otherwise the heap would be handed memory the ROM is still using.
+  const stackSentry = memory.readUint32((pointer + 8) >>> 0);
+  const stackTop = memory.readUint32((pointer + 12) >>> 0);
+  check(stackSentry < SOC_ROM_STACK_START, 'the stack sentry is below the reserved boundary');
+  check(stackTop <= SOC_DRAM_HIGH, 'the stack top is within DRAM');
+
+  // Every field is populated, so a firmware reading a later one gets a
+  // defined address rather than whatever happened to be in memory.
+  let unset = 0;
+  for (let i = 0; i < 40; i++) {
+    if (memory.readUint32((pointer + i * 4) >>> 0) === 0) unset++;
+  }
+  check(unset === 0, `all ${40} layout fields are populated (${unset} left at zero)`);
 }
 
 console.log(failures === 0 ? '\nESP32-C3 ROM checks passed.' : `\n${failures} check(s) FAILED`);

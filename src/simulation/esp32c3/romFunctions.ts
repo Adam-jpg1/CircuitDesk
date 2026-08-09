@@ -1117,6 +1117,82 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
   },
 ];
 
+// ------------------------------------------------------- ROM data structures
+//
+// The mask ROM publishes more than code: it also exposes constants the
+// application reads directly. `ets_rom_layout_p` is one — a pointer, at a fixed
+// address in the ROM's data area, to a structure describing which parts of DRAM
+// the ROM itself uses.
+//
+// ESP-IDF startup reads it to reserve that memory before the heap is created:
+//
+//     SOC_RESERVE_MEMORY_REGION(ets_rom_layout_p->dram0_rtos_reserved_start,
+//                               SOC_DRAM_HIGH, rom_data);
+//
+// With no ROM present the pointer reads as zero, the dereference reads address
+// four, and the reservation comes out as [0x00000000, 0x3FCE0000] — a region
+// covering all of memory, which overlaps everything. ESP-IDF detects that and
+// panics, which is exactly what it should do.
+//
+// So the structure is provided. The layout is the public one from ESP-IDF's
+// `rom_layout.h`; the values come from the chip's own documented constants
+// rather than from any ROM image.
+
+/** Where the ROM's pointer to its layout structure lives. */
+export const ETS_ROM_LAYOUT_POINTER = 0x3ff1fffc;
+
+/** Where this runtime places the structure it points at. */
+export const ETS_ROM_LAYOUT_ADDRESS = 0x3ff1ff00;
+
+/** Documented ESP32-C3 DRAM boundaries, from the SoC headers. */
+export const SOC_DRAM_LOW = 0x3fc80000;
+export const SOC_DRAM_HIGH = 0x3fce0000;
+export const SOC_ROM_STACK_START = 0x3fcde710;
+export const SOC_ROM_STACK_SIZE = 0x2000;
+
+/**
+ * Installs `ets_rom_layout` and the pointer to it.
+ *
+ * Only the leading fields have a defined meaning for a runtime that provides
+ * no ROM Bluetooth or Wi-Fi implementation, and those are the ones startup
+ * reads:
+ *
+ *   dram0_stack_shared_mem_start  where the ROM's shared stack area begins
+ *   dram0_rtos_reserved_start     first DRAM byte the RTOS must not allocate
+ *   stack_sentry / stack          the ROM stack's guard and top
+ *
+ * `dram0_rtos_reserved_start` is set to the documented ROM stack start, which
+ * is precisely the boundary above which the ROM's own memory sits. The
+ * remaining fields describe the ROM's Bluetooth and Wi-Fi data areas; this
+ * runtime provides neither, so they are left as empty ranges at the top of
+ * DRAM rather than being given invented extents.
+ */
+export function installRomLayout(bus: Bus): void {
+  const fields = [
+    SOC_ROM_STACK_START, // dram0_stack_shared_mem_start
+    SOC_ROM_STACK_START, // dram0_rtos_reserved_start
+    SOC_ROM_STACK_START - SOC_ROM_STACK_SIZE, // stack_sentry
+    SOC_DRAM_HIGH, // stack
+    SOC_ROM_STACK_START - SOC_ROM_STACK_SIZE, // stack_sentry_app
+    SOC_DRAM_HIGH, // stack_app
+  ];
+  for (let i = 0; i < fields.length; i++) {
+    bus.writeUint32((ETS_ROM_LAYOUT_ADDRESS + i * 4) >>> 0, fields[i] >>> 0);
+  }
+  // Every remaining field is an empty range at the top of DRAM: the ROM
+  // subsystems they describe are not provided, so they occupy nothing.
+  for (let i = fields.length; i < ROM_LAYOUT_FIELD_COUNT; i++) {
+    bus.writeUint32((ETS_ROM_LAYOUT_ADDRESS + i * 4) >>> 0, SOC_DRAM_HIGH >>> 0);
+  }
+  bus.writeUint32(ETS_ROM_LAYOUT_POINTER, ETS_ROM_LAYOUT_ADDRESS >>> 0);
+}
+
+/**
+ * Fields in the structure for a build with Bluetooth and Wi-Fi support
+ * declared, which is how the Arduino core is compiled.
+ */
+const ROM_LAYOUT_FIELD_COUNT = 40;
+
 /** Address range the ESP32-C3 maps its mask ROM into. */
 export const ROM_START = 0x40000000;
 export const ROM_END = 0x40060000;

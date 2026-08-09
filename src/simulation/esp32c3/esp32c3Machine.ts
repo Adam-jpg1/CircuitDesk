@@ -17,6 +17,7 @@ import {
   buildRomTable,
   createRomMachineState,
   isRomAddress,
+  installRomLayout,
   ResetReason,
   UnimplementedRomCallError,
   type RomFunction,
@@ -211,6 +212,9 @@ export class Esp32C3Machine implements Bus {
     for (const segment of image.segments) {
       for (let i = 0; i < segment.data.length; i++) this.writeByte(segment.loadAddress + i, segment.data[i]);
     }
+    // The ROM publishes constants the application reads directly, so they have
+    // to exist before it runs.
+    installRomLayout(this);
     this.core.reset(image.entryPoint);
     // The application is entered on the ROM's stack, exactly as it would be on
     // hardware. x2 is sp in the RISC-V calling convention.
