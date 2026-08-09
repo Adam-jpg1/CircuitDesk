@@ -89,6 +89,19 @@ export interface GuestCallResult {
   instructions: number;
 }
 
+/**
+ * Simulated time since power-on.
+ *
+ * Peripherals that count — the system timer, the timer groups — need a shared
+ * notion of elapsed time, and it has to be the machine's own rather than the
+ * host's wall clock: a run that is paused, stepped or driven faster than real
+ * time must still present firmware with a consistent timeline.
+ */
+export interface SimulatedClock {
+  /** Nanoseconds of simulated time since power-on. */
+  readonly nanos: number;
+}
+
 /** A memory-mapped peripheral. Addresses are offsets from its base. */
 export interface Peripheral {
   readonly name: string;
@@ -148,9 +161,30 @@ class SparseMemory {
   }
 }
 
-export class Esp32C3Machine implements Bus {
+export class Esp32C3Machine implements Bus, SimulatedClock {
   readonly core: Rv32Core;
   readonly romState: RomMachineState;
+
+  /**
+   * Simulated time since power-on.
+   *
+   * This interpreter retires one instruction per step rather than modelling the
+   * C3's pipeline, so time advances one CPU clock period per instruction. That
+   * is an approximation of instruction timing, not of behaviour: the clock rate
+   * is the one the firmware itself configured, elapsed time is monotonic, and a
+   * ROM delay contributes the microseconds it actually asked for. Sub-cycle
+   * accuracy is not claimed anywhere, and nothing in the runtime depends on it.
+   */
+  private elapsedNanos = 0;
+
+  get nanos(): number {
+    return this.elapsedNanos;
+  }
+
+  /** Simulated microseconds since power-on, which is what firmware asks for. */
+  get micros(): number {
+    return this.elapsedNanos / 1000;
+  }
 
   private readonly memory = new SparseMemory();
   private readonly romTable: Map<number, RomFunction>;
@@ -190,6 +224,7 @@ export class Esp32C3Machine implements Bus {
   loadImage(image: EspApplicationImage): void {
     this.image = image;
     this.memory.clear();
+    this.elapsedNanos = 0;
     // The flash MMU maps the application partition into the IROM and DROM
     // windows, so the whole image file — header included — is visible there,
     // not just the segment payloads. ESP-IDF's cpu_start re-reads that header
@@ -223,6 +258,9 @@ export class Esp32C3Machine implements Bus {
 
   /** Returns the machine to its power-on state and boots the same image again. */
   reset(): void {
+    this.elapsedNanos = 0;
+    this.romState.cpuFrequencyMhz = 160;
+    this.romState.pendingDelayUs = 0;
     for (const peripheral of this.peripherals) peripheral.reset?.();
     this.romState.regi2c.clear();
     this.romState.cache.iCacheEnabled = false;
@@ -239,11 +277,19 @@ export class Esp32C3Machine implements Bus {
    * caller can advance a cycle counter.
    */
   step(): number {
+    const period = 1000 / Math.max(1, this.romState.cpuFrequencyMhz);
     const pc = this.core.pc >>> 0;
     if (isRomAddress(pc)) {
       this.dispatchRomCall(pc);
+      // A ROM routine runs natively in no time at all, but the firmware
+      // measured a delay it asked for, so that delay is real simulated time.
+      this.elapsedNanos += period + this.romState.pendingDelayUs * 1000;
+      this.romState.pendingDelayUs = 0;
       return 0;
     }
+    // A parked core is still clocked; without this a WFI would stop time and
+    // the interrupt it waits for could never arrive.
+    this.elapsedNanos += period;
     return this.core.step();
   }
 

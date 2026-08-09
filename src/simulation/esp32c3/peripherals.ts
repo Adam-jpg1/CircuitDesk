@@ -16,7 +16,7 @@
 // status bit nobody sets makes the firmware hang visibly rather than continue
 // on invented data.
 
-import type { Peripheral } from './esp32c3Machine';
+import type { Peripheral, SimulatedClock } from './esp32c3Machine';
 
 /** Documented ESP32-C3 peripheral base addresses. */
 export const PERIPHERAL_BASE = {
@@ -150,13 +150,226 @@ export class TimerGroup extends RegisterFile {
   }
 }
 
+// -------------------------------------------------------------- system timer
+
+/**
+ * The ESP32-C3's system timer, which is the chip's timebase.
+ *
+ * It is two 52-bit up-counters and three comparators. ESP-IDF reads a counter
+ * by writing an UPDATE bit and polling a VALUE_VALID bit — a real handshake,
+ * not a plain register read — and FreeRTOS drives its tick from a comparator.
+ * A register file cannot stand in for either: the poll never completes because
+ * nothing sets VALUE_VALID, and startup spins in
+ * `systimer_hal_get_counter_value` for ever.
+ *
+ * Offsets and bit positions are the documented ones from the C3 technical
+ * reference manual. The counters run at 16 MHz: the source is the 40 MHz
+ * crystal through the chip's fixed divider of 2.5.
+ */
+const SYSTIMER_CONF = 0x00;
+const SYSTIMER_UNIT_OP = [0x04, 0x08];
+const SYSTIMER_UNIT_LOAD_HI = [0x0c, 0x14];
+const SYSTIMER_UNIT_LOAD_LO = [0x10, 0x18];
+const SYSTIMER_TARGET_HI = [0x1c, 0x24, 0x2c];
+const SYSTIMER_TARGET_LO = [0x20, 0x28, 0x30];
+const SYSTIMER_TARGET_CONF = [0x34, 0x38, 0x3c];
+const SYSTIMER_UNIT_VALUE_HI = [0x40, 0x48];
+const SYSTIMER_UNIT_VALUE_LO = [0x44, 0x4c];
+const SYSTIMER_COMP_LOAD = [0x50, 0x54, 0x58];
+const SYSTIMER_UNIT_LOAD = [0x5c, 0x60];
+const SYSTIMER_INT_ENA = 0x64;
+const SYSTIMER_INT_RAW = 0x68;
+const SYSTIMER_INT_CLR = 0x6c;
+const SYSTIMER_INT_ST = 0x70;
+
+const UNIT_VALUE_VALID = 1 << 29;
+const UNIT_UPDATE = 1 << 30;
+const UNIT_WORK_EN = [1 << 30, 1 << 29];
+const TARGET_WORK_EN = [1 << 24, 1 << 23, 1 << 22];
+const TARGET_PERIOD_MASK = 0x03ffffff;
+const TARGET_PERIOD_MODE = 1 << 30;
+const TARGET_UNIT_SEL = 1 << 31;
+
+/** The counter's high half is 20 bits wide, so the whole counter is 52. */
+const SYSTIMER_HI_MASK = 0xfffff;
+
+/** Counter frequency: the 40 MHz crystal through the chip's fixed 2.5 divider. */
+export const SYSTIMER_TICK_HZ = 16_000_000;
+
+/**
+ * Reset value of SYSTIMER_CONF: unit 0 counting, and both of unit 1's
+ * stall-with-core bits set, exactly as the manual documents the defaults.
+ */
+const SYSTIMER_CONF_RESET = UNIT_WORK_EN[0] | (1 << 25) | (1 << 26);
+
+interface SysTimerUnit {
+  /** Counter value at the moment it was last loaded or stopped. */
+  offset: number;
+  /** Simulated nanoseconds when it started running from that offset. */
+  since: number;
+  running: boolean;
+}
+
+interface SysTimerComparator {
+  /** Absolute counter value this comparator next fires at. */
+  next: number;
+  /** Ticks between repeats, or 0 when the comparator is one-shot. */
+  period: number;
+  armed: boolean;
+}
+
+export class SysTimer extends RegisterFile {
+  private readonly units: SysTimerUnit[] = [];
+  private readonly comparators: SysTimerComparator[] = [];
+
+  constructor(private readonly clock: SimulatedClock) {
+    super('systimer', PERIPHERAL_BASE.systimer, 0x1000);
+    this.reset();
+  }
+
+  override reset(): void {
+    super.reset();
+    this.registers.set(SYSTIMER_CONF, SYSTIMER_CONF_RESET >>> 0);
+    this.units.length = 0;
+    for (let i = 0; i < 2; i++) {
+      this.units.push({ offset: 0, since: this.clock.nanos, running: (SYSTIMER_CONF_RESET & UNIT_WORK_EN[i]) !== 0 });
+    }
+    this.comparators.length = 0;
+    for (let i = 0; i < 3; i++) this.comparators.push({ next: 0, period: 0, armed: false });
+  }
+
+  /** Current value of a counter, in systimer ticks. */
+  counter(unit: number): number {
+    const u = this.units[unit];
+    if (!u.running) return u.offset;
+    return u.offset + Math.floor(((this.clock.nanos - u.since) * SYSTIMER_TICK_HZ) / 1e9);
+  }
+
+  /**
+   * Bits set in INT_RAW right now.
+   *
+   * Comparators are evaluated on demand rather than on a schedule: the answer
+   * is a function of the counter, so asking at the moment of the read gives the
+   * same result as updating continuously, without stepping the peripheral.
+   */
+  private rawInterrupts(): number {
+    const conf = this.peek(SYSTIMER_CONF);
+    let raw = this.peek(SYSTIMER_INT_RAW);
+    for (let i = 0; i < 3; i++) {
+      const comparator = this.comparators[i];
+      if (!comparator.armed || (conf & TARGET_WORK_EN[i]) === 0) continue;
+      const unit = (this.peek(SYSTIMER_TARGET_CONF[i]) & TARGET_UNIT_SEL) !== 0 ? 1 : 0;
+      const value = this.counter(unit);
+      if (value < comparator.next) continue;
+      raw |= 1 << i;
+      if (comparator.period > 0) {
+        // Keep the repeat aligned to the original phase rather than to the
+        // moment it was noticed, so a late read cannot make the tick drift.
+        const missed = Math.floor((value - comparator.next) / comparator.period) + 1;
+        comparator.next += missed * comparator.period;
+      } else {
+        comparator.armed = false;
+      }
+    }
+    this.registers.set(SYSTIMER_INT_RAW, raw >>> 0);
+    return raw >>> 0;
+  }
+
+  /** Interrupt lines this peripheral is currently asserting. */
+  pendingInterrupts(): number {
+    return (this.rawInterrupts() & this.peek(SYSTIMER_INT_ENA)) >>> 0;
+  }
+
+  protected override onRead(offset: number): number | undefined {
+    if (offset === SYSTIMER_INT_RAW) return this.rawInterrupts();
+    if (offset === SYSTIMER_INT_ST) return this.pendingInterrupts();
+    // VALUE_HI/LO hold the snapshot the last UPDATE latched, so they read back
+    // as plain storage. INT_CLR is write-only and reads as zero.
+    if (offset === SYSTIMER_INT_CLR) return 0;
+    return undefined;
+  }
+
+  protected override onWrite(offset: number, value: number): void {
+    if (offset === SYSTIMER_CONF) {
+      for (let i = 0; i < 2; i++) this.setUnitRunning(i, (value & UNIT_WORK_EN[i]) !== 0);
+      return;
+    }
+
+    const opUnit = SYSTIMER_UNIT_OP.indexOf(offset);
+    if (opUnit >= 0) {
+      if ((value & UNIT_UPDATE) === 0) {
+        this.registers.set(offset, value & ~UNIT_VALUE_VALID);
+        return;
+      }
+      // Latch the counter and report the snapshot ready. On hardware this takes
+      // a few cycles; nothing observable depends on the delay, and firmware
+      // reaches the same state either way.
+      const snapshot = this.counter(opUnit);
+      this.registers.set(SYSTIMER_UNIT_VALUE_LO[opUnit], snapshot >>> 0);
+      this.registers.set(SYSTIMER_UNIT_VALUE_HI[opUnit], Math.floor(snapshot / 0x100000000) & SYSTIMER_HI_MASK);
+      this.registers.set(offset, (value | UNIT_VALUE_VALID) >>> 0);
+      return;
+    }
+
+    const loadUnit = SYSTIMER_UNIT_LOAD.indexOf(offset);
+    if (loadUnit >= 0 && (value & 1) !== 0) {
+      const hi = this.peek(SYSTIMER_UNIT_LOAD_HI[loadUnit]) & SYSTIMER_HI_MASK;
+      const lo = this.peek(SYSTIMER_UNIT_LOAD_LO[loadUnit]) >>> 0;
+      this.units[loadUnit].offset = hi * 0x100000000 + lo;
+      this.units[loadUnit].since = this.clock.nanos;
+      return;
+    }
+
+    const comparator = SYSTIMER_COMP_LOAD.indexOf(offset);
+    if (comparator >= 0 && (value & 1) !== 0) {
+      this.armComparator(comparator);
+      return;
+    }
+
+    if (offset === SYSTIMER_INT_CLR) {
+      this.registers.set(SYSTIMER_INT_RAW, this.peek(SYSTIMER_INT_RAW) & ~value);
+      this.registers.set(SYSTIMER_INT_CLR, 0);
+    }
+  }
+
+  private setUnitRunning(index: number, running: boolean): void {
+    const unit = this.units[index];
+    if (unit.running === running) return;
+    // Freeze at the value the counter had reached, so stopping and restarting
+    // does not lose or invent time.
+    if (!running) unit.offset = this.counter(index);
+    else unit.since = this.clock.nanos;
+    unit.running = running;
+  }
+
+  /**
+   * Applies a comparator's target registers, which the manual requires a
+   * COMPn_LOAD write to do — writing the target alone changes nothing.
+   */
+  private armComparator(index: number): void {
+    const conf = this.peek(SYSTIMER_TARGET_CONF[index]);
+    const unit = (conf & TARGET_UNIT_SEL) !== 0 ? 1 : 0;
+    const comparator = this.comparators[index];
+    if ((conf & TARGET_PERIOD_MODE) !== 0) {
+      comparator.period = conf & TARGET_PERIOD_MASK;
+      // A period comparator counts from now, not from an absolute target.
+      comparator.next = this.counter(unit) + comparator.period;
+    } else {
+      comparator.period = 0;
+      const hi = this.peek(SYSTIMER_TARGET_HI[index]) & SYSTIMER_HI_MASK;
+      comparator.next = hi * 0x100000000 + (this.peek(SYSTIMER_TARGET_LO[index]) >>> 0);
+    }
+    comparator.armed = true;
+  }
+}
+
 /**
  * Builds the peripheral set an ESP32-C3 machine needs to start.
  *
  * Blocks are added as startup proves it touches them; each one is either
  * modelled or left as a register file, and nothing is added speculatively.
  */
-export function createStartupPeripherals(): Peripheral[] {
+export function createStartupPeripherals(clock: SimulatedClock): Peripheral[] {
   return [
     new TimerGroup('timg0', PERIPHERAL_BASE.timg0),
     new TimerGroup('timg1', PERIPHERAL_BASE.timg1),
@@ -165,7 +378,7 @@ export function createStartupPeripherals(): Peripheral[] {
     new RegisterFile('interrupt_matrix', PERIPHERAL_BASE.interruptMatrix, 0x1000),
     new RegisterFile('extmem', PERIPHERAL_BASE.extMem, 0x1000),
     new RegisterFile('apb_ctrl', PERIPHERAL_BASE.apbCtrl, 0x1000),
-    new RegisterFile('systimer', PERIPHERAL_BASE.systimer, 0x1000),
+    new SysTimer(clock),
     new RegisterFile('io_mux', PERIPHERAL_BASE.ioMux, 0x1000),
   ];
 }
