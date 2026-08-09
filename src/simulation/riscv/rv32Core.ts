@@ -90,6 +90,19 @@ export class Rv32Core {
 
   private csr = new Map<number, number>();
 
+  /**
+   * Chip-specific control registers, supplied by whoever owns this core.
+   *
+   * RISC-V reserves a range of CSR numbers for implementations to define, and
+   * real parts use it — the ESP32-C3 puts its performance counters there. The
+   * core cannot know what those mean, so it asks. Returning undefined leaves
+   * the generic behaviour in place.
+   */
+  customCsrRead?: (number_: number) => number | undefined;
+
+  /** Returns true when the chip handled the write itself. */
+  customCsrWrite?: (number_: number, value: number) => boolean;
+
   constructor(readonly bus: Bus) {
     this.reset(0);
   }
@@ -135,8 +148,10 @@ export class Rv32Core {
       case CSR_MCYCLEH:
       case CSR_MINSTRETH:
         return Math.floor(this.instructionsRetired / 0x100000000) | 0;
-      default:
-        return this.csr.get(number_) ?? 0;
+      default: {
+        const custom = this.customCsrRead?.(number_);
+        return custom !== undefined ? custom | 0 : (this.csr.get(number_) ?? 0);
+      }
     }
   }
 
@@ -154,6 +169,7 @@ export class Rv32Core {
       case CSR_MINSTRETH:
         return;
       default:
+        if (this.customCsrWrite?.(number_, value | 0)) return;
         this.csr.set(number_, value | 0);
     }
   }
