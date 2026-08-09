@@ -554,6 +554,74 @@ const md5Final: RomHandler = ({ args, bus }) => {
   for (let i = 0; i < MD5_BLOCK_SIZE; i++) bus.writeUint8((context + MD5_INPUT_OFFSET + i) >>> 0, 0);
 };
 
+// ---------------------------------------------------------------------- CRC
+//
+// ESP-IDF checks the partition table, OTA data and several other structures
+// with the CRC routines in the mask ROM. These are the standard CRC-32 and
+// CRC-16 definitions, written from their published polynomials.
+//
+// The ROM's convention is that the running value is passed and returned
+// inverted, so a caller starting from 0xFFFFFFFF and comparing against a
+// stored CRC gets the ordinary answer. Getting that inversion wrong makes
+// every stored checksum appear corrupt.
+
+/** Reflected CRC-32, the one used by Ethernet, PNG and zlib. */
+const CRC32_REFLECTED_POLYNOMIAL = 0xedb88320;
+/** The same polynomial written the other way round, for the big-endian form. */
+const CRC32_POLYNOMIAL = 0x04c11db7;
+/** CRC-16/CCITT's polynomial, reflected and not. */
+const CRC16_REFLECTED_POLYNOMIAL = 0x8408;
+const CRC16_POLYNOMIAL = 0x1021;
+
+function crcLe(crc: number, bits: number, polynomial: number, read: (i: number) => number, length: number): number {
+  let value = crc >>> 0;
+  for (let i = 0; i < length; i++) {
+    value ^= read(i);
+    for (let bit = 0; bit < 8; bit++) {
+      value = (value & 1) !== 0 ? ((value >>> 1) ^ polynomial) >>> 0 : value >>> 1;
+    }
+  }
+  return bits === 16 ? value & 0xffff : value >>> 0;
+}
+
+function crcBe(crc: number, bits: number, polynomial: number, read: (i: number) => number, length: number): number {
+  const top = 1 << (bits - 1);
+  const mask = bits === 16 ? 0xffff : 0xffffffff;
+  let value = crc >>> 0;
+  for (let i = 0; i < length; i++) {
+    value = (value ^ (read(i) << (bits - 8))) & mask;
+    for (let bit = 0; bit < 8; bit++) {
+      value = (value & top) !== 0 ? ((value << 1) ^ polynomial) & mask : (value << 1) & mask;
+    }
+  }
+  return value >>> 0;
+}
+
+/** `crc32_le(crc, buffer, length)`, with the ROM's inverted convention. */
+const crc32Le: RomHandler = ({ args, bus }) => {
+  const [crc, buffer, length] = args.map((v) => v >>> 0);
+  const read = (i: number): number => bus.readUint8((buffer + i) >>> 0);
+  return ~crcLe(~crc >>> 0, 32, CRC32_REFLECTED_POLYNOMIAL, read, length) >>> 0;
+};
+
+const crc32Be: RomHandler = ({ args, bus }) => {
+  const [crc, buffer, length] = args.map((v) => v >>> 0);
+  const read = (i: number): number => bus.readUint8((buffer + i) >>> 0);
+  return ~crcBe(~crc >>> 0, 32, CRC32_POLYNOMIAL, read, length) >>> 0;
+};
+
+const crc16Le: RomHandler = ({ args, bus }) => {
+  const [crc, buffer, length] = args.map((v) => v >>> 0);
+  const read = (i: number): number => bus.readUint8((buffer + i) >>> 0);
+  return ~crcLe(~crc & 0xffff, 16, CRC16_REFLECTED_POLYNOMIAL, read, length) & 0xffff;
+};
+
+const crc16Be: RomHandler = ({ args, bus }) => {
+  const [crc, buffer, length] = args.map((v) => v >>> 0);
+  const read = (i: number): number => bus.readUint8((buffer + i) >>> 0);
+  return ~crcBe(~crc & 0xffff, 16, CRC16_POLYNOMIAL, read, length) & 0xffff;
+};
+
 /**
  * `ets_apb_backup_init_lock_func(lock, unlock)`
  *
@@ -1600,6 +1668,30 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
     name: 'MD5Final',
     handler: md5Final,
     rationale: 'Pads, appends the bit length, and emits the 16-byte digest.',
+  },
+  {
+    address: 0x40000628,
+    name: 'crc32_le',
+    handler: crc32Le,
+    rationale: 'Reflected CRC-32 with the inverted running value the ROM uses.',
+  },
+  {
+    address: 0x4000062c,
+    name: 'crc32_be',
+    handler: crc32Be,
+    rationale: 'The unreflected form of the same polynomial.',
+  },
+  {
+    address: 0x40000630,
+    name: 'crc16_le',
+    handler: crc16Le,
+    rationale: 'Reflected CRC-16/CCITT.',
+  },
+  {
+    address: 0x40000634,
+    name: 'crc16_be',
+    handler: crc16Be,
+    rationale: 'The unreflected form.',
   },
   {
     address: 0x40000060,

@@ -18,7 +18,7 @@
 
 import type { Peripheral, SimulatedClock } from './esp32c3Machine';
 import { RegisterFile } from './registerFile';
-import { SpiMemController, SPI_MEM_BASE } from './spiMem';
+import { FlashMmu, SpiMemController, SPI_MEM_BASE } from './spiMem';
 import { InterruptMatrix, INTERRUPT_SOURCE, SystemRegisters, type InterruptingPeripheral } from './interrupts';
 
 export { RegisterFile } from './registerFile';
@@ -174,11 +174,12 @@ interface SysTimerUnit {
 }
 
 interface SysTimerComparator {
-  /** Absolute counter value this comparator next fires at. */
-  next: number;
-  /** Ticks between repeats, or 0 when the comparator is one-shot. */
-  period: number;
-  armed: boolean;
+  /** Absolute counter value the last COMP_LOAD latched. */
+  target: number;
+  /** Counter value the current periodic run started from. */
+  periodBase: number;
+  /** Alarms already reported in the current periodic run. */
+  periodCount: number;
 }
 
 export class SysTimer extends RegisterFile implements InterruptingPeripheral {
@@ -198,7 +199,7 @@ export class SysTimer extends RegisterFile implements InterruptingPeripheral {
       this.units.push({ offset: 0, since: this.clock.nanos, running: (SYSTIMER_CONF_RESET & UNIT_WORK_EN[i]) !== 0 });
     }
     this.comparators.length = 0;
-    for (let i = 0; i < 3; i++) this.comparators.push({ next: 0, period: 0, armed: false });
+    for (let i = 0; i < 3; i++) this.comparators.push({ target: 0, periodBase: 0, periodCount: 0 });
   }
 
   /** Current value of a counter, in systimer ticks. */
@@ -219,23 +220,49 @@ export class SysTimer extends RegisterFile implements InterruptingPeripheral {
     const conf = this.peek(SYSTIMER_CONF);
     let raw = this.peek(SYSTIMER_INT_RAW);
     for (let i = 0; i < 3; i++) {
-      const comparator = this.comparators[i];
-      if (!comparator.armed || (conf & TARGET_WORK_EN[i]) === 0) continue;
-      const unit = (this.peek(SYSTIMER_TARGET_CONF[i]) & TARGET_UNIT_SEL) !== 0 ? 1 : 0;
-      const value = this.counter(unit);
-      if (value < comparator.next) continue;
+      if ((conf & TARGET_WORK_EN[i]) === 0) continue;
+      const alarm = this.alarmOf(i);
+      if (alarm === undefined) continue;
+      const value = this.counter(this.unitOf(i));
+      if (value < alarm.at) continue;
       raw |= 1 << i;
-      if (comparator.period > 0) {
-        // Keep the repeat aligned to the original phase rather than to the
-        // moment it was noticed, so a late read cannot make the tick drift.
-        const missed = Math.floor((value - comparator.next) / comparator.period) + 1;
-        comparator.next += missed * comparator.period;
-      } else {
-        comparator.armed = false;
+      // A periodic comparator reloads itself. How many periods have elapsed is
+      // taken from the counter rather than from how often this was read, so a
+      // late look cannot shift the repeat off its original phase.
+      if (alarm.period > 0) {
+        this.comparators[i].periodCount = Math.floor((value - this.comparators[i].periodBase) / alarm.period);
       }
     }
     this.registers.set(SYSTIMER_INT_RAW, raw >>> 0);
     return raw >>> 0;
+  }
+
+  /** Which counter a comparator watches. Read live, as the hardware does. */
+  private unitOf(index: number): number {
+    return (this.peek(SYSTIMER_TARGET_CONF[index]) & TARGET_UNIT_SEL) !== 0 ? 1 : 0;
+  }
+
+  /**
+   * The counter value a comparator next fires at, and its repeat interval.
+   *
+   * Mode, period and unit are read from the configuration register every time
+   * rather than captured when COMP_LOAD was written. They are live settings,
+   * and firmware really does switch a comparator to periodic after loading its
+   * target — capturing them at load time leaves such a comparator stuck on the
+   * one-shot value it was given, which is what silently stopped the FreeRTOS
+   * tick after its very first alarm.
+   *
+   * A one-shot comparator is a plain comparison and stays true once the counter
+   * has passed its target; the hardware has no latch to disarm, and firmware
+   * moves the target on or disables the comparator instead.
+   */
+  private alarmOf(index: number): { at: number; period: number } | undefined {
+    const conf = this.peek(SYSTIMER_TARGET_CONF[index]);
+    const comparator = this.comparators[index];
+    if ((conf & TARGET_PERIOD_MODE) === 0) return { at: comparator.target, period: 0 };
+    const period = conf & TARGET_PERIOD_MASK;
+    if (period === 0) return undefined;
+    return { at: comparator.periodBase + (comparator.periodCount + 1) * period, period };
   }
 
   /** Interrupt lines this peripheral is currently asserting. */
@@ -265,10 +292,10 @@ export class SysTimer extends RegisterFile implements InterruptingPeripheral {
     const enabled = this.peek(SYSTIMER_INT_ENA);
     let soonest: number | undefined;
     for (let i = 0; i < 3; i++) {
-      const comparator = this.comparators[i];
-      if (!comparator.armed || (conf & TARGET_WORK_EN[i]) === 0 || (enabled & (1 << i)) === 0) continue;
-      const unit = (this.peek(SYSTIMER_TARGET_CONF[i]) & TARGET_UNIT_SEL) !== 0 ? 1 : 0;
-      const remaining = comparator.next - this.counter(unit);
+      if ((conf & TARGET_WORK_EN[i]) === 0 || (enabled & (1 << i)) === 0) continue;
+      const alarm = this.alarmOf(i);
+      if (alarm === undefined) continue;
+      const remaining = alarm.at - this.counter(this.unitOf(i));
       // Already past its target: the machine should look immediately.
       const at = remaining <= 0 ? this.clock.nanos : this.clock.nanos + (remaining * 1e9) / SYSTIMER_TICK_HZ;
       if (soonest === undefined || at < soonest) soonest = at;
@@ -343,19 +370,12 @@ export class SysTimer extends RegisterFile implements InterruptingPeripheral {
    * COMPn_LOAD write to do — writing the target alone changes nothing.
    */
   private armComparator(index: number): void {
-    const conf = this.peek(SYSTIMER_TARGET_CONF[index]);
-    const unit = (conf & TARGET_UNIT_SEL) !== 0 ? 1 : 0;
     const comparator = this.comparators[index];
-    if ((conf & TARGET_PERIOD_MODE) !== 0) {
-      comparator.period = conf & TARGET_PERIOD_MASK;
-      // A period comparator counts from now, not from an absolute target.
-      comparator.next = this.counter(unit) + comparator.period;
-    } else {
-      comparator.period = 0;
-      const hi = this.peek(SYSTIMER_TARGET_HI[index]) & SYSTIMER_HI_MASK;
-      comparator.next = hi * 0x100000000 + (this.peek(SYSTIMER_TARGET_LO[index]) >>> 0);
-    }
-    comparator.armed = true;
+    const hi = this.peek(SYSTIMER_TARGET_HI[index]) & SYSTIMER_HI_MASK;
+    comparator.target = hi * 0x100000000 + (this.peek(SYSTIMER_TARGET_LO[index]) >>> 0);
+    // A periodic run counts from the moment its target was loaded.
+    comparator.periodBase = this.counter(this.unitOf(index));
+    comparator.periodCount = 0;
   }
 }
 
@@ -417,6 +437,7 @@ export function createStartupPeripherals(clock: SimulatedClock, flash?: SerialNo
     // transactions through it, so its registers only need to read back.
     new RegisterFile('spi0', SPI_MEM_BASE.spi0, 0x1000),
     ...(flash ? [new SpiMemController(flash)] : []),
+    new FlashMmu(),
     new TimerGroup('timg0', PERIPHERAL_BASE.timg0),
     new TimerGroup('timg1', PERIPHERAL_BASE.timg1),
     new RegisterFile('rtc_cntl', PERIPHERAL_BASE.rtcCntl, 0x1000),

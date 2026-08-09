@@ -146,15 +146,33 @@ const PERIOD_MODE = 1 << 30;
   check((timer.readUint32(INT_RAW) & 1) !== 0, 'and does fire once the counter reaches it');
   check((timer.readUint32(INT_ST) & 1) !== 0, 'the masked status follows the raw status when enabled');
 
+  // A one-shot comparator is a comparison, not a latch: once the counter has
+  // passed the target the condition stays true, so clearing the status only
+  // holds until the next look. Firmware moves the target on instead, which is
+  // exactly what the timer driver does for a one-shot alarm.
   timer.writeUint32(INT_CLR, 1);
-  check((timer.readUint32(INT_RAW) & 1) === 0, 'writing to the clear register clears it');
-  clock.advanceMicros(10_000);
-  check((timer.readUint32(INT_RAW) & 1) === 0, 'and a one-shot comparator does not fire again');
+  check((timer.readUint32(INT_RAW) & 1) !== 0, 'a one-shot target already passed re-asserts after a clear');
+
+  timer.writeUint32(TARGET0_LO, target * 4);
+  timer.writeUint32(COMP0_LOAD, 1);
+  timer.writeUint32(INT_CLR, 1);
+  check((timer.readUint32(INT_RAW) & 1) === 0, 'moving the target forward stops it');
+  // The new target is four times the original, so the counter has to run well
+  // past where it already is before the comparison becomes true again.
+  clock.advanceMicros(20_000);
+  check((timer.readUint32(INT_RAW) & 1) !== 0, 'and it fires again when the counter reaches the new target');
+
+  // Disabling the comparator silences it whatever its target.
+  timer.writeUint32(INT_CLR, 1);
+  timer.writeUint32(CONF, UNIT0_WORK_EN);
+  check((timer.readUint32(INT_RAW) & 1) === 0, 'a comparator with its work-enable clear asserts nothing');
+  timer.writeUint32(CONF, UNIT0_WORK_EN | TARGET0_WORK_EN);
 
   // A period comparator repeats, and keeps its phase.
   const period = SYSTIMER_TICK_HZ / 1000;
   timer.writeUint32(TARGET0_CONF, PERIOD_MODE | period);
   timer.writeUint32(COMP0_LOAD, 1);
+  timer.writeUint32(INT_CLR, 1);
   clock.advanceMicros(999);
   check((timer.readUint32(INT_RAW) & 1) === 0, 'a period comparator waits out its first period');
   clock.advanceMicros(2);
@@ -172,6 +190,19 @@ const PERIOD_MODE = 1 << 30;
   timer.writeUint32(INT_CLR, 1);
   clock.advanceMicros(1000);
   check((timer.readUint32(INT_RAW) & 1) !== 0, 'and the repeat stays on its original phase');
+
+  // Switching a comparator to periodic after its target was loaded has to take
+  // effect: the mode bits are live configuration, not something latched by the
+  // load. Getting this wrong leaves the FreeRTOS tick firing exactly once.
+  timer.writeUint32(INT_CLR, 1);
+  clock.advanceMicros(3000);
+  let repeats = 0;
+  for (let i = 0; i < 3; i++) {
+    if ((timer.readUint32(INT_RAW) & 1) !== 0) repeats++;
+    timer.writeUint32(INT_CLR, 1);
+    clock.advanceMicros(1000);
+  }
+  check(repeats === 3, `a periodic comparator keeps firing indefinitely (${repeats} of 3)`);
 
   // A comparator whose work-enable is off produces nothing.
   timer.writeUint32(INT_CLR, 1);
