@@ -242,11 +242,48 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     [{ ...g3('GPIO1', 'GPIO1') }, { ...g3('GPIO2', 'GPIO2') }, ...seqPins('GPIO', 38, 48, 3.3), g3('TX0', 'TX0'), g3('RX0', 'RX0'), p5v('VIN_5V', '5V'), gnd('GND2')],
     'validation', { color: '#12262e', usb: 'usb-c' },
   ),
+  // ESP32-C3-DevKitM-1, Espressif's own development board for the
+  // ESP32-C3-MINI-1 module. The pin order below is the J1 and J3 headers as
+  // Espressif documents them, top to bottom, including the repeated GND and
+  // supply pins — a board's real header has those, and leaving them out is
+  // what made the previous definition impossible to wire against correctly.
+  //
+  // ADC channels follow the module's own mapping: ADC1 on IO0-IO4 and ADC2_CH0
+  // on IO5. IO18 and IO19 carry USB D-/D+ on this board, and IO8 drives the
+  // on-board RGB LED, so both are annotated rather than presented as plain
+  // GPIO.
   simpleWiringBoard(
-    'board.esp32-c3', 'ESP32-C3 DevKitM', 'Espressif', 'ESP32-C3 (RISC-V)', 25.4, 52, 3.3,
-    [p3v3('3V3'), ...seqPins('GPIO', 0, 7, 3.3), gnd('GND1')],
-    [g3('GPIO8', 'GPIO8'), g3('GPIO9', 'GPIO9'), g3('GPIO10', 'GPIO10'), g3('GPIO18', 'GPIO18'), g3('GPIO19', 'GPIO19'), g3('TX0', 'TX0'), g3('RX0', 'RX0'), p5v('VIN_5V', '5V'), gnd('GND2')],
-    'validation', { color: '#12262e', usb: 'usb-c' },
+    'board.esp32-c3', 'ESP32-C3-DevKitM-1', 'Espressif', 'ESP32-C3 (RISC-V RV32IMC)', 22.9, 51.1, 3.3,
+    [
+      gnd('GND1'), { ...p3v3('3V3_1'), aliases: ['3V3'] }, p3v3('3V3_2'),
+      { ...a3('IO2', 'IO2'), aliases: ['GPIO2'] }, { ...a3('IO3', 'IO3'), aliases: ['GPIO3'] },
+      gnd('GND2'), reset('RST', 'RST'), gnd('GND3'),
+      { ...a3('IO0', 'IO0'), aliases: ['GPIO0'] }, { ...a3('IO1', 'IO1'), aliases: ['GPIO1'] },
+      { ...g3('IO10', 'IO10'), aliases: ['GPIO10'] },
+      gnd('GND4'), { ...p5v('5V_1', '5V'), aliases: ['VIN_5V'] }, p5v('5V_2', '5V'), gnd('GND5'),
+    ],
+    [
+      gnd('GND6'),
+      g3('IO21', 'TX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-tx'], aliases: ['TX0'] }),
+      g3('IO20', 'RX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-rx'], aliases: ['RX0'] }),
+      gnd('GND7'),
+      { ...g3('IO9', 'IO9'), aliases: ['GPIO9'] },
+      g3('IO8', 'IO8', { aliases: ['GPIO8'], description: 'GPIO8 — also drives the on-board RGB LED' }),
+      gnd('GND8'),
+      { ...g3('IO7', 'IO7'), aliases: ['GPIO7'] }, { ...g3('IO6', 'IO6'), aliases: ['GPIO6'] },
+      { ...a3('IO5', 'IO5'), aliases: ['GPIO5'] }, { ...a3('IO4', 'IO4'), aliases: ['GPIO4'] },
+      gnd('GND9'),
+      g3('IO18', 'IO18', { aliases: ['GPIO18'], description: 'GPIO18 — also USB D-' }),
+      g3('IO19', 'IO19', { aliases: ['GPIO19'], description: 'GPIO19 — also USB D+' }),
+      gnd('GND10'),
+    ],
+    'validation',
+    {
+      color: '#12262e',
+      usb: 'micro',
+      description:
+        'ESP32-C3-DevKitM-1 (ESP32-C3-MINI-1 module, 4 MB flash). RISC-V RV32IMC at 160 MHz with 3.3 V logic. Two 15-pin headers as Espressif documents them.',
+    },
   ),
   simpleWiringBoard(
     'board.esp8266-nodemcu', 'ESP8266 NodeMCU', 'Espressif', 'ESP8266', 25.6, 48.5, 3.3,

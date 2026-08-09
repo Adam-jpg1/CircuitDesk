@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import type { CircuitProject, TestResult } from '../types';
-import { resolveDefinition } from './partsRegistry';
+import { resolveDefinition, resolvePin } from './partsRegistry';
 import { buildCircuitGraph, splitNode } from '../circuit/nets';
 import { validateProject } from '../validation/validator';
 import { downloadFile } from '../ui/primitives';
@@ -63,7 +63,7 @@ export function buildWiringReport(project: CircuitProject): string {
   };
   const pinLabel = (instId: string, pinId: string) => {
     const def = graph.definitions.get(instId);
-    return def?.pins.find((p) => p.id === pinId)?.label ?? pinId;
+    return resolvePin(def, pinId)?.label ?? pinId;
   };
   const lines: string[] = [
     `CircuitDesk wiring report — ${project.name}`,

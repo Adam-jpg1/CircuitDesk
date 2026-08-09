@@ -4,6 +4,7 @@ import { uid, type CircuitProject, type ValidationIssue, type PinDefinition } fr
 import { buildCircuitGraph, splitNode, type CircuitGraph } from '../circuit/nets';
 import { arduinoPinNumber } from '../boards/pinMaps';
 import { analyzeCodePins } from '../compiler/codeAnalysis';
+import { resolvePin } from '../project/partsRegistry';
 
 interface NetInfo {
   id: string;
@@ -40,7 +41,7 @@ function collectNetInfo(graph: CircuitGraph): Map<string, NetInfo> {
     for (const node of net.nodes) {
       const [instId, pinId] = splitNode(node);
       const def = graph.definitions.get(instId);
-      const pin = def?.pins.find((p) => p.id === pinId);
+      const pin = resolvePin(def, pinId);
       if (!def || !pin) continue;
       info.pins.push({ instId, pinId, pin, isBoard: Boolean(def.isBoard), defId: def.id });
       if (pin.type === 'ground') info.hasGround = true;

@@ -277,7 +277,9 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
   'board.esp32-c3': {
     architecture: 'esp32',
     variant: 'esp32c3',
-    aliases: ['esp32-c3'],
+    // 'esp32-c3-devkitm' and the old display name stay as lookup aliases so
+    // projects saved before this entry was corrected still resolve.
+    aliases: ['esp32-c3', 'esp32-c3-devkitm-1', 'esp32-c3-devkitm', 'esp32c3', 'esp32:esp32:esp32c3'],
     limitation: 'ESP32-C3 is RISC-V, not Xtensa — tracked as its own variant; validation only.',
   },
   'board.esp8266-nodemcu': {
