@@ -34,7 +34,7 @@ export interface CompileResult {
   stderr: string;
   diagnostics: Diagnostic[];
   firmware?: {
-    format: 'intel-hex' | 'uf2' | 'bin';
+    format: 'intel-hex' | 'uf2' | 'bin' | 'esp-image';
     /** intel-hex is plain text; uf2/bin are base64. */
     data: string;
   };
@@ -67,7 +67,7 @@ export interface BoardTarget {
   id: string;
   fqbn: string;
   name: string;
-  arch: 'avr' | 'rp2040';
+  arch: 'avr' | 'rp2040' | 'esp32c3';
   /** arduino-cli core that provides this target. */
   core: string;
   fCpuHz: number;

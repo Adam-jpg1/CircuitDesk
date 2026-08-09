@@ -189,7 +189,7 @@ function finish(
   success: boolean,
   toolchain: 'arduino-cli' | 'avr-gcc',
   version: string,
-  out: { stdout: string; stderr: string; hex?: string; binaryBase64?: string; binaryFormat?: 'uf2' | 'bin'; flashBytes?: number; ramBytes?: number },
+  out: { stdout: string; stderr: string; hex?: string; binaryBase64?: string; binaryFormat?: 'uf2' | 'bin' | 'esp-image'; flashBytes?: number; ramBytes?: number },
   diagnostics: Diagnostic[],
   target: { id: string; fqbn: string; flashMaxBytes: number; ramMaxBytes: number },
   started: number,

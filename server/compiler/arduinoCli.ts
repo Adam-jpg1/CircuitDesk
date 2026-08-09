@@ -78,7 +78,7 @@ export interface CliBuildOutput {
   hex?: string;
   /** base64-encoded binary firmware for non-AVR targets (.uf2 preferred, else .bin). */
   binaryBase64?: string;
-  binaryFormat?: 'uf2' | 'bin';
+  binaryFormat?: 'uf2' | 'bin' | 'esp-image';
   flashBytes?: number;
   ramBytes?: number;
 }
@@ -88,7 +88,7 @@ export async function cliCompile(
   outputDir: string,
   fqbn: string,
   syntaxOnly: boolean,
-  arch: 'avr' | 'rp2040' = 'avr',
+  arch: 'avr' | 'rp2040' | 'esp32c3' = 'avr',
 ): Promise<CliBuildOutput> {
   const jobs = ['--jobs', String(COMPILE_JOBS)];
   const args = syntaxOnly
@@ -102,7 +102,7 @@ export async function cliCompile(
     });
     let hex: string | undefined;
     let binaryBase64: string | undefined;
-    let binaryFormat: 'uf2' | 'bin' | undefined;
+    let binaryFormat: 'uf2' | 'bin' | 'esp-image' | undefined;
     if (!syntaxOnly) {
       const files = await readdir(outputDir);
       // Artifact choice follows the TARGET's architecture, not whatever the
@@ -115,6 +115,24 @@ export async function cliCompile(
         if (chosen) {
           binaryBase64 = (await readFile(path.join(outputDir, chosen))).toString('base64');
           binaryFormat = uf2 ? 'uf2' : 'bin';
+        }
+      } else if (arch === 'esp32c3') {
+        // An ESP build writes several .bin files: the application image, the
+        // second-stage bootloader, the partition table and a merged 4 MB flash
+        // image. The application image is the one that is executed, and it is
+        // self-describing — it carries its own segment load addresses and entry
+        // point — so it is picked by name rather than by taking whichever .bin
+        // the directory listing happens to yield first.
+        const app = files.find(
+          (f) =>
+            f.endsWith('.bin') &&
+            !f.endsWith('.bootloader.bin') &&
+            !f.endsWith('.partitions.bin') &&
+            !f.endsWith('.merged.bin'),
+        );
+        if (app) {
+          binaryBase64 = (await readFile(path.join(outputDir, app))).toString('base64');
+          binaryFormat = 'esp-image';
         }
       } else {
         const hexFile = files.find((f) => f.endsWith('.hex') && !f.endsWith('.with_bootloader.hex'));
