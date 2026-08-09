@@ -230,5 +230,117 @@ function call(name: string, args: number[], state = createRomMachineState(), bus
   check(!table.has(0x40001234), 'an address with no implementation is genuinely absent from the table');
 }
 
+// ---------- 7. guest callbacks and qsort ----------
+//
+// qsort's comparator is firmware code, so the runtime has to be able to call
+// into the guest and use the answer. These build tiny RISC-V comparators by
+// hand and sort real arrays through the real ROM entry point.
+{
+  const { Esp32C3Machine } = await import('../src/simulation/esp32c3/esp32c3Machine');
+  const machine = new Esp32C3Machine();
+
+  // Somewhere to put code and data. IRAM and DRAM are both plain memory here.
+  const CODE = 0x40381000;
+  const DATA = 0x3fc81000;
+  const emit = (address: number, words: number[]) => words.forEach((w, i) => machine.writeUint32(address + i * 4, w));
+
+  // int ascending(const int *a, const int *b) { return *a - *b; }
+  //   lw a2,0(a0); lw a3,0(a1); sub a0,a2,a3; ret
+  const ASCENDING = CODE;
+  emit(ASCENDING, [0x00052603, 0x0005a683, 0x40d60533, 0x00008067]);
+
+  // int descending(const int *a, const int *b) { return *b - *a; }
+  const DESCENDING = CODE + 0x100;
+  emit(DESCENDING, [0x00052603, 0x0005a683, 0x40c68533, 0x00008067]);
+
+  // A comparator on the low byte only, to prove element width is respected.
+  //   lbu a2,0(a0); lbu a3,0(a1); sub a0,a2,a3; ret
+  const BY_BYTE = CODE + 0x200;
+  emit(BY_BYTE, [0x00054603, 0x0005c683, 0x40d60533, 0x00008067]);
+
+  machine.core.registers[2] = 0x3fcde710;
+
+  // The callback mechanism on its own, before qsort uses it.
+  machine.writeUint32(DATA, 7);
+  machine.writeUint32(DATA + 4, 3);
+  const direct = machine.callGuestFunction(ASCENDING, [DATA, DATA + 4]);
+  check(direct.value === 4, `a guest callback returns its own result (${direct.value})`);
+  check(direct.instructions === 4, `the callback really executed its instructions (${direct.instructions})`);
+
+  // Caller state must survive: a ROM function is mid-flight when this happens.
+  machine.core.registers[5] = 0x1234;
+  machine.core.pc = 0x40382000;
+  const savedSp = machine.core.registers[2];
+  machine.callGuestFunction(DESCENDING, [DATA, DATA + 4]);
+  check(machine.core.registers[5] === 0x1234, 'a callback leaves the caller\'s registers untouched');
+  check(machine.core.pc === 0x40382000, 'a callback leaves the caller\'s program counter untouched');
+  check(machine.core.registers[2] === savedSp, 'a callback restores the stack pointer');
+
+  // A runaway callback is stopped rather than hanging the run.
+  const SPIN = CODE + 0x300;
+  emit(SPIN, [0x0000006f]); // j .
+  let spun = false;
+  try {
+    machine.callGuestFunction(SPIN, [], { maxInstructions: 500 });
+  } catch (err) {
+    spun = err instanceof Error && /did not return/.test(err.message);
+  }
+  check(spun, 'a callback that never returns is abandoned with an explanation');
+  check(machine.core.pc === 0x40382000, 'even an abandoned callback restores the caller');
+
+  /** Sorts an array of 32-bit words through the real ROM qsort entry. */
+  const sortWords = (values: number[], comparator: number): number[] => {
+    values.forEach((v, i) => machine.writeUint32(DATA + i * 4, v));
+    const entry = ESP32C3_ROM_FUNCTIONS.find((f) => f.name === 'qsort')!;
+    entry.handler({
+      args: [DATA, values.length, 4, comparator, 0, 0],
+      bus: machine,
+      machine: machine.romState,
+      registers: machine.core.registers,
+      callGuest: (address, callArgs, options) => machine.callGuestFunction(address, callArgs, options),
+    });
+    return values.map((_, i) => machine.readUint32(DATA + i * 4) | 0);
+  };
+
+  check(
+    sortWords([5, 3, 9, 1, 7], ASCENDING).join(',') === '1,3,5,7,9',
+    `qsort orders by the firmware's comparator (${sortWords([5, 3, 9, 1, 7], ASCENDING).join(',')})`,
+  );
+  check(
+    sortWords([5, 3, 9, 1, 7], DESCENDING).join(',') === '9,7,5,3,1',
+    'a different comparator gives a different order, so the ordering is genuinely the firmware\'s',
+  );
+  check(sortWords([4, 4, 4], ASCENDING).join(',') === '4,4,4', 'equal elements are handled');
+  check(sortWords([1, 2, 3, 4], ASCENDING).join(',') === '1,2,3,4', 'an already sorted array is left alone');
+  check(sortWords([9, 8, 7, 6, 5, 4, 3, 2, 1], ASCENDING).join(',') === '1,2,3,4,5,6,7,8,9', 'a fully reversed array sorts');
+  check(sortWords([42], ASCENDING).join(',') === '42', 'a single element is a no-op');
+  check(sortWords([-5, 3, -1], ASCENDING).join(',') === '-5,-1,3', 'negative values sort correctly');
+
+  // Nothing outside the array may be touched — the bug that corrupted a
+  // caller's neighbouring data and made ESP-IDF report an impossible memory
+  // region overlap.
+  const GUARD = DATA + 0x100;
+  machine.writeUint32(GUARD, 0xdeadbeef);
+  machine.writeUint32(GUARD + 4, 0xfeedface);
+  sortWords([3, 1, 2], ASCENDING);
+  check(machine.readUint32(GUARD) === 0xdeadbeef, 'qsort writes nothing past the end of the array');
+  check(machine.readUint32(GUARD + 4) === 0xfeedface, 'and nothing further past it either');
+
+  // Element width is honoured: sorting bytes must move bytes, not words.
+  for (let i = 0; i < 4; i++) machine.writeUint8(DATA + i, [4, 2, 3, 1][i]);
+  const qsortEntry = ESP32C3_ROM_FUNCTIONS.find((f) => f.name === 'qsort')!;
+  qsortEntry.handler({
+    args: [DATA, 4, 1, BY_BYTE, 0, 0],
+    bus: machine,
+    machine: machine.romState,
+    registers: machine.core.registers,
+    callGuest: (address, callArgs, options) => machine.callGuestFunction(address, callArgs, options),
+  });
+  check(
+    [0, 1, 2, 3].map((i) => machine.readUint8(DATA + i)).join(',') === '1,2,3,4',
+    `qsort respects an element width of one byte (${[0, 1, 2, 3].map((i) => machine.readUint8(DATA + i)).join(',')})`,
+  );
+}
+
 console.log(failures === 0 ? '\nESP32-C3 ROM checks passed.' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

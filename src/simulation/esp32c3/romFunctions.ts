@@ -51,6 +51,18 @@ export interface RomCallContext {
    * in a0 — the 64-bit division helpers return a pair in a0 and a1.
    */
   registers: Int32Array;
+  /**
+   * Calls a function inside the firmware.
+   *
+   * Provided for the ROM routines that take a firmware function pointer, such
+   * as qsort's comparator. The callback genuinely executes; the runtime only
+   * arranges the call.
+   */
+  callGuest: (address: number, args?: number[], options?: { maxInstructions?: number }) => {
+    value: number;
+    high: number;
+    instructions: number;
+  };
 }
 
 export interface RomMachineState {
@@ -77,6 +89,8 @@ export interface RomMachineState {
   romConsole: number[];
   romConsoleRx: number[];
   romConsoleDivider: number;
+  /** Seed state for the ROM's rand(), kept deterministic across runs. */
+  randState: number;
 }
 
 export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMachineState {
@@ -91,6 +105,7 @@ export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMac
     romConsole: [],
     romConsoleRx: [],
     romConsoleDivider: 0,
+    randState: 1,
   };
 }
 
@@ -601,6 +616,193 @@ const romPrintf: RomHandler = ({ args, bus, machine, registers }) => {
   return out.length;
 };
 
+
+// -------------------------------------------------------- ROM C library
+//
+// The ESP32-C3 ROM carries a slice of the C library, so ordinary firmware code
+// calling itoa or strchr becomes a ROM call. Each is implemented from its
+// standard signature. They are grouped because they arrive as a family: once
+// one is linked the others usually follow, and stalling on each in turn would
+// be a lot of round trips for behaviour that is entirely specified.
+
+/** Reads a NUL-terminated string, bounded so a runaway pointer cannot hang. */
+function readCString(bus: Bus, address: number, limit = 4096): string {
+  let out = '';
+  for (let i = 0; i < limit; i++) {
+    const byte = bus.readUint8((address + i) >>> 0);
+    if (byte === 0) break;
+    out += String.fromCharCode(byte);
+  }
+  return out;
+}
+
+/** Writes a string plus its terminator. */
+function writeCString(bus: Bus, address: number, text: string): void {
+  for (let i = 0; i < text.length; i++) bus.writeUint8((address + i) >>> 0, text.charCodeAt(i) & 0xff);
+  bus.writeUint8((address + text.length) >>> 0, 0);
+}
+
+/** `itoa(value, buffer, radix)` -> buffer. Signed in base 10, as specified. */
+const itoa: RomHandler = ({ args, bus }) => {
+  const [value, buffer, radix] = args;
+  const base = radix === 0 ? 10 : radix;
+  writeCString(bus, buffer >>> 0, base === 10 ? String(value | 0) : (value >>> 0).toString(base));
+  return buffer;
+};
+
+/** `utoa(value, buffer, radix)` -> buffer. Always unsigned. */
+const utoa: RomHandler = ({ args, bus }) => {
+  const [value, buffer, radix] = args;
+  writeCString(bus, buffer >>> 0, (value >>> 0).toString(radix === 0 ? 10 : radix));
+  return buffer;
+};
+
+/** `atoi(s)` — leading space skipped, optional sign, digits until a non-digit. */
+const atoi: RomHandler = ({ args, bus }) => {
+  const parsed = Number.parseInt(readCString(bus, args[0] >>> 0).trim(), 10);
+  return Number.isNaN(parsed) ? 0 : parsed | 0;
+};
+
+/**
+ * `strtol(s, endptr, base)`
+ *
+ * Base 0 auto-detects, as the standard requires: a 0x prefix means 16, a
+ * leading 0 means 8, anything else means 10. `endptr`, when given, receives the
+ * address just past the digits consumed.
+ */
+const strtol: RomHandler = ({ args, bus }) => {
+  const [start, endPointer, requestedBase] = args;
+  const text = readCString(bus, start >>> 0);
+  let index = 0;
+  while (index < text.length && /\s/.test(text[index])) index++;
+  const signIndex = index;
+  if (text[index] === '+' || text[index] === '-') index++;
+  let base = requestedBase | 0;
+  if ((base === 0 || base === 16) && text.slice(index, index + 2).toLowerCase() === '0x') {
+    base = 16;
+    index += 2;
+  } else if (base === 0) {
+    base = text[index] === '0' ? 8 : 10;
+  }
+  const digitStart = index;
+  const digits = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, base);
+  while (index < text.length && digits.includes(text[index].toLowerCase())) index++;
+  const body = text.slice(digitStart, index);
+  const parsed = body.length === 0 ? 0 : Number.parseInt(body, base);
+  if (endPointer !== 0) {
+    bus.writeUint32(endPointer >>> 0, ((start >>> 0) + (body.length === 0 ? 0 : index)) >>> 0);
+  }
+  return (text[signIndex] === '-' ? -parsed : parsed) | 0;
+};
+
+const strstr: RomHandler = ({ args, bus }) => {
+  const haystackAddress = args[0] >>> 0;
+  const at = readCString(bus, haystackAddress).indexOf(readCString(bus, args[1] >>> 0));
+  return at < 0 ? 0 : (haystackAddress + at) >>> 0;
+};
+
+const strchr: RomHandler = ({ args, bus }) => {
+  const address = args[0] >>> 0;
+  const text = readCString(bus, address);
+  const wanted = args[1] & 0xff;
+  // Searching for NUL finds the terminator, which the standard requires.
+  if (wanted === 0) return (address + text.length) >>> 0;
+  const at = text.indexOf(String.fromCharCode(wanted));
+  return at < 0 ? 0 : (address + at) >>> 0;
+};
+
+const strcat: RomHandler = ({ args, bus }) => {
+  const dest = args[0] >>> 0;
+  writeCString(bus, (dest + readCString(bus, dest).length) >>> 0, readCString(bus, args[1] >>> 0));
+  return dest;
+};
+
+const strncat: RomHandler = ({ args, bus }) => {
+  const dest = args[0] >>> 0;
+  writeCString(bus, (dest + readCString(bus, dest).length) >>> 0, readCString(bus, args[1] >>> 0).slice(0, args[2] >>> 0));
+  return dest;
+};
+
+/** `strlcpy(dst, src, size)` -> length of src, so truncation is detectable. */
+const strlcpy: RomHandler = ({ args, bus }) => {
+  const [dest, source, size] = args.map((v) => v >>> 0);
+  const text = readCString(bus, source);
+  if (size > 0) writeCString(bus, dest, text.slice(0, size - 1));
+  return text.length;
+};
+
+const bzero: RomHandler = ({ args, bus }) => {
+  const [dest, length] = args.map((v) => v >>> 0);
+  for (let i = 0; i < length; i++) bus.writeUint8((dest + i) >>> 0, 0);
+};
+
+const absHandler: RomHandler = ({ args }) => Math.abs(args[0] | 0) | 0;
+const isalnum: RomHandler = ({ args }) => (/[0-9a-z]/i.test(String.fromCharCode(args[0] & 0xff)) ? 1 : 0);
+const isspace: RomHandler = ({ args }) => (/[ \t\n\v\f\r]/.test(String.fromCharCode(args[0] & 0xff)) ? 1 : 0);
+const toupper: RomHandler = ({ args }) => String.fromCharCode(args[0] & 0xff).toUpperCase().charCodeAt(0);
+const tolower: RomHandler = ({ args }) => String.fromCharCode(args[0] & 0xff).toLowerCase().charCodeAt(0);
+
+/**
+ * `rand()` and `srand(seed)`
+ *
+ * A deterministic sequence, seeded by the firmware. Determinism is the point:
+ * numbers that differed between runs would make a failure impossible to
+ * reproduce, and the standard promises the same sequence for the same seed.
+ */
+const randHandler: RomHandler = ({ machine }) => {
+  machine.randState = (Math.imul(machine.randState, 1103515245) + 12345) >>> 0;
+  return (machine.randState >>> 16) & 0x7fff;
+};
+const srandHandler: RomHandler = ({ args, machine }) => {
+  machine.randState = args[0] >>> 0;
+};
+
+/**
+ * `qsort(base, count, width, compare)`
+ *
+ * A genuine general sort: any base address, any element count, any element
+ * width, sorting in place, ordering decided entirely by the firmware's own
+ * comparator. Nothing assumes what is being sorted or that it arrives nearly
+ * ordered — ESP-IDF sorts its own tables through this and the contents differ
+ * per sketch.
+ *
+ * Insertion sort by adjacent swaps. The algorithm matters here for a reason
+ * that is easy to get wrong: the comparator is firmware code that receives
+ * *pointers*, so both addresses it is handed must be real elements of the
+ * array. Holding a key aside in scratch memory would mean finding somewhere to
+ * put it, and anywhere outside the array belongs to something else — doing
+ * that corrupted the caller's neighbouring data and ESP-IDF reported the
+ * damage as an overlapping memory region. Comparing and swapping neighbours
+ * touches nothing but the array.
+ *
+ * A simple algorithm is also the right trade here: each comparison is a guest
+ * call, which dominates the cost, and the tables ESP-IDF sorts are small.
+ */
+const qsort: RomHandler = ({ args, bus, callGuest }) => {
+  const [base, count, width, compare] = args.map((v) => v >>> 0);
+  if (count < 2 || width === 0) return 0;
+
+  const swap = (a: number, b: number): void => {
+    const addressA = (base + a * width) >>> 0;
+    const addressB = (base + b * width) >>> 0;
+    for (let i = 0; i < width; i++) {
+      const left = bus.readUint8((addressA + i) >>> 0);
+      bus.writeUint8((addressA + i) >>> 0, bus.readUint8((addressB + i) >>> 0));
+      bus.writeUint8((addressB + i) >>> 0, left);
+    }
+  };
+
+  for (let i = 1; i < count; i++) {
+    for (let j = i; j > 0; j--) {
+      // compare(previous, current) > 0 means they are out of order.
+      const { value } = callGuest(compare, [(base + (j - 1) * width) >>> 0, (base + j * width) >>> 0]);
+      if (value <= 0) break;
+      swap(j - 1, j);
+    }
+  }
+  return 0;
+};
+
 /** One flat key per (block, register) pair. */
 export function regi2cKey(block: number, register: number): number {
   return ((block & 0xff) << 8) | (register & 0xff);
@@ -777,6 +979,34 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
     name: 'esp_rom_route_intr_matrix',
     handler: routeIntrMatrix,
     rationale: 'Performs the real matrix write so the routing is observable, not just recorded.',
+  },
+  {
+    address: 0x40000448,
+    name: 'itoa',
+    handler: itoa,
+    rationale: 'Signed for base 10, raw bit pattern for other bases, as the standard specifies.',
+  },
+  { address: 0x40000444, name: 'utoa', handler: utoa, rationale: 'Unsigned conversion in any radix.' },
+  { address: 0x4000044c, name: 'atoi', handler: atoi, rationale: 'Leading space, optional sign, decimal digits.' },
+  { address: 0x40000454, name: 'strtol', handler: strtol, rationale: 'Base 0 auto-detection and a correct endptr.' },
+  { address: 0x40000378, name: 'strstr', handler: strstr, rationale: 'Returns a pointer into the haystack, or null.' },
+  { address: 0x400003e0, name: 'strchr', handler: strchr, rationale: 'Finds the terminator when asked for NUL.' },
+  { address: 0x400003d8, name: 'strcat', handler: strcat, rationale: 'Appends at the destination terminator.' },
+  { address: 0x400003fc, name: 'strncat', handler: strncat, rationale: 'Bounded append.' },
+  { address: 0x400003f0, name: 'strlcpy', handler: strlcpy, rationale: 'Returns the source length so truncation is detectable.' },
+  { address: 0x4000037c, name: 'bzero', handler: bzero, rationale: 'Clears a range byte-wise.' },
+  { address: 0x40000424, name: 'abs', handler: absHandler, rationale: 'Absolute value of a 32-bit integer.' },
+  { address: 0x40000388, name: 'isalnum', handler: isalnum, rationale: 'ASCII classification.' },
+  { address: 0x400003b0, name: 'isspace', handler: isspace, rationale: 'ASCII classification.' },
+  { address: 0x400003b8, name: 'toupper', handler: toupper, rationale: 'ASCII case conversion.' },
+  { address: 0x400003bc, name: 'tolower', handler: tolower, rationale: 'ASCII case conversion.' },
+  { address: 0x4000043c, name: 'rand', handler: randHandler, rationale: 'Deterministic sequence so runs reproduce.' },
+  { address: 0x40000440, name: 'srand', handler: srandHandler, rationale: 'Seeds that sequence.' },
+  {
+    address: 0x40000434,
+    name: 'qsort',
+    handler: qsort,
+    rationale: 'General in-place sort of arbitrary elements, ordered by the firmware\'s own comparator.',
   },
   {
     address: 0x40000040,
