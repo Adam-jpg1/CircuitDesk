@@ -512,19 +512,21 @@ export class Rv32Core {
           return;
         case 0x3: {
           if (rd === 2) {
-            // C.ADDI16SP
-            const immediate =
-              ((instruction >> 12) << 9) |
+            // C.ADDI16SP. The immediate is scattered across the encoding and
+            // sign-extended from bit 9 — note that only bit 12 carries the
+            // sign, not the whole top nibble.
+            const raw =
+              (((instruction >>> 12) & 0x1) << 9) |
               (((instruction >>> 3) & 0x3) << 7) |
               (((instruction >>> 5) & 0x1) << 6) |
               (((instruction >>> 2) & 0x1) << 5) |
               (((instruction >>> 6) & 0x1) << 4);
-            this.setReg(2, (this.reg(2) + immediate) | 0);
+            this.setReg(2, (this.reg(2) + ((raw << 22) >> 22)) | 0);
             return;
           }
-          // C.LUI
-          const immediate = (((instruction >> 12) << 17) | (((instruction >>> 2) & 0x1f) << 12)) | 0;
-          this.setReg(rd, immediate);
+          // C.LUI, sign-extended from bit 17 for the same reason.
+          const raw = (((instruction >>> 12) & 0x1) << 17) | (((instruction >>> 2) & 0x1f) << 12);
+          this.setReg(rd, (raw << 14) >> 14);
           return;
         }
         case 0x4: {
