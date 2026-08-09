@@ -12,6 +12,8 @@
 
 import { Rv32Core, type Bus } from '../riscv/rv32Core';
 import { isInterrupting, InterruptMatrix, type InterruptingPeripheral } from './interrupts';
+import { FlashMmu, MMU_PAGE_SIZE, SpiMemController } from './spiMem';
+import { ESP32C3_FLASH_LAYOUT, type SerialNorFlash } from './spiFlash';
 import type { EspApplicationImage } from './espImage';
 import {
   ARG_REGISTER_BASE,
@@ -198,6 +200,8 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
   private readonly peripherals: Peripheral[] = [];
   private readonly interruptSources: InterruptingPeripheral[] = [];
   private interruptMatrix: InterruptMatrix | undefined;
+  private mmu: FlashMmu | undefined;
+  private flash: SerialNorFlash | undefined;
   private pendingInterruptLines = 0;
   /** Simulated time at which a peripheral said its interrupt state may change. */
   private nextInterruptCheckNanos: number | undefined;
@@ -238,6 +242,8 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
   addPeripheral(peripheral: Peripheral): void {
     this.peripherals.push(peripheral);
     if (peripheral instanceof InterruptMatrix) this.interruptMatrix = peripheral;
+    if (peripheral instanceof FlashMmu) this.mmu = peripheral;
+    if (peripheral instanceof SpiMemController) this.flash = peripheral.flash;
     if (isInterrupting(peripheral)) this.interruptSources.push(peripheral);
     // A new source could already be asserting, so the next step has to look.
     this.interruptsDirty = true;
@@ -300,6 +306,13 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
     this.image = image;
     this.memory.clear();
     this.elapsedNanos = 0;
+    const mmu = this.mmu;
+    let mapped = false;
+    if (!mmu) {
+      throw new Error(
+        'This ESP32-C3 machine has no flash MMU. Cache-mapped code and constants cannot be reached without one.',
+      );
+    }
     // The flash MMU maps the application partition into the IROM and DROM
     // windows, so the whole image file — header included — is visible there,
     // not just the segment payloads. ESP-IDF's cpu_start re-reads that header
@@ -311,11 +324,21 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
     // `loadAddress - fileOffset`. Mapping from there reproduces what the MMU
     // does without needing to model page tables.
     for (const segment of image.segments) {
-      const flashMapped = segment.loadAddress >= MEMORY_MAP.drom.start && segment.loadAddress < MEMORY_MAP.drom.end;
-      const iromMapped = segment.loadAddress >= MEMORY_MAP.irom.start && segment.loadAddress < MEMORY_MAP.irom.end;
-      if (!flashMapped && !iromMapped) continue;
-      const fileBase = (segment.loadAddress - segment.fileOffset) >>> 0;
-      for (let i = 0; i < image.raw.length; i++) this.writeByte(fileBase + i, image.raw[i]);
+      if (!this.isCacheMapped(segment.loadAddress)) continue;
+      // The flash offset this segment's bytes live at: the application starts
+      // at its partition offset, and the segment sits where the image put it.
+      const flashAddress = ESP32C3_FLASH_LAYOUT.application + segment.fileOffset;
+      // The mapping is by whole pages, so it starts at the page containing the
+      // segment and covers every page the segment reaches into.
+      const firstPage = Math.floor(flashAddress / MMU_PAGE_SIZE);
+      const pages = Math.ceil((flashAddress % MMU_PAGE_SIZE + segment.data.length) / MMU_PAGE_SIZE);
+      const firstEntry = FlashMmu.entryOf(segment.loadAddress);
+      for (let i = 0; i < pages; i++) mmu.map(firstEntry + i, firstPage + i);
+      mapped = true;
+    }
+    if (!mapped) {
+      // An image with no flash-mapped segment runs entirely from RAM. Nothing
+      // to map, and nothing to warn about.
     }
     // Segment payloads are written after the mapping so a RAM segment always
     // wins over anything the mapping happened to cover.
@@ -477,8 +500,29 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
     this.memory.page(address >>> 0)[(address >>> 0) & 0xffff] = value & 0xff;
   }
 
+  /** True for the two windows the cache maps flash into. */
+  private isCacheMapped(address: number): boolean {
+    const a = address >>> 0;
+    return (
+      (a >= MEMORY_MAP.drom.start && a < MEMORY_MAP.drom.end) ||
+      (a >= MEMORY_MAP.irom.start && a < MEMORY_MAP.irom.end)
+    );
+  }
+
   private readByte(address: number): number {
-    return this.memory.page(address >>> 0)[(address >>> 0) & 0xffff];
+    const a = address >>> 0;
+    // The cache windows hold nothing of their own: every byte read from them
+    // comes from the flash page the MMU points at. Reading them out of a copy
+    // made at load time would go stale the moment firmware remapped a page or
+    // wrote to the flash, and would leave cache2phys with nothing to invert.
+    if (this.flash && this.mmu && this.isCacheMapped(a)) {
+      const physical = this.mmu.translate(a);
+      // An unmapped page reads as the cache's own miss value rather than as
+      // whatever a neighbouring page happens to hold.
+      if (physical === undefined) return 0;
+      return this.flash.bytes[physical % this.flash.bytes.length];
+    }
+    return this.memory.page(a)[a & 0xffff];
   }
 
   /**

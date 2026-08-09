@@ -214,3 +214,83 @@ export class SpiMemController implements Peripheral {
     if (this.recent.length > this.recentLimit) this.recent.shift();
   }
 }
+
+// ------------------------------------------------------------------ flash MMU
+
+/** Where the flash MMU's page table is mapped. */
+export const MMU_TABLE_BASE = 0x600c5000;
+
+/** One entry per 64 KB page, shared by the instruction and data windows. */
+export const MMU_ENTRY_COUNT = 128;
+export const MMU_PAGE_SIZE = 0x10000;
+
+/** Bit 8 marks an entry as not mapping anything. */
+const MMU_INVALID = 1 << 8;
+/** The remaining low bits hold the flash page number. */
+const MMU_PAGE_MASK = 0xff;
+
+/**
+ * Only the low 23 bits of a cache address select a page; the rest selects
+ * which window, and both windows share this one table.
+ */
+const MMU_VADDR_MASK = 0x7fffff;
+
+/**
+ * The flash MMU.
+ *
+ * The cache windows at 0x3C000000 and 0x42000000 do not hold anything of their
+ * own: each 64 KB page of them is mapped, through this table, onto a 64 KB page
+ * of the flash. That is what makes a 4 MB flash readable as if it were memory,
+ * and it is also why ESP-IDF can ask which flash offset a given code address
+ * came from — `spi_flash_cache2phys` reads this table and inverts the mapping.
+ * Without it, `esp_ota_get_running_partition` cannot tell which partition it is
+ * executing from and asserts.
+ *
+ * Entries are writable because firmware really does rewrite them: mapping a
+ * partition at runtime is exactly this.
+ */
+export class FlashMmu implements Peripheral {
+  readonly name = 'flash_mmu';
+  readonly base = MMU_TABLE_BASE;
+  readonly size = MMU_ENTRY_COUNT * 4;
+
+  private readonly entries = new Uint32Array(MMU_ENTRY_COUNT);
+
+  constructor() {
+    this.reset();
+  }
+
+  reset(): void {
+    this.entries.fill(MMU_INVALID);
+  }
+
+  readUint32(offset: number): number {
+    return this.entries[(offset >>> 2) % MMU_ENTRY_COUNT] >>> 0;
+  }
+
+  writeUint32(offset: number, value: number): void {
+    this.entries[(offset >>> 2) % MMU_ENTRY_COUNT] = value >>> 0;
+  }
+
+  /** Points a cache page at a flash page. */
+  map(entry: number, flashPage: number): void {
+    if (entry < 0 || entry >= MMU_ENTRY_COUNT) return;
+    this.entries[entry] = flashPage & MMU_PAGE_MASK;
+  }
+
+  /** The entry a cache address falls in. */
+  static entryOf(address: number): number {
+    return ((address & MMU_VADDR_MASK) >>> 16) % MMU_ENTRY_COUNT;
+  }
+
+  /**
+   * Converts a cache address to a flash offset, or undefined when the page it
+   * lands in is not mapped — which is the answer `spi_flash_cache2phys`
+   * reports as a failure rather than a guess.
+   */
+  translate(address: number): number | undefined {
+    const entry = this.entries[FlashMmu.entryOf(address)];
+    if ((entry & MMU_INVALID) !== 0) return undefined;
+    return (entry & MMU_PAGE_MASK) * MMU_PAGE_SIZE + (address & (MMU_PAGE_SIZE - 1));
+  }
+}
