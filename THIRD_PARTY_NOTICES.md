@@ -65,9 +65,36 @@ computes its PWM divisor in floating point, which is why PWM is not listed among
 the Pico's simulated capabilities. Integer arithmetic, digital I/O,
 `analogRead()` and `Serial1` do not touch these routines and are unaffected.
 
+## RISC-V execution core — original work
+
+`src/simulation/riscv/rv32Core.ts` and `src/simulation/esp32c3/espImage.ts` are
+original CircuitDesk code. They add **no dependency**.
+
+The interpreter is written from the public RISC-V specifications, which
+describe an open standard instruction set rather than anyone's implementation.
+It is not derived from another emulator: the mature browser-capable RISC-V
+emulators are QEMU builds (GPLv2) or projects licensed AGPLv3, and neither is
+compatible with how CircuitDesk is distributed, so none of them was used or
+consulted as a source.
+
+The image parser follows the documented ESP-IDF application-image layout
+(`esp_image_header_t` and `esp_image_segment_header_t`), which is public.
+
+## Espressif ROM — NOT distributed
+
+CircuitDesk ships **no** Espressif ROM material, in source or binary form.
+
+ESP-IDF publishes the mask ROM's *symbol addresses* in its linker scripts, but
+not the ROM's source, and no redistributable ROM binary is offered. Any ROM
+behaviour CircuitDesk needs is therefore implemented independently from
+documented behaviour, covering only the functions real firmware actually calls,
+and anything unimplemented fails loudly rather than returning a fabricated
+value. See `docs/esp32-c3-runtime.md` for the exact list.
+
 ## Arduino cores
 
 Firmware is compiled by `arduino-cli` using vendor board support packages
-(`arduino:avr`, `rp2040:rp2040`) installed on the compiler backend at build
-time. Those packages are not redistributed as part of CircuitDesk's source or
-its browser bundle.
+(`arduino:avr`, `rp2040:rp2040`, `esp32:esp32`) installed on the compiler
+backend at build time. Those packages are not redistributed as part of
+CircuitDesk's source or its browser bundle, and none of them reaches the
+browser: they are build-time toolchains that run server-side only.
