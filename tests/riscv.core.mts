@@ -391,6 +391,7 @@ function runProgram(words: number[], steps: number, setup?: (core: Rv32Core) => 
       ADDI(2, 2, 1), // i++
       jType(-12, 0, 0x6f), // J loop
       ADDI(4, 0, 1), // done
+      jType(0, 0, 0x6f), // park here, the way firmware ends up in a spin
     ],
     200,
   );
