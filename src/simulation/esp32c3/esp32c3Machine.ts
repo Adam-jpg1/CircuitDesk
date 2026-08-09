@@ -23,6 +23,14 @@ import {
   type RomMachineState,
 } from './romFunctions';
 
+/**
+ * Stack headroom reserved for a guest callback, below the caller's pointer.
+ *
+ * Large enough for the nested frames a comparator realistically builds, small
+ * enough that a deep chain of nested callbacks still fits in the C3's DRAM.
+ */
+const GUEST_CALL_STACK_GAP = 0x400;
+
 /** Documented ESP32-C3 address ranges this machine models. */
 export const MEMORY_MAP = {
   rom: { start: 0x40000000, end: 0x40060000 },
@@ -48,6 +56,37 @@ export const MEMORY_MAP = {
  * would have found on entry.
  */
 export const ROM_STACK_TOP = 0x3fcde710;
+
+/**
+ * Return address used when the runtime calls a function inside the firmware.
+ *
+ * It points at the very start of the ROM window, where no implemented function
+ * lives, so the program counter arriving there can only mean the guest call
+ * finished. Using an address the firmware can never legitimately return to is
+ * what makes the boundary unambiguous.
+ */
+export const GUEST_RETURN_SENTINEL = 0x40000004;
+
+/** Raised when a guest callback misbehaves, always naming what went wrong. */
+export class GuestCallError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GuestCallError';
+  }
+}
+
+export interface GuestCallOptions {
+  /** Instructions the callback may retire before it is abandoned. */
+  maxInstructions?: number;
+}
+
+export interface GuestCallResult {
+  /** a0, the conventional return value. */
+  value: number;
+  /** a1, for the few callbacks returning a 64-bit pair. */
+  high: number;
+  instructions: number;
+}
 
 /** A memory-mapped peripheral. Addresses are offsets from its base. */
 export interface Peripheral {
@@ -218,10 +257,78 @@ export class Esp32C3Machine implements Bus {
       throw new UnimplementedRomCallError(pc, this.symbols.get(pc), returnAddress);
     }
     const args = [0, 1, 2, 3, 4, 5].map((i) => this.core.registers[ARG_REGISTER_BASE + i] | 0);
-    const result = entry.handler({ args, bus: this, machine: this.romState, registers: this.core.registers });
+    const result = entry.handler({
+      args,
+      bus: this,
+      machine: this.romState,
+      registers: this.core.registers,
+      callGuest: (target, callArgs, callOptions) => this.callGuestFunction(target, callArgs, callOptions),
+    });
     if (typeof result === 'number') this.core.registers[ARG_REGISTER_BASE] = result | 0;
     this.options.onRomCall?.({ address: pc, symbol: entry.name, args, result: typeof result === 'number' ? result : undefined, pc: returnAddress });
     this.core.pc = returnAddress;
+  }
+
+  // --------------------------------------------------------- guest callbacks
+
+  /**
+   * Calls a function inside the firmware and returns its result.
+   *
+   * Some ROM functions take a firmware function pointer — `qsort` takes a
+   * comparator — so an independently implemented ROM routine has to be able to
+   * run guest code and use the answer. That is not a shortcut: the comparator
+   * really is the firmware's own, and it really does execute.
+   *
+   * The whole register file is saved and restored around the call, so the
+   * interrupted ROM call resumes with exactly the state it had. The callback
+   * gets its own stack space below the current stack pointer, keeping its
+   * frames clear of the caller's. Nesting works because each level saves its
+   * own copy.
+   *
+   * Every exit is bounded and explicit: the sentinel return, an instruction
+   * budget, or a fault — never an open-ended loop.
+   */
+  callGuestFunction(address: number, args: number[] = [], options: GuestCallOptions = {}): GuestCallResult {
+    const maxInstructions = options.maxInstructions ?? 2_000_000;
+    const saved = Int32Array.from(this.core.registers);
+    const savedPc = this.core.pc;
+    const savedWaiting = this.core.waiting;
+
+    // Leave a gap below the caller's stack so the callback's frames cannot
+    // overwrite anything the interrupted function still needs, and keep the
+    // pointer 16-byte aligned as the RISC-V ABI requires.
+    const stack = ((saved[2] >>> 0) - GUEST_CALL_STACK_GAP) & ~0xf;
+
+    this.core.registers[1] = GUEST_RETURN_SENTINEL | 0;
+    this.core.registers[2] = stack | 0;
+    for (let i = 0; i < args.length && i < 8; i++) this.core.registers[ARG_REGISTER_BASE + i] = args[i] | 0;
+    this.core.pc = address >>> 0 & ~1;
+    this.core.waiting = false;
+
+    let instructions = 0;
+    let value = 0;
+    let high = 0;
+    try {
+      while ((this.core.pc >>> 0) !== GUEST_RETURN_SENTINEL) {
+        if (instructions >= maxInstructions) {
+          throw new GuestCallError(
+            `A firmware callback at 0x${(address >>> 0).toString(16)} did not return within ${maxInstructions} ` +
+              'instructions. The sketch may contain an endless comparison function.',
+          );
+        }
+        // Nested ROM calls are dispatched here too, so a callback may itself
+        // call a ROM function that calls back into firmware again.
+        this.step();
+        instructions++;
+      }
+      value = this.core.registers[ARG_REGISTER_BASE] | 0;
+      high = this.core.registers[ARG_REGISTER_BASE + 1] | 0;
+    } finally {
+      this.core.registers.set(saved);
+      this.core.pc = savedPc;
+      this.core.waiting = savedWaiting;
+    }
+    return { value, high, instructions };
   }
 
   // ------------------------------------------------------------------ bus
