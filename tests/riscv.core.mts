@@ -288,6 +288,33 @@ function runProgram(words: number[], steps: number, setup?: (core: Rv32Core) => 
   check(core.reg(10) === 8, `c.mv copies a register (x10 = ${core.reg(10)})`);
 
   // Mixing widths must keep the program counter aligned to what each form uses.
+  // C.ADDI16SP and C.LUI scatter their immediates and sign-extend from a
+  // single bit, which is the easiest place in the whole encoding to be wrong:
+  // treating the top nibble as the sign turns "addi sp,sp,32" into a jump of
+  // 3104 bytes, and a stack that drifts like that fails a long way from here.
+  {
+    const sp = new FlatMemory();
+    const spCore = new Rv32Core(sp);
+    sp.writeUint16(0, 0x6105); // c.addi16sp sp, 32
+    sp.writeUint16(2, 0x7139); // c.addi16sp sp, -64
+    spCore.reset(0);
+    spCore.registers[2] = 0x1000;
+    spCore.step();
+    check(spCore.reg(2) === 0x1020, `c.addi16sp adds exactly 32 (0x${(spCore.reg(2) >>> 0).toString(16)})`);
+    spCore.step();
+    check(spCore.reg(2) === 0x1020 - 64, `c.addi16sp subtracts exactly 64 (0x${(spCore.reg(2) >>> 0).toString(16)})`);
+
+    const lui = new FlatMemory();
+    const luiCore = new Rv32Core(lui);
+    lui.writeUint16(0, 0x6405); // c.lui a0, 0x1
+    lui.writeUint16(2, 0x74fd); // c.lui s1, 0xfffff (negative)
+    luiCore.reset(0);
+    luiCore.step();
+    check(luiCore.reg(8) === 0x1000, `c.lui loads a positive upper immediate (0x${(luiCore.reg(8) >>> 0).toString(16)})`);
+    luiCore.step();
+    check(luiCore.reg(9) === -4096, `c.lui sign-extends a negative one (${luiCore.reg(9)})`);
+  }
+
   const mixed = new FlatMemory();
   const mixedCore = new Rv32Core(mixed);
   mixed.writeUint16(0, 0x4415); // c.li x8, 5      (2 bytes)

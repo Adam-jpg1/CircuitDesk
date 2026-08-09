@@ -41,11 +41,16 @@ export enum ResetReason {
 }
 
 export interface RomCallContext {
-  /** Arguments a0..a3, already read out of the core's registers. */
+  /** Arguments a0..a5, already read out of the core's registers. */
   args: number[];
   bus: Bus;
   /** State the machine keeps across ROM calls. */
   machine: RomMachineState;
+  /**
+   * The core's register file, for the few functions whose result does not fit
+   * in a0 — the 64-bit division helpers return a pair in a0 and a1.
+   */
+  registers: Int32Array;
 }
 
 export interface RomMachineState {
@@ -54,6 +59,12 @@ export interface RomMachineState {
   regi2c: Map<number, number>;
   /** Recorded cache configuration, for diagnostics and tests. */
   cache: { iCacheEnabled: boolean; iromMmuSize: number; dromMmuSize: number };
+  /** What ets_get_cpu_frequency() reports, in MHz. */
+  cpuFrequencyMhz: number;
+  /** Microseconds a ROM delay asked for, which the runner turns into time. */
+  pendingDelayUs: number;
+  /** Character sink the ROM's printf was told to use. */
+  putc1: number;
 }
 
 export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMachineState {
@@ -61,6 +72,9 @@ export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMac
     resetReason,
     regi2c: new Map<number, number>(),
     cache: { iCacheEnabled: false, iromMmuSize: 0, dromMmuSize: 0 },
+    cpuFrequencyMhz: 160,
+    pendingDelayUs: 0,
+    putc1: 0,
   };
 }
 
@@ -173,6 +187,117 @@ const regi2cWrite: RomHandler = ({ args, machine }) => {
   machine.regi2c.set(regi2cKey(args[0], args[2]), args[3] & 0xff);
 };
 
+// ------------------------------------------------- compiler runtime helpers
+//
+// The ESP32-C3 ROM carries the parts of libgcc and the C library that ESP-IDF
+// links against, so a division of two 64-bit integers in ordinary firmware
+// becomes a ROM call. These are implemented from their published signatures,
+// not from Espressif's code.
+//
+// On RV32 a 64-bit argument occupies a register pair, low half first: the two
+// arguments arrive as (a0, a1) and (a2, a3), and the result is returned the
+// same way. BigInt does the arithmetic because a 64-bit quotient does not fit
+// in a JavaScript number exactly.
+
+const asUnsigned64 = (low: number, high: number): bigint => (BigInt(high >>> 0) << 32n) | BigInt(low >>> 0);
+const asSigned64 = (low: number, high: number): bigint => BigInt.asIntN(64, asUnsigned64(low, high));
+
+function return64(registers: Int32Array, value: bigint): number {
+  const masked = BigInt.asUintN(64, value);
+  registers[ARG_REGISTER_BASE] = Number(masked & 0xffffffffn) | 0;
+  registers[ARG_REGISTER_BASE + 1] = Number((masked >> 32n) & 0xffffffffn) | 0;
+  return registers[ARG_REGISTER_BASE];
+}
+
+/**
+ * Division by zero.
+ *
+ * The C standard leaves it undefined and libgcc's helpers do not trap, so the
+ * all-ones result these return matches what the real routines produce rather
+ * than raising an exception the firmware has no handler for.
+ */
+const DIV_BY_ZERO = 0xffffffffffffffffn;
+
+const udivdi3: RomHandler = ({ args, registers }) => {
+  const divisor = asUnsigned64(args[2], args[3]);
+  const dividend = asUnsigned64(args[0], args[1]);
+  return return64(registers, divisor === 0n ? DIV_BY_ZERO : dividend / divisor);
+};
+
+const umoddi3: RomHandler = ({ args, registers }) => {
+  const divisor = asUnsigned64(args[2], args[3]);
+  const dividend = asUnsigned64(args[0], args[1]);
+  return return64(registers, divisor === 0n ? dividend : dividend % divisor);
+};
+
+const divdi3: RomHandler = ({ args, registers }) => {
+  const divisor = asSigned64(args[2], args[3]);
+  const dividend = asSigned64(args[0], args[1]);
+  if (divisor === 0n) return return64(registers, DIV_BY_ZERO);
+  // BigInt division already truncates toward zero, which is what C requires.
+  return return64(registers, dividend / divisor);
+};
+
+const moddi3: RomHandler = ({ args, registers }) => {
+  const divisor = asSigned64(args[2], args[3]);
+  const dividend = asSigned64(args[0], args[1]);
+  if (divisor === 0n) return return64(registers, dividend);
+  return return64(registers, dividend % divisor);
+};
+
+/** `strlen(s)` — bytes before the first NUL. */
+const strlen: RomHandler = ({ args, bus }) => {
+  let length = 0;
+  while (bus.readUint8((args[0] + length) >>> 0) !== 0) {
+    length++;
+    // A string with no terminator would otherwise run the whole address space.
+    if (length > 0x10000) break;
+  }
+  return length;
+};
+
+/**
+ * `ets_get_cpu_frequency()` -> MHz
+ *
+ * Answers from the machine's own clock model rather than a constant, so a
+ * firmware that changes the CPU frequency sees its own value.
+ */
+const getCpuFrequency: RomHandler = ({ machine }) => machine.cpuFrequencyMhz;
+
+/**
+ * `esp_rom_delay_us(us)`
+ *
+ * A busy-wait on hardware. Here the caller advances simulated time instead, so
+ * the delay is recorded and the machine's clock is moved forward by the runner
+ * — spinning through millions of emulated instructions to burn a microsecond
+ * would only make the simulation slower, not more accurate.
+ */
+const delayUs: RomHandler = ({ args, machine }) => {
+  machine.pendingDelayUs += args[0] >>> 0;
+};
+
+/**
+ * `ets_install_putc1(fn)`
+ *
+ * Records where the ROM's own printf would send characters. Nothing here calls
+ * back into firmware, so the pointer is stored for diagnostics only.
+ */
+const installPutc1: RomHandler = ({ args, machine }) => {
+  machine.putc1 = args[0] >>> 0;
+};
+
+/**
+ * `esp_rom_set_cpu_ticks_per_us(ticks)`
+ *
+ * Tells the ROM how many CPU cycles make a microsecond, so its delay loop
+ * spins the right number of times. Startup calls it whenever it changes the
+ * CPU frequency, so storing the value keeps the machine's own clock model and
+ * the ROM's agreeing with each other.
+ */
+const setCpuTicksPerUs: RomHandler = ({ args, machine }) => {
+  machine.cpuFrequencyMhz = Math.max(1, args[0] >>> 0);
+};
+
 /** One flat key per (block, register) pair. */
 export function regi2cKey(block: number, register: number): number {
   return ((block & 0xff) << 8) | (register & 0xff);
@@ -217,6 +342,77 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
     name: 'esp_rom_regi2c_write_mask',
     handler: regi2cWriteMask,
     rationale: 'Read-modify-write of a bit field in the internal analog register file.',
+  },
+  {
+    address: 0x400008ac,
+    name: '__udivdi3',
+    handler: udivdi3,
+    rationale: '64-bit unsigned division from its published signature, via BigInt for exactness.',
+  },
+  {
+    address: 0x400008bc,
+    name: '__umoddi3',
+    handler: umoddi3,
+    rationale: '64-bit unsigned remainder, matching libgcc\'s divide-by-zero behaviour.',
+  },
+  {
+    address: 0x400007b4,
+    name: '__divdi3',
+    handler: divdi3,
+    rationale: '64-bit signed division, truncating toward zero as C requires.',
+  },
+  {
+    address: 0x4000083c,
+    name: '__moddi3',
+    handler: moddi3,
+    rationale: '64-bit signed remainder, taking the dividend\'s sign.',
+  },
+  {
+    address: 0x40000374,
+    name: 'strlen',
+    handler: strlen,
+    rationale: 'Counts bytes before the first NUL, bounded so an unterminated string cannot hang the run.',
+  },
+  {
+    address: 0x40000588,
+    name: 'esp_rom_set_cpu_ticks_per_us',
+    handler: setCpuTicksPerUs,
+    rationale: 'Stores the CPU frequency so the machine and the ROM delay loop agree.',
+  },
+  {
+    address: 0x40000584,
+    name: 'ets_get_cpu_frequency',
+    handler: getCpuFrequency,
+    rationale: 'Answers from the machine\'s own clock model rather than a constant.',
+  },
+  {
+    address: 0x40000050,
+    name: 'esp_rom_delay_us',
+    handler: delayUs,
+    rationale: 'Records the requested delay; the runner advances simulated time instead of spinning.',
+  },
+  {
+    address: 0x40000044,
+    name: 'ets_install_putc1',
+    handler: installPutc1,
+    rationale: 'Stores the ROM printf character sink for diagnostics; nothing calls back into firmware.',
+  },
+  {
+    address: 0x40000524,
+    name: 'Cache_Suspend_ICache',
+    handler: ({ machine }) => {
+      machine.cache.iCacheEnabled = false;
+      return 0;
+    },
+    rationale: 'Same structural no-op as enabling it: there is no translation to suspend.',
+  },
+  {
+    address: 0x40000528,
+    name: 'Cache_Resume_ICache',
+    handler: ({ machine }) => {
+      machine.cache.iCacheEnabled = true;
+    },
+    rationale: 'Pairs with Cache_Suspend_ICache; recorded rather than ignored.',
   },
   {
     address: 0x40001954,
