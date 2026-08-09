@@ -314,7 +314,7 @@ export interface CompileResult {
   stdout: string;
   stderr: string;
   diagnostics: Diagnostic[];
-  firmware?: { format: 'intel-hex' | 'uf2' | 'bin'; data: string };
+  firmware?: { format: 'intel-hex' | 'uf2' | 'bin' | 'esp-image'; data: string };
   memory?: { flashBytes: number; flashMaxBytes: number; ramBytes: number; ramMaxBytes: number };
   durationMs: number;
   error?: string;
