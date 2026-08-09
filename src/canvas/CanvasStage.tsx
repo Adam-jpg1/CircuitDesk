@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
-import { resolveDefinition } from '../project/partsRegistry';
+import { resolveDefinition, resolvePin } from '../project/partsRegistry';
 import { buildCircuitGraph } from '../circuit/nets';
 import { arduinoPinNumber } from '../boards/pinMaps';
 import { pinAbsolute, partBounds, partSize, wirePath, snap, type Pt } from './geometry';
@@ -321,7 +321,7 @@ export function CanvasStage() {
     (componentId: string, pinId: string): Pt | null => {
       const inst = instances.find((i) => i.id === componentId);
       const def = inst ? definitions.get(inst.id) : undefined;
-      const pin = def?.pins.find((p) => p.id === pinId);
+      const pin = resolvePin(def, pinId);
       if (!inst || !def || !pin) return null;
       return pinAbsolute(inst, def, pin);
     },

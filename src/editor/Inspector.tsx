@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useEditorStore } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
-import { resolveDefinition } from '../project/partsRegistry';
+import { resolveDefinition, resolvePin } from '../project/partsRegistry';
 import { analyzeCodePins } from '../compiler/codeAnalysis';
 import { arduinoPinNumber } from '../boards/pinMaps';
 import { describeSupport } from '../project/support';
@@ -341,7 +341,7 @@ function ConnectionInspector({ conn }: { conn: Connection }) {
   const endName = (instId: string, pinId: string) => {
     const inst = [...project.boardInstances, ...project.componentInstances].find((i) => i.id === instId);
     const def = inst ? resolveDefinition(inst.definitionId, project) : undefined;
-    const pin = def?.pins.find((p) => p.id === pinId);
+    const pin = resolvePin(def, pinId);
     return `${inst?.label || def?.name || '?'} · ${pin?.label ?? pinId}`;
   };
   return (

@@ -22,8 +22,18 @@ export function resolveDefinition(id: string, project?: CircuitProject | null): 
   return libraryCustomIndex.get(id);
 }
 
+/**
+ * Finds a pin by its current id, or by an id it used to have.
+ *
+ * Aliases exist so a board definition can be corrected without invalidating
+ * projects already saved against it. When the ESP32-C3 entry was rebuilt as a
+ * real ESP32-C3-DevKitM-1 its pin identifiers changed to the ones printed on
+ * the board, and every stored connection referencing the old names still has
+ * to resolve to the same physical pin.
+ */
 export function resolvePin(def: PartDefinition | undefined, pinId: string): PinDefinition | undefined {
-  return def?.pins.find((p) => p.id === pinId);
+  if (!def) return undefined;
+  return def.pins.find((p) => p.id === pinId) ?? def.pins.find((p) => p.aliases?.includes(pinId));
 }
 
 export function allBuiltinParts(): PartDefinition[] {
