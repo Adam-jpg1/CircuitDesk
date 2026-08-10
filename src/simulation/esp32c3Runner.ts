@@ -39,14 +39,14 @@ const MEASURE_WINDOW_US = 50_000;
 
 interface PadHistory {
   toggles: number;
-  /** Simulated microseconds the pad has spent high within the window. */
-  highUs: number;
-  lastLevel: 0 | 1 | undefined;
+  /** Level the pad has held since `lastChangeUs`. */
+  level: 0 | 1 | undefined;
   lastChangeUs: number;
+  /** Start of the window duty is measured over. */
   windowStartUs: number;
-  lastHighPulseUs: number;
+  /** High time already accumulated in the window, excluding the current run. */
   windowHighUs: number;
-  duty: number;
+  lastHighPulseUs: number;
 }
 
 export class Esp32C3Runner implements BoardRunner {
@@ -92,16 +92,37 @@ export class Esp32C3Runner implements BoardRunner {
   }
 
   private freshHistory(): PadHistory {
-    return {
-      toggles: 0,
-      highUs: 0,
-      lastLevel: undefined,
-      lastChangeUs: 0,
-      windowStartUs: 0,
-      lastHighPulseUs: 0,
-      windowHighUs: 0,
-      duty: 0,
-    };
+    const nowUs = this.machine ? this.machine.micros : 0;
+    return { toggles: 0, level: undefined, lastChangeUs: nowUs, windowStartUs: nowUs, windowHighUs: 0, lastHighPulseUs: 0 };
+  }
+
+  /**
+   * Fraction of the recent past a pad has spent high.
+   *
+   * Computed when asked rather than accumulated on edges, because a pad that
+   * is simply held high has no edges — and a duty derived only from edges
+   * reads zero for it, which would leave a steadily lit LED dark.
+   */
+  private dutyOf(pin: number): number {
+    const history = this.history[pin];
+    const nowUs = this.machine.micros;
+    const elapsed = nowUs - history.windowStartUs;
+    const inCurrentRun = history.level === 1 ? nowUs - history.lastChangeUs : 0;
+    if (elapsed <= 0) return history.level === 1 ? 1 : 0;
+    return Math.min(1, Math.max(0, (history.windowHighUs + inCurrentRun) / elapsed));
+  }
+
+  /**
+   * Drops history older than the measurement window.
+   *
+   * Without this the duty of a pin that changed behaviour long ago would stay
+   * anchored to what it used to do.
+   */
+  private rollWindow(history: PadHistory, nowUs: number): void {
+    if (nowUs - history.windowStartUs <= MEASURE_WINDOW_US) return;
+    history.windowStartUs = nowUs;
+    history.windowHighUs = 0;
+    history.lastChangeUs = Math.min(history.lastChangeUs, nowUs);
   }
 
   // ------------------------------------------------------------- execution
@@ -167,22 +188,15 @@ export class Esp32C3Runner implements BoardRunner {
     const history = this.history[pin];
     if (history) {
       const nowUs = this.machine.micros;
-      const wasHigh = change.previous.level === 1;
-      if (wasHigh) {
+      this.rollWindow(history, nowUs);
+      if (history.level === 1) {
         const width = nowUs - history.lastChangeUs;
         history.lastHighPulseUs = width;
         history.windowHighUs += width;
       }
-      if (change.previous.level !== change.current.level) history.toggles++;
+      if (history.level !== change.current.level) history.toggles++;
       history.lastChangeUs = nowUs;
-      history.lastLevel = change.current.level;
-
-      const elapsed = nowUs - history.windowStartUs;
-      if (elapsed >= MEASURE_WINDOW_US) {
-        history.duty = Math.min(1, Math.max(0, history.windowHighUs / elapsed));
-        history.windowHighUs = 0;
-        history.windowStartUs = nowUs;
-      }
+      history.level = change.current.level;
     }
 
     // Only a driven pad is reported as a level change; an input's level
@@ -201,7 +215,8 @@ export class Esp32C3Runner implements BoardRunner {
     const toggles: number[] = [];
     for (let pin = 0; pin < PIN_COUNT; pin++) {
       states.push(this.digitalPinLevel(pin) ?? 'input');
-      duty.push(this.history[pin].duty);
+      this.rollWindow(this.history[pin], this.machine.micros);
+      duty.push(this.dutyOf(pin));
       pulseWidthUs.push(this.history[pin].lastHighPulseUs);
       toggles.push(this.history[pin].toggles);
     }
