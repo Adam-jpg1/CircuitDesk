@@ -72,6 +72,37 @@ const AVR_SIM_PERIPHERALS = ['GPIO ports', 'Timer0/1/2', 'USART0', 'ADC'];
  * run on fabricated values. Integer arithmetic, digital I/O, `analogRead()`
  * and `Serial1` do not touch them.
  */
+/**
+ * What a sketch on this board can actually rely on.
+ *
+ * The list is deliberately short. Everything on it is exercised by a test
+ * against real compiled firmware; anything absent is absent because it is not
+ * modelled, not because it was forgotten.
+ */
+const ESP32C3_SIM_APIS = [
+  'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
+  'digitalWrite',
+  'digitalRead',
+  'delay/millis/micros',
+  'setup() and repeated loop()',
+];
+
+const ESP32C3_SIM_PERIPHERALS = [
+  'GPIO with the IO MUX and GPIO matrix',
+  'System timer, which drives the FreeRTOS tick',
+  'Interrupt matrix and CPU interrupt controller',
+  'SPI flash and the flash MMU',
+];
+
+/**
+ * Said plainly, because the gap between what this runs and what an ESP32-C3
+ * does is large and a student should not have to discover it by being wrong.
+ */
+const ESP32C3_LIMITATION =
+  'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), and GPIO. ' +
+  'Wi-Fi, Bluetooth LE, USB Serial/JTAG, ADC, PWM, I2C, SPI to devices and the hardware UART are not simulated — ' +
+  'sketches using them compile and run, but those peripherals do nothing.';
+
 const RP2040_SIM_APIS = [
   'pinMode (INPUT, OUTPUT, INPUT_PULLUP)',
   'digitalWrite',
@@ -280,7 +311,20 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     // 'esp32-c3-devkitm' and the old display name stay as lookup aliases so
     // projects saved before this entry was corrected still resolve.
     aliases: ['esp32-c3', 'esp32-c3-devkitm-1', 'esp32-c3-devkitm', 'esp32c3', 'esp32:esp32:esp32c3'],
-    limitation: 'ESP32-C3 is RISC-V, not Xtensa — tracked as its own variant; validation only.',
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'esp32:esp32:esp32c3',
+      requiredCore: 'esp32:esp32',
+      supported: true,
+      note: 'Requires the esp32:esp32 core on the compiler service. The ESP32-C3 is RISC-V, so it is never compiled through an Xtensa or AVR core.',
+    },
+    simulation: {
+      engine: 'esp32c3',
+      supported: true,
+      supportedApis: ESP32C3_SIM_APIS,
+      supportedPeripherals: ESP32C3_SIM_PERIPHERALS,
+    },
+    limitation: ESP32C3_LIMITATION,
   },
   'board.esp8266-nodemcu': {
     architecture: 'esp8266',

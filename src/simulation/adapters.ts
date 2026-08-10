@@ -12,20 +12,30 @@ import { AVR_BOARD_PROFILES } from '../boards/pinMaps';
 // Firmware validation is pure and emulator-free, so a bad artifact is refused
 // without downloading an engine chunk to find out.
 import { decodeBase64Firmware, parseRp2040Uf2, FirmwareRejectedError } from './rp2040/uf2';
+// The ESP image parser imports no emulator, so a wrong-architecture or
+// malformed artifact is refused before any engine chunk is downloaded.
+import { decodeBase64Image, parseEspApplicationImage } from './esp32c3/espImage';
 
 /** The compiler service's artifact, as handed to the simulator. */
 export interface FirmwareArtifact {
-  /** Intel HEX text for AVR, base64 UF2 for RP2040. */
+  /** Intel HEX text for AVR, base64 UF2 for RP2040, base64 image for ESP. */
   data: string;
   format: string;
+  /**
+   * Other flash regions the toolchain produced, at their real offsets.
+   *
+   * An ESP32-C3 reads its partition table out of flash before it will run
+   * anything, so the artifacts that are not executed still have to be present.
+   */
+  regions?: { offset: number; data: string }[];
 }
 
 export interface BoardSimulatorAdapter {
-  engine: 'avr8js' | 'rp2040js';
+  engine: 'avr8js' | 'rp2040js' | 'esp32c3';
   /** Canonical board ids this adapter genuinely supports (tested). */
   boardIds: string[];
   /** The artifact format this engine executes. */
-  firmwareFormat: 'intel-hex' | 'uf2';
+  firmwareFormat: 'intel-hex' | 'uf2' | 'esp-image';
   /** Lazily loads the engine and creates a runner with the board's own profile. */
   createRunner(firmware: FirmwareArtifact, board: BoardDefinition): Promise<BoardRunner>;
 }
@@ -93,7 +103,25 @@ const rp2040jsAdapter: BoardSimulatorAdapter = {
   },
 };
 
-const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter];
+const esp32c3Adapter: BoardSimulatorAdapter = {
+  engine: 'esp32c3',
+  boardIds: ['board.esp32-c3'],
+  firmwareFormat: 'esp-image',
+  async createRunner(firmware, board) {
+    assertFormat(this, firmware, board);
+    // Validated before the engine chunk is fetched: an image built for another
+    // Espressif part, or an AVR or RP2040 artifact that reached here by
+    // mistake, is refused without downloading an emulator to find out.
+    const image = parseEspApplicationImage(decodeBase64Image(firmware.data));
+    const { Esp32C3Runner, decodeRegion } = await import('./esp32c3Runner');
+    return new Esp32C3Runner(
+      image,
+      (firmware.regions ?? []).map((r) => ({ offset: r.offset, data: decodeRegion(r.data) })),
+    );
+  },
+};
+
+const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32c3Adapter];
 
 /** Returns the adapter for a board, or null when the board is not genuinely simulated. */
 export function getSimulatorAdapter(board: BoardDefinition | undefined | null): BoardSimulatorAdapter | null {
@@ -106,6 +134,8 @@ export function registeredSimulatedBoardIds(): string[] {
 }
 
 /** The artifact format a board's engine executes, for the compile pipeline. */
-export function firmwareFormatForBoard(board: BoardDefinition | undefined | null): 'intel-hex' | 'uf2' | null {
+export function firmwareFormatForBoard(
+  board: BoardDefinition | undefined | null,
+): 'intel-hex' | 'uf2' | 'esp-image' | null {
   return getSimulatorAdapter(board)?.firmwareFormat ?? null;
 }
