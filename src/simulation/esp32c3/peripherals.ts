@@ -19,6 +19,7 @@
 import type { Peripheral, SimulatedClock } from './esp32c3Machine';
 import { RegisterFile } from './registerFile';
 import { FlashMmu, SpiMemController, SPI_MEM_BASE } from './spiMem';
+import { Esp32C3Gpio } from './gpio';
 import { InterruptMatrix, INTERRUPT_SOURCE, SystemRegisters, type InterruptingPeripheral } from './interrupts';
 
 export { RegisterFile } from './registerFile';
@@ -431,6 +432,15 @@ export class SystemConfiguration extends RegisterFile {
  * Blocks are added as startup proves it touches them; each one is either
  * modelled or left as a register file, and nothing is added speculatively.
  */
+/**
+ * The GPIO block and its IO MUX, which belong together: the MUX decides
+ * whether the GPIO matrix owns a pad at all.
+ */
+function gpioPeripherals(clock: SimulatedClock): Peripheral[] {
+  const gpio = new Esp32C3Gpio(clock);
+  return [gpio, gpio.ioMux];
+}
+
 export function createStartupPeripherals(clock: SimulatedClock, flash?: SerialNorFlash): Peripheral[] {
   return [
     // SPI0 belongs to the cache. Firmware configures it but runs no
@@ -447,7 +457,8 @@ export function createStartupPeripherals(clock: SimulatedClock, flash?: SerialNo
     new InterruptMatrix(),
     new RegisterFile('extmem', PERIPHERAL_BASE.extMem, 0x1000),
     new SystemConfiguration(),
+    ...gpioPeripherals(clock),
     new SysTimer(clock),
-    new RegisterFile('io_mux', PERIPHERAL_BASE.ioMux, 0x1000),
+
   ];
 }
