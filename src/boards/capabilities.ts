@@ -12,6 +12,13 @@
 
 import type { BoardArchitecture, BoardCompilerInfo, BoardSimulationInfo, PinCapability } from '../types';
 
+/**
+ * Used where a board is an open or widely-cloned design rather than one
+ * company's product. Saying this is more accurate than picking a vendor, and
+ * it keeps CircuitDesk from implying a relationship that does not exist.
+ */
+export const MULTI_VENDOR_DESIGN = 'Various manufacturers';
+
 export interface BoardCapabilityEntry {
   architecture: BoardArchitecture;
   aliases: string[];
@@ -25,6 +32,17 @@ export interface BoardCapabilityEntry {
   extraPinCaps?: { pattern: RegExp; add: PinCapability[] }[];
   /** Honest statement of the biggest current limitation, surfaced in tooltips. */
   limitation?: string;
+  /**
+   * Who actually makes this board.
+   *
+   * Distinct from `family`, which groups by chip. Several popular boards are
+   * open designs produced by many vendors, and naming one of them as the maker
+   * would be a claim CircuitDesk cannot support — those carry
+   * MULTI_VENDOR_DESIGN instead of a company.
+   */
+  manufacturer?: string;
+  /** Why an entry is generic, when it is. Shown so the ambiguity is visible. */
+  identityNote?: string;
 }
 
 const AVR_SIM_APIS = [
@@ -144,6 +162,7 @@ const avrCliCompiler = (fqbn: string): BoardCompilerInfo => ({
 export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
   // ---------------- AVR (genuinely simulated where tested) ----------------
   'board.arduino-uno': {
+    manufacturer: 'Arduino',
     architecture: 'avr',
     aliases: ['arduino-uno', 'uno', 'Arduino UNO R3', 'arduino:avr:uno'],
     compiler: avrCliCompiler('arduino:avr:uno'),
@@ -156,6 +175,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     analogPinBase: 14,
   },
   'board.arduino-nano': {
+    manufacturer: 'Arduino',
     architecture: 'avr',
     aliases: ['arduino-nano', 'nano', 'arduino:avr:nano'],
     compiler: avrCliCompiler('arduino:avr:nano'),
@@ -169,6 +189,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation: 'Same ATmega328P core as the Uno; A6/A7 are ADC-only, as on real hardware.',
   },
   'board.arduino-mega2560': {
+    manufacturer: 'Arduino',
     architecture: 'avr',
     aliases: ['arduino-mega', 'mega', 'mega2560', 'arduino:avr:mega'],
     compiler: avrCliCompiler('arduino:avr:mega'),
@@ -190,6 +211,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       'attachInterrupt is not emulated on this board either: external interrupts (INT0-INT7) and pin-change interrupts (PCINT0-2) are not modeled for the ATmega2560, so those pins still wire and validate but produce no interrupt behavior.',
   },
   'board.arduino-leonardo': {
+    manufacturer: 'Arduino',
     architecture: 'avr',
     aliases: ['arduino-leonardo', 'leonardo', 'arduino:avr:leonardo'],
     compiler: avrCliCompiler('arduino:avr:leonardo'),
@@ -214,33 +236,41 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
 
   // ---------------- SAM / SAMD / Renesas ----------------
   'board.arduino-due': {
+    manufacturer: 'Arduino',
     architecture: 'sam',
     aliases: ['arduino-due', 'due'],
     limitation: 'SAM3X8E toolchain not installed on the compiler service; wiring + 3.3 V validation only.',
   },
   'board.arduino-uno-r4': {
+    manufacturer: 'Arduino',
     architecture: 'renesas',
     aliases: ['uno-r4', 'uno-r4-minima'],
     limitation: 'Renesas RA4M1 toolchain not installed; wiring + validation only.',
   },
   'board.nano-33-ble': {
+    manufacturer: 'Arduino',
     architecture: 'nrf52',
     aliases: ['nano-33-ble', 'nano33ble'],
     limitation: 'nRF52840 toolchain not installed; wiring + validation only.',
   },
   'board.adafruit-feather': {
+    manufacturer: 'Adafruit',
+    identityNote:
+      'Feather M0 is a family of boards sharing the Feather pin layout. This entry models the shared layout rather than one specific variant.',
     architecture: 'samd',
     aliases: ['feather-m0'],
     limitation: 'SAMD21 toolchain not installed; wiring only.',
   },
   'board.adafruit-qtpy': {
+    manufacturer: 'Adafruit',
     architecture: 'samd',
-    aliases: ['qt-py'],
+    aliases: ['qt-py', 'adafruit qt py', 'qt py'],
     limitation: 'SAMD21 toolchain not installed; wiring only.',
   },
   'board.seeed-xiao': {
+    manufacturer: 'Seeed Studio',
     architecture: 'samd',
-    aliases: ['xiao', 'seeeduino-xiao'],
+    aliases: ['xiao', 'seeeduino-xiao', 'seeed studio xiao', 'xiao'],
     limitation: 'SAMD21 toolchain not installed; wiring only.',
   },
 
@@ -249,6 +279,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
   // its own FQBN. The retired arduino:mbed_rp2040:pico identifier is kept only
   // as a lookup alias — see the note on the Pico's alias list below.
   'board.raspberry-pi-pico': {
+    manufacturer: 'Raspberry Pi',
     architecture: 'rp2040',
     // 'arduino:mbed_rp2040:pico' stays purely so findBoardByIdOrAlias() still
     // resolves projects imported while that was the live target. Aliases are a
@@ -272,6 +303,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation: RP2040_LIMITATION,
   },
   'board.raspberry-pi-pico-w': {
+    manufacturer: 'Raspberry Pi',
     architecture: 'rp2040',
     aliases: ['raspberry-pi-pico-w', 'pico-w', 'rp2040:rp2040:rpipicow'],
     compiler: {
@@ -294,18 +326,23 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
 
   // ---------------- Espressif (variants are distinct) ----------------
   'board.esp32-devkit': {
+    manufacturer: MULTI_VENDOR_DESIGN,
+    identityNote:
+      '"ESP32 DevKit V1" is a widely cloned third-party design, not an Espressif product — Espressif\'s own boards are the ESP32-DevKitC series. It is produced by many vendors, so no single manufacturer is claimed.',
     architecture: 'esp32',
     variant: 'esp32',
     aliases: ['esp32-devkit-v1', 'esp32'],
     limitation: 'Xtensa LX6 execution is not simulated and the ESP32 core is not installed on the compiler service; wiring + 3.3 V validation only.',
   },
   'board.esp32-s3': {
+    manufacturer: 'Espressif',
     architecture: 'esp32',
     variant: 'esp32s3',
-    aliases: ['esp32-s3'],
+    aliases: ['esp32-s3', 'esp32-s3 devkitc', 'esp32-s3-devkitc'],
     limitation: 'ESP32-S3 (Xtensa LX7) — validation only; distinct from the base ESP32.',
   },
   'board.esp32-c3': {
+    manufacturer: 'Espressif',
     architecture: 'esp32',
     variant: 'esp32c3',
     // 'esp32-c3-devkitm' and the old display name stay as lookup aliases so
@@ -327,12 +364,18 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation: ESP32C3_LIMITATION,
   },
   'board.esp8266-nodemcu': {
+    manufacturer: MULTI_VENDOR_DESIGN,
+    identityNote:
+      'NodeMCU is an open dev-kit and firmware project, not an Espressif product. Boards carrying the name are made by several vendors with differing layouts, so no single manufacturer is claimed.',
     architecture: 'esp8266',
     variant: 'esp8266',
     aliases: ['nodemcu', 'esp8266'],
     limitation: 'Single ADC (A0, 1.0 V range on the bare chip); not compiled or simulated.',
   },
   'board.esp32-cam': {
+    manufacturer: MULTI_VENDOR_DESIGN,
+    identityNote:
+      'The ESP32-CAM design originated with Ai-Thinker and is widely cloned. It is not an Espressif product, so no single manufacturer is claimed.',
     architecture: 'esp32',
     variant: 'esp32',
     aliases: ['esp32-cam'],
@@ -341,16 +384,23 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
 
   // ---------------- STM32 / imxrt / nRF52 ----------------
   'board.stm32-nucleo': {
+    manufacturer: 'STMicroelectronics',
+    identityNote:
+      'Nucleo-64 is a board family sharing one pin layout. This entry models that shared layout rather than one part number; the processor field names the variant it is dimensioned for.',
     architecture: 'stm32',
     aliases: ['nucleo-64', 'nucleo-f401re'],
     limitation: 'STM32 toolchain not installed; wiring only.',
   },
   'board.teensy41': {
+    manufacturer: 'PJRC',
     architecture: 'imxrt',
     aliases: ['teensy-4.1'],
     limitation: 'IMXRT1062 toolchain not installed; wiring only.',
   },
   'board.microbit': {
+    manufacturer: 'Micro:bit Educational Foundation',
+    identityNote:
+      'Originated by the BBC and now produced by the Micro:bit Educational Foundation, which is why the brand and the maker differ.',
     architecture: 'nrf52',
     aliases: ['micro:bit', 'microbit-v2'],
     limitation: 'Edge-connector visual reference only.',
@@ -358,12 +408,14 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
 
   // ---------------- Linux SBC headers ----------------
   'board.rpi-zero-gpio': {
+    manufacturer: 'Raspberry Pi',
     architecture: 'linux',
     aliases: ['raspberry-pi-zero'],
     limitation:
       'Linux boards are not emulated. No behavioral GPIO runtime is implemented yet, so this stays at wiring level — it is never claimed as simulated.',
   },
   'board.rpi4-gpio': {
+    manufacturer: 'Raspberry Pi',
     architecture: 'linux',
     aliases: ['raspberry-pi-4', 'raspberry-pi-5'],
     limitation:

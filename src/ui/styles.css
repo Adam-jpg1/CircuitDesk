@@ -563,3 +563,72 @@ input[type='checkbox'] { accent-color: var(--accent); }
 }
 .toast.error { border-color: #6e2724; }
 .toast.success { border-color: #1f5f2c; }
+
+/* ---------------------------------------------------- licenses & notices */
+/* The notices page reuses the document layout the About page already uses, so
+   it reads as part of the application rather than as a developer dump. */
+.doc-page { max-width: 860px; }
+.notice-independence {
+  border-left: 3px solid var(--accent);
+  background: var(--bg-2);
+  border-radius: 0 6px 6px 0;
+  padding: 12px 16px;
+  margin: 18px 0 6px;
+}
+.notice-independence p { margin: 0 0 10px; color: var(--text-1); }
+.notice-independence p:last-child { margin-bottom: 0; }
+.notice-preamble { color: var(--text-2); font-size: 13px; margin-bottom: 6px; }
+.notice-group { margin-top: 30px; }
+.notice-group h2 { margin-bottom: 4px; }
+.notice-blurb { color: var(--text-2); font-size: 13px; margin: 0 0 14px; }
+
+.notice-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-1);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.notice-card.exclusion { border-style: dashed; }
+.notice-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-0);
+  font: inherit;
+}
+.notice-head:hover { background: var(--bg-2); }
+.notice-title { font-weight: 600; flex: 1; min-width: 0; }
+.notice-meta { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.notice-chevron { color: var(--text-2); width: 14px; text-align: center; flex-shrink: 0; }
+.notice-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 0 14px 12px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.notice-sub a { color: var(--accent); word-break: break-all; }
+.notice-body {
+  padding: 4px 14px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.notice-text { margin: 12px 0; color: var(--text-1); }
+.notice-list { margin: 12px 0; padding-left: 20px; color: var(--text-1); }
+.notice-list li { margin-bottom: 5px; }
+.notice-footnote { margin-top: 28px; color: var(--text-2); font-size: 12px; }
+
+@media (max-width: 640px) {
+  .notice-head { flex-wrap: wrap; }
+  .notice-title { flex-basis: 100%; }
+  .notice-meta { justify-content: flex-start; }
+}

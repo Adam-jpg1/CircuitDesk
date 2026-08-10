@@ -237,7 +237,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   ),
   ESP32_DEVKIT,
   simpleWiringBoard(
-    'board.esp32-s3', 'ESP32-S3 DevKitC', 'Espressif', 'ESP32-S3', 25.5, 63, 3.3,
+    'board.esp32-s3', 'ESP32-S3-DevKitC-1', 'Espressif', 'ESP32-S3', 25.5, 63, 3.3,
     [p3v3('3V3'), ...seqPins('GPIO', 4, 18, 3.3), gnd('GND1')],
     [{ ...g3('GPIO1', 'GPIO1') }, { ...g3('GPIO2', 'GPIO2') }, ...seqPins('GPIO', 38, 48, 3.3), g3('TX0', 'TX0'), g3('RX0', 'RX0'), p5v('VIN_5V', '5V'), gnd('GND2')],
     'validation', { color: '#12262e', usb: 'usb-c' },
@@ -336,13 +336,13 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     'wiring', { color: '#12262e' },
   ),
   simpleWiringBoard(
-    'board.adafruit-qtpy', 'Adafruit QT Py', 'Adafruit', 'SAMD21 (Cortex-M0+)', 17.8, 22.9, 3.3,
+    'board.adafruit-qtpy', 'Adafruit QT Py SAMD21', 'Adafruit', 'SAMD21 (Cortex-M0+)', 17.8, 22.9, 3.3,
     [a3('A0', 'A0'), a3('A1', 'A1'), a3('A2', 'A2'), a3('A3', 'A3'), g3('SDA', 'SDA', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('SCL', 'SCL', { caps: ['digital-in', 'digital-out', 'i2c-scl'] })],
     [p5v('VUSB', '5V'), gnd('GND'), p3v3('3V3'), g3('TX', 'TX', { caps: ['digital-out', 'uart-tx'] }), g3('RX', 'RX', { caps: ['digital-in', 'uart-rx'] }), g3('SCK', 'SCK', { caps: ['digital-in', 'digital-out', 'spi-sck'] })],
     'wiring', { usb: 'usb-c', color: '#1a1a24' },
   ),
   simpleWiringBoard(
-    'board.seeed-xiao', 'Seeed Studio XIAO', 'Seeed Studio', 'SAMD21 (Cortex-M0+)', 17.5, 21, 3.3,
+    'board.seeed-xiao', 'Seeed Studio XIAO SAMD21', 'Seeed Studio', 'SAMD21 (Cortex-M0+)', 17.5, 21, 3.3,
     [a3('A0', 'A0/D0'), a3('A1', 'A1/D1'), a3('A2', 'A2/D2'), a3('A3', 'A3/D3'), g3('SDA', 'SDA', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('SCL', 'SCL', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('TX', 'TX', { caps: ['digital-out', 'uart-tx'] })],
     [p5v('VUSB', '5V'), gnd('GND'), p3v3('3V3'), a3('A10', 'A10/MOSI'), a3('A9', 'A9/MISO'), a3('A8', 'A8/SCK'), g3('RX', 'RX', { caps: ['digital-in', 'uart-rx'] })],
     'wiring', { usb: 'usb-c', color: '#1a1a24' },
@@ -372,6 +372,7 @@ function applyCapabilities(raw: BoardDefinition): BoardDefinition {
     pins,
     architecture: caps.architecture,
     aliases: caps.aliases,
+    ...(caps.manufacturer ? { manufacturer: caps.manufacturer } : {}),
     compiler: caps.compiler ?? { provider: 'none', supported: false },
     simulation:
       caps.simulation ?? { engine: 'none', supported: false, supportedApis: [], supportedPeripherals: [] },
@@ -384,6 +385,7 @@ function applyCapabilities(raw: BoardDefinition): BoardDefinition {
       ...(caps.analogPinBase !== undefined ? { analogPinBase: caps.analogPinBase } : {}),
       ...(caps.variant ? { variant: caps.variant } : {}),
       ...(caps.limitation ? { limitation: caps.limitation } : {}),
+      ...(caps.identityNote ? { identityNote: caps.identityNote } : {}),
     },
   };
   delete def.compilerTarget;
