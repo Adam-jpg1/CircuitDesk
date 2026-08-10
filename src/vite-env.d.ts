@@ -8,3 +8,10 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// The third-party notices file is imported as text so the Licenses page and
+// the repository's own notices cannot drift apart.
+declare module '*.md?raw' {
+  const content: string;
+  export default content;
+}

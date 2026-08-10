@@ -76,6 +76,7 @@ export function Dashboard() {
         <button className="btn" onClick={() => navigate('#/import')}>
           <ImportIcon style={{ width: 14, height: 14 }} /> Import
         </button>
+        <button className="btn" onClick={() => navigate('#/licenses')}>Licenses</button>
         <button className="btn" onClick={() => navigate('#/about')}>About</button>
         <button className="btn primary" onClick={() => void createProject(() => buildBlinkProject('New Project'))}>
           <PlusIcon style={{ width: 14, height: 14 }} /> New project

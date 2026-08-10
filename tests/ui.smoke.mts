@@ -85,5 +85,33 @@ pass('no "Maximum update depth exceeded" errors');
 const otherErrors = errors.filter((e) => !e.includes('favicon') && !e.includes('Download the React DevTools'));
 console.log(otherErrors.length === 0 ? 'PASS: no console errors' : `NOTE: console errors (${otherErrors.length}): ${otherErrors.slice(0, 5).join(' || ').slice(0, 500)}`);
 
+// 7. Licenses page reachable from home, renders, and carries real notices
+await page.goto('http://localhost:3411/#/', { waitUntil: 'load' });
+await page.waitForTimeout(500);
+const licensesBtn = page.locator('button', { hasText: /^Licenses$/ }).first();
+if ((await licensesBtn.count()) === 0) fail('home has a Licenses button');
+else {
+  pass('home has a Licenses button');
+  await licensesBtn.click();
+  await page.waitForTimeout(600);
+  const onPage = await page.locator('[data-testid="licenses-page"]').count();
+  if (onPage === 0) fail('the Licenses page renders');
+  else {
+    pass('the Licenses page renders');
+    const body = (await page.locator('[data-testid="licenses-page"]').innerText()).toLowerCase();
+    for (const needle of ['avr8js', 'rp2040js', 'arduino cores', 'independent simulation platform']) {
+      if (body.includes(needle)) pass(`the page shows "${needle}"`);
+      else fail(`the page shows "${needle}"`);
+    }
+    // An entry expands to its full notice text rather than only a summary.
+    const card = page.locator('.notice-head').first();
+    await card.click();
+    await page.waitForTimeout(300);
+    const expanded = await page.locator('.notice-body').count();
+    if (expanded > 0) pass('an entry expands to its full notice text');
+    else fail('an entry expands to its full notice text');
+  }
+}
+
 await browser.close();
 console.log('\nUI smoke test finished.');

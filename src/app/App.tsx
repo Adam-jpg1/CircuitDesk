@@ -5,6 +5,7 @@ import { EditorShell } from '../editor/EditorShell';
 import { ImportWizard } from '../import/ImportWizard';
 import { CustomPartsPage } from '../custom-parts/CustomPartsPage';
 import { AboutPage } from './AboutPage';
+import { LicensesPage } from './LicensesPage';
 import { useCustomPartsStore } from '../custom-parts/customPartsStore';
 
 export function App() {
@@ -30,6 +31,10 @@ export function App() {
       ) : route.startsWith('#/custom-parts') ? (
         <ErrorBoundary name="custom parts library">
           <CustomPartsPage />
+        </ErrorBoundary>
+      ) : route.startsWith('#/licenses') ? (
+        <ErrorBoundary name="licenses page">
+          <LicensesPage />
         </ErrorBoundary>
       ) : route.startsWith('#/about') ? (
         <ErrorBoundary name="about page">

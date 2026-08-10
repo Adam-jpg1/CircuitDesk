@@ -114,6 +114,14 @@ export interface BoardDefinition {
   /** Alternate names/identifiers this board is known by. */
   aliases?: string[];
   family: string;
+  /**
+   * Who makes the board, when a single company does.
+   *
+   * `family` groups by chip and is not a maker: an ESP32 DevKit V1 is an
+   * Espressif-chip board that Espressif does not sell. Absent when unknown;
+   * set to a plain statement when the design has many producers.
+   */
+  manufacturer?: string;
   /** Optional for backward compatibility with stored custom boards; treat undefined as 'other'. */
   architecture?: BoardArchitecture;
   processor: string;
