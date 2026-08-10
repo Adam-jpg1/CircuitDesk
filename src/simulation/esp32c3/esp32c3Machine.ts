@@ -12,6 +12,7 @@
 
 import { Rv32Core, type Bus } from '../riscv/rv32Core';
 import { isInterrupting, InterruptMatrix, type InterruptingPeripheral } from './interrupts';
+import { planIdleSkip, type TimedEventSource } from '../eventScheduler';
 import { FlashMmu, MMU_PAGE_SIZE, SpiMemController } from './spiMem';
 import { ESP32C3_FLASH_LAYOUT, type SerialNorFlash } from './spiFlash';
 import type { EspApplicationImage } from './espImage';
@@ -144,6 +145,14 @@ export interface Esp32C3MachineOptions {
   /** Called for every access to an address no peripheral claims. */
   onUnclaimedMmio?: (event: MmioEvent) => void;
   onRomCall?: (event: RomCallEvent) => void;
+  /**
+   * Whether a parked core may skip straight to its next event.
+   *
+   * On by default, because clocking cycles through a wait is pure waste. It is
+   * switchable so the two paths can be compared against each other and shown
+   * to produce the same timing.
+   */
+  idleFastForward?: boolean;
 }
 
 /**
@@ -206,6 +215,20 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
   /** Simulated time at which a peripheral said its interrupt state may change. */
   private nextInterruptCheckNanos: number | undefined;
   private interruptsDirty = true;
+  private readonly externalEventSources: TimedEventSource[] = [];
+
+  /**
+   * Latest simulated time this run may reach while fast-forwarding an idle
+   * core. A runner asked for one slice of time sets it so a skip cannot
+   * disappear far into the future and miss an input arriving meanwhile.
+   */
+  timeLimitNanos: number | undefined;
+
+  /** True once nothing left can wake a parked machine. */
+  stalled = false;
+
+  /** How many times an idle wait was fast-forwarded, for measurement. */
+  idleSkips = 0;
   private image: EspApplicationImage | null = null;
 
   /** Symbol names by address, for diagnostics. Populated from an ELF if one is available. */
@@ -357,6 +380,8 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
   /** Returns the machine to its power-on state and boots the same image again. */
   reset(): void {
     this.elapsedNanos = 0;
+    this.stalled = false;
+    this.idleSkips = 0;
     this.pendingInterruptLines = 0;
     this.nextInterruptCheckNanos = undefined;
     this.interruptsDirty = true;
@@ -385,6 +410,14 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
     ) {
       this.refreshInterrupts();
     }
+    // A core parked on a wait-for-interrupt cannot change anything, and
+    // nothing else will either until some source acts. Rather than clocking
+    // millions of cycles through the wait, jump straight to the moment
+    // something happens.
+    if (this.options.idleFastForward !== false && this.core.waiting && this.pendingInterruptLines === 0) {
+      const skipped = this.skipIdleTime();
+      if (skipped) return 0;
+    }
     const period = 1000 / Math.max(1, this.romState.cpuFrequencyMhz);
     const pc = this.core.pc >>> 0;
     if (isRomAddress(pc)) {
@@ -399,6 +432,63 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
     // the interrupt it waits for could never arrive.
     this.elapsedNanos += period;
     return this.core.step();
+  }
+
+  /**
+   * Advances simulated time to the next thing that can wake the machine.
+   *
+   * Only ever called with the core genuinely parked, so no instruction is
+   * skipped and no guest state is guessed at: the only thing that moves is the
+   * clock, and every peripheral derives its state from the clock anyway.
+   *
+   * Returns true when time moved, so the caller can treat the skip as one
+   * step's worth of work.
+   */
+  private skipIdleTime(): boolean {
+    const plan = planIdleSkip(this.eventSources(), this.elapsedNanos, this.timeLimitNanos);
+    switch (plan.kind) {
+      case 'advanced':
+      case 'limited':
+        this.elapsedNanos = plan.to;
+        this.idleSkips++;
+        // Whatever is due at the new time has to be looked at before the core
+        // decides whether it may leave the wait.
+        this.refreshInterrupts();
+        return true;
+      case 'due':
+        this.refreshInterrupts();
+        return false;
+      case 'stalled':
+        // Nothing will ever wake it. Clocking cycles through that changes
+        // nothing, so the caller's own budget ends the run and reports it.
+        this.stalled = true;
+        return false;
+    }
+  }
+
+  /**
+   * Everything that can act on its own once the processor stops.
+   *
+   * Peripherals answer for themselves; the extra source covers inputs a host
+   * has queued for a future moment, such as a button press scheduled on the
+   * canvas.
+   */
+  private *eventSources(): Generator<TimedEventSource> {
+    for (const source of this.interruptSources) {
+      const at = source.nextInterruptChangeNanos?.bind(source);
+      if (at) yield { nextEventNanos: at };
+    }
+    for (const source of this.externalEventSources) yield source;
+  }
+
+  /**
+   * Registers something outside the chip that will act at a known time.
+   *
+   * The canvas uses this for input it has scheduled, so a parked machine still
+   * wakes for it rather than sleeping through it.
+   */
+  addEventSource(source: TimedEventSource): void {
+    this.externalEventSources.push(source);
   }
 
   /**
