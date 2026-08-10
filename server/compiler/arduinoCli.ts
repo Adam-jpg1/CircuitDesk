@@ -79,6 +79,8 @@ export interface CliBuildOutput {
   /** base64-encoded binary firmware for non-AVR targets (.uf2 preferred, else .bin). */
   binaryBase64?: string;
   binaryFormat?: 'uf2' | 'bin' | 'esp-image';
+  /** Other flash regions, at their real offsets, base64 encoded. */
+  binaryRegions?: { offset: number; data: string }[];
   flashBytes?: number;
   ramBytes?: number;
 }
@@ -103,6 +105,7 @@ export async function cliCompile(
     let hex: string | undefined;
     let binaryBase64: string | undefined;
     let binaryFormat: 'uf2' | 'bin' | 'esp-image' | undefined;
+    let binaryRegions: { offset: number; data: string }[] | undefined;
     if (!syntaxOnly) {
       const files = await readdir(outputDir);
       // Artifact choice follows the TARGET's architecture, not whatever the
@@ -133,6 +136,19 @@ export async function cliCompile(
         if (app) {
           binaryBase64 = (await readFile(path.join(outputDir, app))).toString('base64');
           binaryFormat = 'esp-image';
+          // The chip reads its partition table out of flash before it will run
+          // anything, and reports the flash as unresponsive without it, so the
+          // parts that are not executed still have to be shipped. These are the
+          // offsets the core's own flashing recipe uses.
+          const bootloader = files.find((f) => f.endsWith('.bootloader.bin'));
+          const partitions = files.find((f) => f.endsWith('.partitions.bin'));
+          binaryRegions = [];
+          if (bootloader) {
+            binaryRegions.push({ offset: 0x0, data: (await readFile(path.join(outputDir, bootloader))).toString('base64') });
+          }
+          if (partitions) {
+            binaryRegions.push({ offset: 0x8000, data: (await readFile(path.join(outputDir, partitions))).toString('base64') });
+          }
         }
       } else {
         const hexFile = files.find((f) => f.endsWith('.hex') && !f.endsWith('.with_bootloader.hex'));
@@ -148,6 +164,7 @@ export async function cliCompile(
       hex,
       binaryBase64,
       binaryFormat,
+      binaryRegions,
       flashBytes: flashMatch ? Number(flashMatch[1]) : undefined,
       ramBytes: ramMatch ? Number(ramMatch[1]) : undefined,
     };

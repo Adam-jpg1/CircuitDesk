@@ -40,7 +40,7 @@ export interface PinSnapshot {
 }
 
 export interface BoardRunner {
-  readonly engine: 'avr8js' | 'rp2040js';
+  readonly engine: 'avr8js' | 'rp2040js' | 'esp32c3';
 
   /** Advances the simulation by a slice of simulated time. Always bounded. */
   runFor(simMs: number): void;
@@ -95,7 +95,35 @@ export interface BoardRunner {
  */
 export function runnerPinIndex(board: BoardDefinition, pinId: string): number | undefined {
   if (board.architecture === 'rp2040') return rp2040PinIndex(pinId);
+  if (isEsp32C3(board)) return esp32c3PinIndex(pinId);
   return arduinoPinNumber(board, pinId);
+}
+
+/**
+ * True for the ESP32-C3.
+ *
+ * The board's architecture is `esp32`, which is correct — the C3 is in that
+ * family — but the family spans two entirely different instruction sets. The
+ * variant is what says which, so it is what the runner dispatches on; keying
+ * off the family alone would hand an Xtensa board to a RISC-V engine.
+ */
+export function isEsp32C3(board: BoardDefinition): boolean {
+  return board.metadata?.variant === 'esp32c3';
+}
+
+/**
+ * IO<n> is runner index n, which is the pad's own name on the die.
+ *
+ * The ESP32-C3 has no Arduino pin numbering, so there is nothing to translate
+ * and nothing to invent. Power, ground and reset pins have no index, and the
+ * legacy aliases old projects used resolve through the board definition before
+ * ever reaching here.
+ */
+export function esp32c3PinIndex(pinId: string): number | undefined {
+  const match = /^IO(\d{1,2})$/.exec(pinId);
+  if (!match) return undefined;
+  const index = Number(match[1]);
+  return index >= 0 && index <= 21 ? index : undefined;
 }
 
 /** GP<n> is runner index n. Power, ground and debug pins have no index. */
@@ -108,6 +136,10 @@ export function rp2040PinIndex(pinId: string): number | undefined {
 
 /** ADC channel reachable at a board pin, in that board's own numbering. */
 export function runnerAdcChannel(board: BoardDefinition, pinId: string): number | undefined {
+  // The C3's ADC is not modelled, so no pin claims a channel. Reporting one
+  // and then returning an invented conversion would look like a working sensor
+  // while telling the student nothing true.
+  if (isEsp32C3(board)) return undefined;
   if (board.architecture === 'rp2040') {
     const index = rp2040PinIndex(pinId);
     if (index === undefined) return undefined;
@@ -122,11 +154,13 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
 
 /** Full-scale ADC reference for a board, in volts. */
 export function boardAdcReference(board: BoardDefinition): number {
-  return board.architecture === 'rp2040' ? 3.3 : 5;
+  if (board.architecture === 'rp2040' || isEsp32C3(board)) return 3.3;
+  return 5;
 }
 
 /** How many runner pin indices a board's engine exposes. */
 export function runnerPinCount(board: BoardDefinition): number {
   if (board.architecture === 'rp2040') return 30;
+  if (isEsp32C3(board)) return 22;
   return avrProfileFor(board)?.pinCount ?? 0;
 }

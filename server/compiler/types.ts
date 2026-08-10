@@ -37,6 +37,15 @@ export interface CompileResult {
     format: 'intel-hex' | 'uf2' | 'bin' | 'esp-image';
     /** intel-hex is plain text; uf2/bin are base64. */
     data: string;
+    /**
+     * Other regions the toolchain places in flash, at their real offsets.
+     *
+     * An ESP build's executed artifact is the application image, but the chip
+     * also reads its partition table out of flash before it will run anything,
+     * so the parts that are not executed still have to be there. Each entry is
+     * base64. Absent for targets whose firmware is the whole flash.
+     */
+    regions?: { offset: number; data: string }[];
   };
   memory?: MemoryUsage;
   durationMs: number;

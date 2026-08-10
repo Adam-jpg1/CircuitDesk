@@ -189,7 +189,7 @@ function finish(
   success: boolean,
   toolchain: 'arduino-cli' | 'avr-gcc',
   version: string,
-  out: { stdout: string; stderr: string; hex?: string; binaryBase64?: string; binaryFormat?: 'uf2' | 'bin' | 'esp-image'; flashBytes?: number; ramBytes?: number },
+  out: { stdout: string; stderr: string; hex?: string; binaryBase64?: string; binaryFormat?: 'uf2' | 'bin' | 'esp-image'; binaryRegions?: { offset: number; data: string }[]; flashBytes?: number; ramBytes?: number },
   diagnostics: Diagnostic[],
   target: { id: string; fqbn: string; flashMaxBytes: number; ramMaxBytes: number },
   started: number,
@@ -212,7 +212,7 @@ function finish(
     if (out.hex) {
       result.firmware = { format: 'intel-hex', data: out.hex };
     } else if (out.binaryBase64 && out.binaryFormat) {
-      result.firmware = { format: out.binaryFormat, data: out.binaryBase64 };
+      result.firmware = { format: out.binaryFormat, data: out.binaryBase64, regions: out.binaryRegions };
     } else {
       result.success = false;
       result.error = 'Build succeeded but produced no firmware artifact for this target.';
