@@ -14,6 +14,7 @@
 import { getSimulatorAdapter, firmwareFormatForBoard } from '../src/simulation/adapters';
 import { CircuitBinding, emptyControls } from '../src/simulation/circuitSim';
 import { getBoardDefinition } from '../src/boards/definitions';
+import { buildPinStatesModel } from '../src/simulation/pinStatesModel';
 import { emptyProject } from '../src/project/templates';
 import type { BoardRunner } from '../src/simulation/boardRunner';
 import type { CircuitProject, ComponentInstance } from '../src/types';
@@ -304,6 +305,52 @@ if (!probe) {
     if (visuals.get(ledId)?.ledOn === true) everOn = true;
   });
   check(!everOn, 'an LED on a pin the sketch never configures never lights');
+  runner.dispose?.();
+}
+
+// ---------- 5. Pin States shows this board's real pins, and nothing else ----------
+{
+  const model = buildPinStatesModel(board);
+  check(model.kind === 'pins', 'Pin States has real rows for this board');
+  if (model.kind !== 'pins') finish();
+
+  check(model.boardName === 'ESP32-C3-DevKitM-1', `named by its official product name (${model.boardName})`);
+
+  const labels = model.rows.map((r) => r.label);
+  check(labels.every((l) => /^IO\d{1,2}$/.test(l)), `every row is an IO pin (${labels.join(' ')})`);
+
+  // The fallbacks that must never appear. An ESP32-C3 has no Arduino pin
+  // numbering and no RP2040 pads, and a row bearing either name would mean the
+  // panel had resolved this board through another architecture's map.
+  check(!labels.some((l) => /^D\d+$/.test(l)), 'no Arduino D0-D13 row appears');
+  check(!labels.some((l) => /^A\d+$/.test(l)), 'no Arduino analog row appears');
+  check(!labels.some((l) => /^GP\d+$/.test(l)), 'no RP2040 GP row appears');
+  check(!labels.some((l) => /^GPIO\d+$/.test(l)), 'and no legacy GPIO alias appears, only the canonical name');
+
+  // Only pins the DevKitM-1 actually brings out, and each exactly once.
+  const exposed = board.pins.filter((p) => /^IO\d{1,2}$/.test(p.id)).map((p) => p.id).sort();
+  check(
+    JSON.stringify([...labels].sort()) === JSON.stringify(exposed),
+    `the rows are exactly the board's exposed GPIOs (${labels.length} of ${exposed.length})`,
+  );
+  check(new Set(labels).size === labels.length, 'with no pin listed twice');
+  check(model.rows.every((r) => r.pin !== undefined), 'and every row maps to a real runner pin');
+
+  // A pin the module does not bring out must not be invented.
+  check(!labels.includes('IO11'), 'IO11, which the module does not expose, is absent');
+  check(!labels.includes('IO17'), 'and so is IO17');
+
+  // Rows carry live state from the running emulator.
+  const runner = await getSimulatorAdapter(board)!.createRunner(probe!, board);
+  for (let i = 0; i < 40; i++) runner.runFor(1);
+  const snapshot = runner.snapshot();
+  const io8 = model.rows.find((r) => r.label === 'IO8')!;
+  check(
+    snapshot.states[io8.pin!] === 'high' || snapshot.states[io8.pin!] === 'low',
+    `IO8 reports a driven level from the live emulator (${snapshot.states[io8.pin!]})`,
+  );
+  const io4 = model.rows.find((r) => r.label === 'IO4')!;
+  check(snapshot.states[io4.pin!] === 'input', 'and a pin the sketch never configures reports as an input');
   runner.dispose?.();
 }
 

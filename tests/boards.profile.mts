@@ -69,6 +69,11 @@ function projectWith(boardDefId: string): CircuitProject {
         'board.arduino-mega2560',
         'board.arduino-nano',
         'board.arduino-uno',
+        // Simulated on the strength of tests/esp32c3.firmware.mts and
+        // tests/esp32c3.integration.mts: real compiled firmware reaching
+        // setup() and repeated loop(), GPIO out on two different pins, GPIO in
+        // with a pull-up, and both proven on the canvas through the binding.
+        'board.esp32-c3',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
       ]),
