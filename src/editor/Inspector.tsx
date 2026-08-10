@@ -70,7 +70,16 @@ function InstanceInspector({ inst }: { inst: ComponentInstance }) {
         </div>
         {def.isBoard && (
           <div style={{ color: 'var(--text-2)', marginTop: 4, fontSize: 11.5 }}>
+            {/* Who makes it comes first: the name above is the manufacturer's
+                own product name, and saying whose it is keeps CircuitDesk from
+                appearing to be the source of someone else's hardware. */}
+            {'manufacturer' in def && def.manufacturer ? `${def.manufacturer} · ` : ''}
             {def.family} · {def.processor}
+          </div>
+        )}
+        {def.isBoard && typeof def.metadata?.identityNote === 'string' && (
+          <div style={{ color: 'var(--text-2)', marginTop: 4, fontSize: 11, fontStyle: 'italic' }}>
+            {def.metadata.identityNote as string}
           </div>
         )}
         {def.description && <p style={{ color: 'var(--text-1)', fontSize: 11.5, lineHeight: 1.5, marginBottom: 0 }}>{def.description}</p>}
