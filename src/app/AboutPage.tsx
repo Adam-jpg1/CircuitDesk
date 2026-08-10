@@ -49,9 +49,9 @@ export function AboutPage() {
           <h2>Honest support levels</h2>
           <p>Every board and component carries a badge that says what actually works:</p>
           <ul>
-            <li><strong>Simulated</strong> — real firmware execution drives it (Arduino Uno, Nano, Mega 2560 and Leonardo, each on its own MCU profile, plus LEDs, buttons, potentiometers, buzzer, servo, 7-segment, HC-SR04, analog sensors).</li>
-            <li><strong>Compile</strong> — code compiles for the real target, but CircuitDesk cannot execute it (Raspberry Pi Pico, Pico W).</li>
-            <li><strong>Validation</strong> — wiring plus electrical rule checks (ESP32, Due, Uno R4, I2C modules…).</li>
+            <li><strong>Simulated</strong> — real firmware execution drives it (Arduino Uno R3, Nano, Mega 2560 and Leonardo on their own AVR profiles; Raspberry Pi Pico and Pico W on the RP2040; ESP32-C3-DevKitM-1 on RISC-V; plus LEDs, buttons, potentiometers, buzzer, servo, 7-segment, HC-SR04, analog sensors).</li>
+            <li><strong>Compile</strong> — code compiles for the real target, but CircuitDesk cannot execute it.</li>
+            <li><strong>Validation</strong> — wiring plus electrical rule checks (ESP32 DevKit V1, ESP32-S3-DevKitC-1, I2C modules…).</li>
             <li><strong>Wiring</strong> — placeable with real pins and metadata, no deep checks yet.</li>
             <li><strong>Visual only</strong> — reference artwork (imported Gerbers, ESP32-CAM…).</li>
           </ul>
