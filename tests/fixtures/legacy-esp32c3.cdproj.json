@@ -1,0 +1,148 @@
+{
+ "app": "CircuitDesk",
+ "kind": "circuitdesk-project",
+ "id": "proj_legacy_esp32c3",
+ "name": "Legacy ESP32-C3 Project",
+ "version": "1.0.0",
+ "createdAt": "2026-02-14T00:00:00.000Z",
+ "updatedAt": "2026-02-14T00:00:00.000Z",
+ "boardInstances": [
+  {
+   "id": "b1",
+   "definitionId": "board.esp32-c3",
+   "x": 100,
+   "y": 100,
+   "rotation": 0,
+   "properties": {},
+   "simulationState": {}
+  }
+ ],
+ "componentInstances": [
+  {
+   "id": "c1",
+   "definitionId": "comp.resistor",
+   "x": 320,
+   "y": 120,
+   "rotation": 0,
+   "properties": { "resistance": 220 },
+   "simulationState": {}
+  },
+  {
+   "id": "c2",
+   "definitionId": "comp.led",
+   "x": 420,
+   "y": 120,
+   "rotation": 0,
+   "properties": { "color": "red" },
+   "simulationState": {}
+  },
+  {
+   "id": "c3",
+   "definitionId": "comp.push-button",
+   "x": 320,
+   "y": 260,
+   "rotation": 0,
+   "properties": {},
+   "simulationState": {}
+  }
+ ],
+ "connections": [
+  {
+   "id": "w1",
+   "sourceComponentId": "b1",
+   "sourcePinId": "GPIO8",
+   "targetComponentId": "c1",
+   "targetPinId": "p1",
+   "netId": "",
+   "color": "#e8590c",
+   "points": [],
+   "routing": "smooth"
+  },
+  {
+   "id": "w2",
+   "sourceComponentId": "c1",
+   "sourcePinId": "p2",
+   "targetComponentId": "c2",
+   "targetPinId": "anode",
+   "netId": "",
+   "color": "#e8590c",
+   "points": [],
+   "routing": "smooth"
+  },
+  {
+   "id": "w3",
+   "sourceComponentId": "c2",
+   "sourcePinId": "cathode",
+   "targetComponentId": "b1",
+   "targetPinId": "GND1",
+   "netId": "",
+   "color": "#495057",
+   "points": [],
+   "routing": "smooth"
+  },
+  {
+   "id": "w4",
+   "sourceComponentId": "b1",
+   "sourcePinId": "GPIO9",
+   "targetComponentId": "c3",
+   "targetPinId": "1a",
+   "netId": "",
+   "color": "#1c7ed6",
+   "points": [],
+   "routing": "smooth"
+  },
+  {
+   "id": "w5",
+   "sourceComponentId": "c3",
+   "sourcePinId": "2a",
+   "targetComponentId": "b1",
+   "targetPinId": "GND2",
+   "netId": "",
+   "color": "#495057",
+   "points": [],
+   "routing": "smooth"
+  },
+  {
+   "id": "w6",
+   "sourceComponentId": "b1",
+   "sourcePinId": "TX0",
+   "targetComponentId": "c3",
+   "targetPinId": "1b",
+   "netId": "",
+   "color": "#37b24d",
+   "points": [],
+   "routing": "smooth"
+  },
+  {
+   "id": "w7",
+   "sourceComponentId": "b1",
+   "sourcePinId": "RX0",
+   "targetComponentId": "c3",
+   "targetPinId": "2b",
+   "netId": "",
+   "color": "#37b24d",
+   "points": [],
+   "routing": "smooth"
+  },
+  {
+   "id": "w8",
+   "sourceComponentId": "b1",
+   "sourcePinId": "3V3",
+   "targetComponentId": "c1",
+   "targetPinId": "p2",
+   "netId": "",
+   "color": "#f59f00",
+   "points": [],
+   "routing": "smooth"
+  }
+ ],
+ "code": {
+  "files": [
+   {
+    "name": "sketch.ino",
+    "content": "void setup() { pinMode(8, OUTPUT); }\nvoid loop() { digitalWrite(8, HIGH); delay(100); digitalWrite(8, LOW); delay(100); }"
+   }
+  ]
+ },
+ "tests": []
+}
