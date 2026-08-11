@@ -358,6 +358,10 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
     this.romState.pendingDelayUs = 0;
     for (const peripheral of this.peripherals) peripheral.reset?.();
     this.romState.regi2c.clear();
+    // Whatever a chip's own ROM was keeping - the C6's heap among it - goes
+    // with the reset, or a rebooted board would inherit the old one's
+    // allocations.
+    this.romState.chipState.clear();
     this.romState.cache.iCacheEnabled = false;
     this.romState.cache.iCacheFrozen = false;
     this.romState.cache.iromMmuSize = 0;
