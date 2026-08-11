@@ -211,8 +211,8 @@ export class SysTimer extends RegisterFile implements InterruptingPeripheral {
    */
   constructor(
     private readonly clock: SimulatedClock,
-    base = PERIPHERAL_BASE.systimer,
-    private readonly firstInterruptSource = INTERRUPT_SOURCE.systimerTarget0,
+    base: number = PERIPHERAL_BASE.systimer,
+    private readonly firstInterruptSource: number = INTERRUPT_SOURCE.systimerTarget0,
   ) {
     super('systimer', base, 0x1000);
     this.reset();

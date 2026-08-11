@@ -61,6 +61,11 @@ export function BottomPanel() {
 function SerialPanel() {
   const serialText = useSimulationStore((s) => s.serialText);
   const status = useSimulationStore((s) => s.status);
+  // Serial belongs to a board, not to the workspace. With one board the panel
+  // stays exactly as it was; with several, output is already labelled by the
+  // controller and input needs somewhere deterministic to go.
+  const boards = useSimulationStore((s) => s.serialBoards);
+  const target = useSimulationStore((s) => s.serialTarget);
   const outRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
@@ -69,28 +74,52 @@ function SerialPanel() {
     if (autoScroll && outRef.current) outRef.current.scrollTop = outRef.current.scrollHeight;
   }, [serialText, autoScroll]);
 
+  const send = () => {
+    if (input.length === 0) return;
+    simulationController.sendSerial(input + '\n', target ?? undefined);
+    setInput('');
+  };
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div ref={outRef} className="mono-out">
         {serialText || (
           <span style={{ color: 'var(--text-2)' }}>
             {status === 'stopped'
-              ? 'Serial monitor — output from the emulated UART (USART0 @ your sketch’s baud rate) appears here when the simulation runs.'
+              ? 'Serial monitor — output from the emulated UART appears here when the simulation runs. With more than one board on the canvas each line is labelled with the board that wrote it.'
               : 'Waiting for serial output…'}
           </span>
         )}
       </div>
       <div className="serial-input-row">
+        {boards.length > 1 && (
+          <select
+            aria-label="Serial input target"
+            title="Which board typed input is sent to"
+            value={target ?? ''}
+            onChange={(e) => useSimulationStore.getState().setSerialTarget(e.target.value || null)}
+            style={{ maxWidth: 200 }}
+          >
+            {boards.map((b) => (
+              <option key={b.instanceId} value={b.instanceId}>
+                {b.label}
+              </option>
+            ))}
+          </select>
+        )}
         <input
-          placeholder={status === 'running' ? 'Send to the sketch (Enter appends \\n)…' : 'Start the simulation to send serial input'}
+          placeholder={
+            status === 'running'
+              ? boards.length > 1
+                ? `Send to ${boards.find((b) => b.instanceId === target)?.label ?? 'the selected board'} (Enter appends \\n)…`
+                : 'Send to the sketch (Enter appends \\n)…'
+              : 'Start the simulation to send serial input'
+          }
           disabled={status !== 'running' && status !== 'paused'}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && input.length > 0) {
-              simulationController.sendSerial(input + '\n');
-              setInput('');
-            }
+            if (e.key === 'Enter') send();
           }}
         />
         <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-2)' }}>
@@ -105,6 +134,7 @@ function SerialPanel() {
 function CompilerPanel() {
   const lastCompile = useEditorStore((s) => s.lastCompile);
   const compiling = useEditorStore((s) => s.compiling);
+  const builds = useSimulationStore((s) => s.builds);
   const [health, setHealth] = useState<CompilerHealth | null>(null);
 
   useEffect(() => {
@@ -123,6 +153,23 @@ function CompilerPanel() {
         </div>
       )}
       {compiling && <div>Compiling…</div>}
+      {/*
+        One line per compile target. A workspace with a Pico and a C6 builds
+        twice, and "Build failed" would be untrue of the half that worked —
+        so each board's outcome is stated separately, by name.
+      */}
+      {!compiling && builds.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          {builds.map((b, i) => (
+            <div
+              key={`${b.fqbn}-${i}`}
+              style={{ color: b.status === 'built' ? 'var(--ok)' : b.status === 'compile-failed' ? 'var(--error)' : '#e8c35a' }}
+            >
+              {b.status === 'built' ? '✓' : b.status === 'compile-failed' ? '✗' : '•'} {b.detail}
+            </div>
+          ))}
+        </div>
+      )}
       {!compiling && !lastCompile && <span style={{ color: 'var(--text-2)' }}>No compile yet. Press Compile or Run (Ctrl+Enter).</span>}
       {!compiling && lastCompile && (
         <>

@@ -109,9 +109,20 @@ export interface BoardRunner {
  */
 export function runnerPinIndex(board: BoardDefinition, pinId: string): number | undefined {
   if (board.architecture === 'rp2040') return rp2040PinIndex(pinId);
-  const espPads = ESP_RISCV_PAD_COUNT[board.metadata?.variant ?? ''];
+  const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPadIndex(pinId, espPads);
   return arduinoPinNumber(board, pinId);
+}
+
+/**
+ * The board's chip variant, as a string.
+ *
+ * `metadata` is `Record<string, unknown>`, so the variant has to be narrowed
+ * before it can key anything — an unknown is not an index.
+ */
+function espVariant(board: BoardDefinition): string {
+  const variant = board.metadata?.variant;
+  return typeof variant === 'string' ? variant : '';
 }
 
 /**
@@ -135,17 +146,17 @@ const ESP_RISCV_PAD_COUNT: Record<string, number | undefined> = {
  * off the family alone would hand an Xtensa board to a RISC-V engine.
  */
 export function isEsp32C3(board: BoardDefinition): boolean {
-  return board.metadata?.variant === 'esp32c3';
+  return espVariant(board) === 'esp32c3';
 }
 
 /** True for the ESP32-C6, on the same reasoning as the C3. */
 export function isEsp32C6(board: BoardDefinition): boolean {
-  return board.metadata?.variant === 'esp32c6';
+  return espVariant(board) === 'esp32c6';
 }
 
 /** True for either Espressif RISC-V part this runtime executes. */
 export function isEspRiscv(board: BoardDefinition): boolean {
-  return ESP_RISCV_PAD_COUNT[board.metadata?.variant ?? ''] !== undefined;
+  return ESP_RISCV_PAD_COUNT[espVariant(board)] !== undefined;
 }
 
 /**
@@ -208,7 +219,7 @@ export function boardAdcReference(board: BoardDefinition): number {
 /** How many runner pin indices a board's engine exposes. */
 export function runnerPinCount(board: BoardDefinition): number {
   if (board.architecture === 'rp2040') return 30;
-  const espPads = ESP_RISCV_PAD_COUNT[board.metadata?.variant ?? ''];
+  const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPads;
   return avrProfileFor(board)?.pinCount ?? 0;
 }

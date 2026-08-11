@@ -304,11 +304,13 @@ void loop(){ if (Serial1.available()) { char c = Serial1.read(); Serial1.print("
   const leoProject: CircuitProject = { ...emptyProject('swap'), boardInstances: [inst('board.arduino-leonardo')] };
   const unoProject: CircuitProject = { ...emptyProject('swap'), boardInstances: [inst('board.arduino-uno')] };
 
-  simulationController.loadFirmware({ data: leoHex, format: 'intel-hex' }, leoProject, 'board.arduino-leonardo');
-  simulationController.start();
-  for (let i = 0; i < 200 && useSimulationStore.getState().status !== 'running'; i++) {
-    await new Promise((r) => setTimeout(r, 10));
-  }
+  simulationController.setCompiler(async () => ({
+    success: true, toolchain: 'avr-gcc', toolchainVersion: '', stdout: '', stderr: '',
+    diagnostics: [], durationMs: 0, firmware: { data: leoHex, format: 'intel-hex' },
+    boardId: 'board.arduino-leonardo', fqbn: 'arduino:avr:leonardo',
+  }));
+  await simulationController.build(leoProject);
+  await simulationController.start();
   check(useSimulationStore.getState().status === 'running', 'Leonardo simulation starts through the controller');
   await new Promise((r) => setTimeout(r, 150));
   const live = useSimulationStore.getState().pinSnapshot;
