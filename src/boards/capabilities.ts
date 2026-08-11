@@ -121,6 +121,39 @@ const ESP32C3_LIMITATION =
   'Wi-Fi, Bluetooth LE, USB Serial/JTAG, ADC, PWM, I2C, SPI to devices and the hardware UART are not simulated — ' +
   'sketches using them compile and run, but those peripherals do nothing.';
 
+/**
+ * The ESP32-C6's list, which is the C3's minus the pull-down.
+ *
+ * Written separately rather than shared, because the two parts are not the same
+ * runtime and a list that drifted into claiming one chip's support for the
+ * other is exactly the kind of quiet inaccuracy these lists exist to prevent.
+ */
+const ESP32C6_SIM_APIS = [
+  'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
+  'digitalWrite',
+  'digitalRead',
+  'delay/millis/micros',
+  'setup() and repeated loop()',
+];
+
+const ESP32C6_SIM_PERIPHERALS = [
+  'GPIO with the IO MUX and GPIO matrix',
+  'System timer, which drives the FreeRTOS tick',
+  'Interrupt matrix and the RISC-V PLIC that delivers to the CPU',
+  'Low-power timer, which is where the runtime reads the time',
+  'SPI flash and the flash MMU',
+  'ROM watchdog, heap, system-timer and flash drivers this part boots on',
+];
+
+/**
+ * Said plainly. Everything the C6 does not do is listed, because a sketch that
+ * uses any of it will compile, run, and quietly do nothing.
+ */
+const ESP32C6_LIMITATION =
+  'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), and GPIO ' +
+  'with its pulls. Wi-Fi, Bluetooth LE, Zigbee/802.15.4, Thread, USB Serial/JTAG, ADC, PWM, I2C, SPI to devices and ' +
+  'the hardware UART are not simulated — sketches using them compile and run, but those peripherals do nothing.';
+
 const RP2040_SIM_APIS = [
   'pinMode (INPUT, OUTPUT, INPUT_PULLUP)',
   'digitalWrite',
@@ -342,8 +375,11 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation: 'ESP32-S3 (Xtensa LX7) — validation only; distinct from the base ESP32.',
   },
   // The board is real and its pins are right; the runtime is not built yet, so
-  // nothing here claims simulation. The compiler target is genuine — the core's
-  // generic esp32c6 target is what this board is built for.
+  // The compiler target is genuine — the core's generic esp32c6 target is what
+  // this board is built for — and firmware execution is now real: ESP-IDF
+  // startup, FreeRTOS with a delivered tick, setup(), loop() and GPIO. The
+  // capability lists stay narrow, because everything else on this part still
+  // does nothing.
   'board.esp32-c6-devkitc-1': {
     architecture: 'esp32',
     variant: 'esp32c6',
@@ -356,9 +392,13 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       supported: true,
       note: 'Requires the esp32:esp32 core. The ESP32-C6 is RISC-V, so it is never compiled through an Xtensa or AVR core.',
     },
-    limitation:
-      'Compiles for the real target. Firmware execution is not implemented for this board yet, and Wi-Fi, Bluetooth LE, ' +
-      'Zigbee/802.15.4 and Thread are not simulated at all.',
+    simulation: {
+      engine: 'esp32c6',
+      supported: true,
+      supportedApis: ESP32C6_SIM_APIS,
+      supportedPeripherals: ESP32C6_SIM_PERIPHERALS,
+    },
+    limitation: ESP32C6_LIMITATION,
   },
   'board.esp32-c3': {
     manufacturer: 'Espressif',

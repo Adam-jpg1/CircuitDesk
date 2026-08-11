@@ -3,7 +3,7 @@
 
 import type { BoardDefinition } from '../types';
 import { avrProfileFor } from '../boards/pinMaps';
-import { runnerPinIndex, runnerAdcChannel, isEsp32C3 } from './boardRunner';
+import { runnerPinIndex, runnerAdcChannel, isEspRiscv } from './boardRunner';
 
 export interface PinStateRow {
   /** Emulator pin index (index into the live PinSnapshot arrays), if live-capable. */
@@ -37,7 +37,7 @@ export function buildPinStatesModel(board: BoardDefinition | null | undefined): 
     // RP2040 row is GP15 → runner index 15 and never an AVR Arduino number.
     const n = runnerPinIndex(board, pin.id);
     const isLive =
-      n !== undefined && (board.architecture === 'rp2040' || isEsp32C3(board) || profile?.portMap[n] !== undefined);
+      n !== undefined && (board.architecture === 'rp2040' || isEspRiscv(board) || profile?.portMap[n] !== undefined);
     if (isLive && !seen.has(n!)) {
       seen.add(n!);
       rows.push({ pin: n, label: pin.id });

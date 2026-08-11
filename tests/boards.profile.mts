@@ -74,6 +74,14 @@ function projectWith(boardDefId: string): CircuitProject {
         // setup() and repeated loop(), GPIO out on two different pins, GPIO in
         // with a pull-up, and both proven on the canvas through the binding.
         'board.esp32-c3',
+        // Simulated on the strength of tests/esp32c6.{startup,gpio,interrupts,
+        // multiboard}.mts: real compiled firmware reaching app_main,
+        // initArduino, setup() and repeated loop() with a delivered FreeRTOS
+        // tick; GPIO out on two independent pins and in with a pull-up; a
+        // canvas button reaching digitalRead; the production runner through the
+        // adapter; two instances proven independent; and firmware-to-firmware
+        // communication with a Pico over a shared net, in both directions.
+        'board.esp32-c6-devkitc-1',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
       ]),
