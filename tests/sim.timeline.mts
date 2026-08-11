@@ -134,32 +134,81 @@ class RecordingRunner implements BoardRunner {
   );
 }
 
-// ---------- 5. resolution is bounded, so the browser cannot starve ----------
+// ---------- 5. real protocol timings are representable ----------
 //
-// A board claiming an event every nanosecond must not make the world take
-// millions of slices to cross a millisecond.
+// These are the numbers that matter. A 115200-baud bit period is 8681 ns, an
+// I2C fast-mode edge is shorter, and an SPI clock at 4 MHz has 125 ns half
+// periods. A scheduler that cannot stop on them cannot carry those protocols
+// however well the rest of it is built.
+{
+  const cases: [string, number][] = [
+    ['a 115200-baud bit period', 8_681],
+    ['one microsecond', 1_000],
+    ['a 4 MHz SPI half period', 125],
+    ['a single 160 MHz CPU cycle', 6],
+  ];
+  for (const [label, ns] of cases) {
+    const world = new SimulationWorld({ sliceMs: 1 });
+    const runner = new RecordingRunner();
+    world.add('b1', runner);
+    let firedAt: number | null = null;
+    world.scheduleAtNs(ns, () => {
+      firedAt = world.timeNs;
+    });
+    world.runFor(1);
+    check(firedAt === ns, `${label} (${ns} ns) is landed on exactly (fired at ${firedAt})`);
+  }
+}
+
+// ---------- 6. closely spaced and simultaneous events ----------
+{
+  const world = new SimulationWorld({ sliceMs: 1 });
+  world.add('b1', new RecordingRunner());
+
+  const order: string[] = [];
+  // Three at the same instant, scheduled out of order, plus two adjacent ones.
+  world.scheduleAtNs(5_000, () => order.push('c'));
+  world.scheduleAtNs(2_000, () => order.push('a1'));
+  world.scheduleAtNs(2_000, () => order.push('a2'));
+  world.scheduleAtNs(2_001, () => order.push('b'));
+  world.scheduleAtNs(2_000, () => order.push('a3'));
+  world.runFor(1);
+
+  check(order.join(',') === 'a1,a2,a3,b,c', `events run in time then scheduling order (${order.join(',')})`);
+
+  // One nanosecond apart must still be two distinct moments.
+  const world2 = new SimulationWorld({ sliceMs: 1 });
+  world2.add('b1', new RecordingRunner());
+  const times: number[] = [];
+  world2.scheduleAtNs(1_000, () => times.push(world2.timeNs));
+  world2.scheduleAtNs(1_001, () => times.push(world2.timeNs));
+  world2.runFor(1);
+  check(times.join(',') === '1000,1001', `events one nanosecond apart stay distinct (${times.join(',')})`);
+}
+
+// ---------- 7. a permanently-due source is bounded without distorting time ----------
+//
+// The protection is a count, not a minimum slice. Forcing the clock forward by
+// a fixed amount would make that amount the finest resolution anything could
+// communicate at, which is the mistake this whole section exists to avoid.
 {
   const world = new SimulationWorld({ sliceMs: 1 });
   const runner = new RecordingRunner();
-  runner.next = 0;
-  // Keep it permanently due, which is the pathological case.
   runner.nextEventMs = () => 0;
   world.add('b1', runner);
-  world.runFor(1);
+  const started = Date.now();
+  world.runFor(2);
 
-  check(runner.slices.length <= 200, `a permanently-due board is still bounded (${runner.slices.length} slices)`);
-  check(Math.abs(world.timeMs - 1) < 1e-9, 'and the millisecond still completes exactly');
+  check(Date.now() - started < 2_000, 'a permanently-due board does not hang the run');
+  check(world.timeNs === 2_000_000, `and simulated time is exactly right, not inflated (${world.timeNs} ns)`);
   check(
     runner.slices.every((s) => s > 0),
     'with no zero-length slice, which would not terminate',
   );
-
-  // The floor is still far below any bit period these protocols use.
-  const shortest = Math.min(...runner.slices);
-  check(shortest <= 0.01 + 1e-9, `the finest slice is ${shortest} ms, under a 115200-baud bit period of 0.0087 ms`);
+  check(runner.slices.length < 500, `bounded by a step count (${runner.slices.length} slices)`);
 }
 
-// ---------- 6. a runner that cannot answer costs only resolution ----------
+// ---------- 8. a runner that cannot answer costs only resolution ----------
 {
   const world = new SimulationWorld({ sliceMs: 1 });
   const runner = new RecordingRunner();
