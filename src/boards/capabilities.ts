@@ -341,6 +341,25 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     aliases: ['esp32-s3', 'esp32-s3 devkitc', 'esp32-s3-devkitc'],
     limitation: 'ESP32-S3 (Xtensa LX7) — validation only; distinct from the base ESP32.',
   },
+  // The board is real and its pins are right; the runtime is not built yet, so
+  // nothing here claims simulation. The compiler target is genuine — the core's
+  // generic esp32c6 target is what this board is built for.
+  'board.esp32-c6-devkitc-1': {
+    architecture: 'esp32',
+    variant: 'esp32c6',
+    manufacturer: 'Espressif',
+    aliases: ['esp32-c6-devkitc-1', 'esp32-c6', 'esp32c6', 'esp32:esp32:esp32c6'],
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'esp32:esp32:esp32c6',
+      requiredCore: 'esp32:esp32',
+      supported: true,
+      note: 'Requires the esp32:esp32 core. The ESP32-C6 is RISC-V, so it is never compiled through an Xtensa or AVR core.',
+    },
+    limitation:
+      'Compiles for the real target. Firmware execution is not implemented for this board yet, and Wi-Fi, Bluetooth LE, ' +
+      'Zigbee/802.15.4 and Thread are not simulated at all.',
+  },
   'board.esp32-c3': {
     manufacturer: 'Espressif',
     architecture: 'esp32',
