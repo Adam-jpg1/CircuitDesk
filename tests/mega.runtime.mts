@@ -268,11 +268,16 @@ void loop(){
   const unoProject: CircuitProject = { ...emptyProject('swap'), boardInstances: [inst('board.arduino-uno')] };
   const megaProject: CircuitProject = { ...emptyProject('swap'), boardInstances: [inst('board.arduino-mega2560')] };
 
-  simulationController.loadFirmware({ data: unoHex, format: 'intel-hex' }, unoProject, 'board.arduino-uno');
-  simulationController.start();
-  for (let i = 0; i < 200 && useSimulationStore.getState().status !== 'running'; i++) {
-    await new Promise((r) => setTimeout(r, 10));
-  }
+  // The controller builds every board on the canvas through its own path. The
+  // sketch is already compiled here, so the compiler is replaced with one that
+  // hands back the artifact — everything downstream is the production code.
+  simulationController.setCompiler(async () => ({
+    success: true, toolchain: 'avr-gcc', toolchainVersion: '', stdout: '', stderr: '',
+    diagnostics: [], durationMs: 0, firmware: { data: unoHex, format: 'intel-hex' },
+    boardId: 'board.arduino-uno', fqbn: 'arduino:avr:uno',
+  }));
+  await simulationController.build(unoProject);
+  await simulationController.start();
   check(useSimulationStore.getState().status === 'running', 'Uno simulation started');
   await new Promise((r) => setTimeout(r, 120));
   const unoSnapshot = useSimulationStore.getState().pinSnapshot;
@@ -283,8 +288,8 @@ void loop(){
   const after = useSimulationStore.getState();
   check(after.status === 'error', `board swap stops the simulation instead of running on (status: ${after.status})`);
   check(
-    /compiled for/.test(after.error ?? '') && /recompile/i.test(after.error ?? ''),
-    'board swap explains the mismatch and asks for a recompile',
+    /Arduino Mega 2560/.test(after.error ?? '') && /recompile/i.test(after.error ?? ''),
+    `board swap names the board that has no firmware and asks for a recompile (${after.error})`,
   );
   check(
     (after.pinSnapshot?.states.length ?? -1) === 0,

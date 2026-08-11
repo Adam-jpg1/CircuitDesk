@@ -88,7 +88,7 @@ export class SpiMemController implements Peripheral, FlashOwner {
 
   constructor(
     readonly flash: SerialNorFlash,
-    base = SPI_MEM_BASE.spi1,
+    base: number = SPI_MEM_BASE.spi1,
   ) {
     this.base = base;
   }

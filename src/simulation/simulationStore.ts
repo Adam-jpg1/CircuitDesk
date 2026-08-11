@@ -4,14 +4,41 @@ import type { PinSnapshot } from './avrRunner';
 
 export type SimStatus = 'stopped' | 'running' | 'paused' | 'error';
 
+/**
+ * One target's build outcome, as the UI needs it.
+ *
+ * Structurally per target rather than one global boolean, because "build
+ * failed" is not true of a workspace where the Pico built and the C6 did not.
+ */
+export interface BoardBuildSummary {
+  boardName: string;
+  fqbn: string;
+  status: 'built' | 'compile-failed' | 'not-simulated' | 'artifact-mismatch' | 'no-toolchain' | 'needs-build';
+  detail: string;
+}
+
 interface SimulationState {
   status: SimStatus;
   error: string | null;
   simTimeMs: number;
   /** Actual emulation speed as a fraction of real time (1 = realtime). */
   speedFactor: number;
+  /**
+   * The serial monitor's text, already attributed.
+   *
+   * Rendered by the controller from a per-instance transcript rather than
+   * accumulated here: with two boards printing, "which board said that" is
+   * part of the content, and a plain string cannot carry it. One board still
+   * renders exactly as it always did, with no prefixes.
+   */
   serialText: string;
   serialLineCount: number;
+  /** Board instances that can produce or accept serial, with display labels. */
+  serialBoards: { instanceId: string; label: string }[];
+  /** Which board typed serial input goes to. Never broadcast. */
+  serialTarget: string | null;
+  /** Per-target build outcomes, so a failure names the board that failed. */
+  builds: BoardBuildSummary[];
   pinSnapshot: PinSnapshot | null;
   visuals: Record<string, ComponentVisualState>;
   /** Bumped on every published frame so canvas layers can subscribe cheaply. */
@@ -30,7 +57,10 @@ interface SimulationState {
     pinSnapshot: PinSnapshot;
     visuals: Record<string, ComponentVisualState>;
   }): void;
-  appendSerial(text: string): void;
+  publishSerial(text: string, lineCount: number): void;
+  setSerialBoards(boards: { instanceId: string; label: string }[]): void;
+  setSerialTarget(instanceId: string | null): void;
+  setBuilds(builds: BoardBuildSummary[]): void;
   clearSerial(): void;
   pressButton(id: string, pressed: boolean): void;
   setToggle(id: string, on: boolean): void;
@@ -48,6 +78,9 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   speedFactor: 1,
   serialText: '',
   serialLineCount: 0,
+  serialBoards: [],
+  serialTarget: null,
+  builds: [],
   pinSnapshot: null,
   visuals: {},
   frame: 0,
@@ -67,12 +100,24 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
       frame: s.frame + 1,
     })),
 
-  appendSerial(text) {
-    const current = get().serialText;
-    let next = current + text;
-    if (next.length > SERIAL_CAP) next = next.slice(next.length - SERIAL_CAP);
-    set({ serialText: next, serialLineCount: get().serialLineCount + (text.match(/\n/g)?.length ?? 0) });
+  publishSerial(text, lineCount) {
+    // Trimmed from the front, as a terminal scrolls. The transcript itself is
+    // already bounded; this bounds what React has to render.
+    const next = text.length > SERIAL_CAP ? text.slice(text.length - SERIAL_CAP) : text;
+    set({ serialText: next, serialLineCount: lineCount });
   },
+
+  setSerialBoards(boards) {
+    const current = get().serialBoards;
+    const same =
+      current.length === boards.length &&
+      current.every((b, i) => b.instanceId === boards[i].instanceId && b.label === boards[i].label);
+    if (!same) set({ serialBoards: boards });
+  },
+
+  setSerialTarget: (instanceId) => set({ serialTarget: instanceId }),
+
+  setBuilds: (builds) => set({ builds }),
 
   clearSerial: () => set({ serialText: '', serialLineCount: 0 }),
 

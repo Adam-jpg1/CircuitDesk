@@ -397,7 +397,8 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
     }
 
     for (const [boardInstanceId, wiring] of perBoard) {
-      const boardOfWire = graph.definitions.get(boardInstanceId);
+      const wired = graph.definitions.get(boardInstanceId);
+      const boardOfWire = wired?.isBoard ? wired : undefined;
       const profile = getBoardBusProfile(boardOfWire);
       // No profile means CircuitDesk does not know this board's bus layout.
       // Saying nothing is the only honest option: the alternative is telling

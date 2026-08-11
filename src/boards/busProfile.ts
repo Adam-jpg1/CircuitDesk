@@ -38,7 +38,7 @@
 // A pin only appears here if the board definition actually brings it out. The
 // chip's capability is the upper bound; the header is what the user can wire to.
 
-import type { BoardDefinition } from '../types';
+import type { BoardDefinition, PinCapability } from '../types';
 
 export type BusLine =
   | 'i2c-sda'
@@ -316,7 +316,7 @@ function fixedProfile(board: BoardDefinition): BoardBusProfile | undefined {
     // The metadata lists the SPI group unordered and the order differs per
     // board, so the roles come from each pin's own declared capability rather
     // than from a position in the list.
-    const byCap = (cap: string) =>
+    const byCap = (cap: PinCapability) =>
       keep(spi.filter((id) => board.pins.find((p) => p.id === id)?.capabilities.includes(cap)));
     const sck = byCap('spi-sck');
     const mosi = byCap('spi-mosi');
@@ -385,8 +385,7 @@ export function classifyBusPin(profile: BoardBusProfile, line: BusLine, pinId: s
   return {
     kind: 'alternate',
     channel: channel.name,
-    configuration:
-      profile.routing === 'fixed' ? undefined : configurationCall(channel.name, line, padArgument(pinId)),
+    configuration: configurationCall(channel.name, line, padArgument(pinId)),
   };
 }
 
