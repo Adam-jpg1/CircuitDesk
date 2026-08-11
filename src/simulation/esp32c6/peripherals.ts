@@ -25,6 +25,7 @@ import { Esp32C6FlashMmu, ESP32C6_SPI1_BASE } from './flashMmu';
 import { Esp32C6InterruptController, ESP32C6_INTERRUPT_SOURCE } from './interrupts';
 import { Esp32C6LpTimer } from './lpTimer';
 import { Esp32C6AnalogMaster } from './analogMaster';
+import { Esp32C6Pcr } from './pcr';
 
 /** Documented ESP32-C6 peripheral base addresses. */
 export const ESP32C6_PERIPHERAL_BASE = {
@@ -116,7 +117,9 @@ export function createEsp32C6Peripherals(clock: SimulatedClock, flash?: SerialNo
     new TimerGroup('timg0', ESP32C6_PERIPHERAL_BASE.timg0),
     new TimerGroup('timg1', ESP32C6_PERIPHERAL_BASE.timg1),
     ...interrupts.peripherals,
-    new RegisterFile('pcr', ESP32C6_PERIPHERAL_BASE.pcr, 0x1000),
+    // PCR is not storage that starts at zero: 76 of its registers have a
+    // documented non-zero reset value, and firmware asserts on some of them.
+    new Esp32C6Pcr(),
     new RegisterFile('assist_debug', ESP32C6_PERIPHERAL_BASE.assistDebug, 0x1000),
     new RegisterFile('extmem', ESP32C6_PERIPHERAL_BASE.extMem, 0x1000),
     // The modem clock control blocks. Configuration registers: startup enables

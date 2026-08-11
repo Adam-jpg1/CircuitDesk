@@ -17,6 +17,7 @@ import { createEsp32C6Peripherals, type Esp32C6Peripherals } from './peripherals
 import type { SerialNorFlash } from '../esp32c3/spiFlash';
 import type { Esp32C3Gpio } from '../esp32c3/gpio';
 import type { Esp32C6InterruptController } from './interrupts';
+import { installRomFlashDevice } from './romFlash';
 
 export { ESP32C6_SOC } from '../espRiscv/soc';
 
@@ -29,6 +30,17 @@ export const ESP32C6_ROM_STACK_TOP = ESP32C6_SOC.romStackTop;
 export class Esp32C6Machine extends EspRiscvMachine {
   constructor(options: EspMachineOptions = {}) {
     super(ESP32C6_SOC, options);
+  }
+
+  /**
+   * The C6's ROM publishes the flash driver, and those entry points are handed
+   * only the bus, so they are told which device they are driving through the
+   * chip-state bag. A reset clears that bag along with everything else, so the
+   * device has to be named again on the way back up.
+   */
+  override reset(): void {
+    super.reset();
+    installRomFlashDevice(this.romState, this.flashDevice);
   }
 }
 
@@ -55,5 +67,6 @@ export function createEsp32C6Machine(flash?: SerialNorFlash, options: EspMachine
   // picked up there as a source in its own right because it carries the
   // software interrupts.
   machine.useInterruptRouter(parts.interrupts);
+  installRomFlashDevice(machine.romState, machine.flashDevice);
   return { machine, gpio: parts.gpio, interrupts: parts.interrupts };
 }
