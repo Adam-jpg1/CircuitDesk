@@ -16,7 +16,7 @@
 // status bit nobody sets makes the firmware hang visibly rather than continue
 // on invented data.
 
-import type { Peripheral, SimulatedClock } from './esp32c3Machine';
+import type { Peripheral, SimulatedClock } from '../espRiscv/peripheral';
 import { RegisterFile } from './registerFile';
 import { FlashMmu, SpiMemController, SPI_MEM_BASE } from './spiMem';
 import { Esp32C3Gpio } from './gpio';

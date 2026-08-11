@@ -16,7 +16,7 @@
 // It lives in its own module so peripherals that need it can also be imported
 // by each other without a cycle.
 
-import type { Peripheral } from './esp32c3Machine';
+import type { Peripheral } from '../espRiscv/peripheral';
 
 /**
  * A peripheral whose registers hold whatever was written to them.

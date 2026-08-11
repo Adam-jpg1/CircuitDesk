@@ -21,6 +21,7 @@
 // with real arguments and still observes real results.
 
 import type { Bus } from '../riscv/rv32Core';
+import { ESP32C3_SOC, type EspRomDataLayout } from '../espRiscv/soc';
 
 /** RISC-V calling convention: a0..a7 are x10..x17. */
 export const ARG_REGISTER_BASE = 10;
@@ -95,6 +96,14 @@ export interface RomMachineState {
   romConsoleDivider: number;
   /** Seed state for the ROM's rand(), kept deterministic across runs. */
   randState: number;
+  /**
+   * Where the coexistence version string was installed.
+   *
+   * `esp_coex_rom_version_get()` returns a pointer, and the address it must
+   * point at is inside whichever chip's mask-ROM window is running — the C6's
+   * ends 0x10000 below the C3's, so a shared constant would be outside it.
+   */
+  coexVersionAddress: number;
 }
 
 export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMachineState {
@@ -112,6 +121,7 @@ export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMac
     romConsoleRx: [],
     romConsoleDivider: 0,
     randState: 1,
+    coexVersionAddress: ROM_COEX_VERSION_ADDRESS,
   };
 }
 
@@ -1702,7 +1712,7 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
   {
     address: 0x400018ac,
     name: 'esp_coex_rom_version_get',
-    handler: () => ROM_COEX_VERSION_ADDRESS,
+    handler: ({ machine }) => machine.coexVersionAddress,
     rationale: 'Returns the version string ESP-IDF logs when the coexistence arbiter starts.',
   },
   {
@@ -1746,17 +1756,25 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
 // `rom_layout.h`; the values come from the chip's own documented constants
 // rather than from any ROM image.
 
+/**
+ * The C3's own set of these addresses, which is also the default.
+ *
+ * The individual constants below are kept because they name the C3's values
+ * plainly and are what the C3's own tests assert against.
+ */
+export const ESP32C3_ROM_DATA: EspRomDataLayout = ESP32C3_SOC.romData;
+
 /** Where the ROM's pointer to its layout structure lives. */
-export const ETS_ROM_LAYOUT_POINTER = 0x3ff1fffc;
+export const ETS_ROM_LAYOUT_POINTER = ESP32C3_ROM_DATA.layoutPointer;
 
 /** Where this runtime places the structure it points at. */
-export const ETS_ROM_LAYOUT_ADDRESS = 0x3ff1ff00;
+export const ETS_ROM_LAYOUT_ADDRESS = ESP32C3_ROM_DATA.layoutAddress;
 
 /** Documented ESP32-C3 DRAM boundaries, from the SoC headers. */
-export const SOC_DRAM_LOW = 0x3fc80000;
-export const SOC_DRAM_HIGH = 0x3fce0000;
-export const SOC_ROM_STACK_START = 0x3fcde710;
-export const SOC_ROM_STACK_SIZE = 0x2000;
+export const SOC_DRAM_LOW = ESP32C3_ROM_DATA.dramLow;
+export const SOC_DRAM_HIGH = ESP32C3_ROM_DATA.dramHigh;
+export const SOC_ROM_STACK_START = ESP32C3_ROM_DATA.romStackStart;
+export const SOC_ROM_STACK_SIZE = ESP32C3_ROM_DATA.romStackSize;
 
 /**
  * Installs `ets_rom_layout` and the pointer to it.
@@ -1775,24 +1793,24 @@ export const SOC_ROM_STACK_SIZE = 0x2000;
  * runtime provides neither, so they are left as empty ranges at the top of
  * DRAM rather than being given invented extents.
  */
-export function installRomLayout(bus: Bus): void {
+export function installRomLayout(bus: Bus, layout: EspRomDataLayout = ESP32C3_ROM_DATA): void {
   const fields = [
-    SOC_ROM_STACK_START, // dram0_stack_shared_mem_start
-    SOC_ROM_STACK_START, // dram0_rtos_reserved_start
-    SOC_ROM_STACK_START - SOC_ROM_STACK_SIZE, // stack_sentry
-    SOC_DRAM_HIGH, // stack
-    SOC_ROM_STACK_START - SOC_ROM_STACK_SIZE, // stack_sentry_app
-    SOC_DRAM_HIGH, // stack_app
+    layout.romStackStart, // dram0_stack_shared_mem_start
+    layout.romStackStart, // dram0_rtos_reserved_start
+    layout.romStackStart - layout.romStackSize, // stack_sentry
+    layout.dramHigh, // stack
+    layout.romStackStart - layout.romStackSize, // stack_sentry_app
+    layout.dramHigh, // stack_app
   ];
   for (let i = 0; i < fields.length; i++) {
-    bus.writeUint32((ETS_ROM_LAYOUT_ADDRESS + i * 4) >>> 0, fields[i] >>> 0);
+    bus.writeUint32((layout.layoutAddress + i * 4) >>> 0, fields[i] >>> 0);
   }
   // Every remaining field is an empty range at the top of DRAM: the ROM
   // subsystems they describe are not provided, so they occupy nothing.
   for (let i = fields.length; i < ROM_LAYOUT_FIELD_COUNT; i++) {
-    bus.writeUint32((ETS_ROM_LAYOUT_ADDRESS + i * 4) >>> 0, SOC_DRAM_HIGH >>> 0);
+    bus.writeUint32((layout.layoutAddress + i * 4) >>> 0, layout.dramHigh >>> 0);
   }
-  bus.writeUint32(ETS_ROM_LAYOUT_POINTER, ETS_ROM_LAYOUT_ADDRESS >>> 0);
+  bus.writeUint32(layout.layoutPointer, layout.layoutAddress >>> 0);
 }
 
 /**
@@ -1808,7 +1826,7 @@ const ROM_LAYOUT_FIELD_COUNT = 40;
  * is where the real string lives — the window is only dispatched as code when
  * the program counter enters it, so a data read here reads memory.
  */
-export const ROM_COEX_VERSION_ADDRESS = 0x4005ff00;
+export const ROM_COEX_VERSION_ADDRESS = ESP32C3_ROM_DATA.coexVersionAddress;
 
 /**
  * What `esp_coex_rom_version_get()` reports.
@@ -1821,13 +1839,18 @@ export const ROM_COEX_VERSION_ADDRESS = 0x4005ff00;
  */
 export const ROM_COEX_VERSION = 'circuitdesk';
 
-/** Installs the constants the ROM publishes for the application to read. */
-export function installRomData(bus: Bus): void {
-  installRomLayout(bus);
+/**
+ * Installs the constants the ROM publishes for the application to read.
+ *
+ * Every address involved differs between the C3 and the C6, so the layout is a
+ * parameter. It defaults to the C3's for the callers that predate the C6.
+ */
+export function installRomData(bus: Bus, layout: EspRomDataLayout = ESP32C3_ROM_DATA): void {
+  installRomLayout(bus, layout);
   for (let i = 0; i < ROM_COEX_VERSION.length; i++) {
-    bus.writeUint8((ROM_COEX_VERSION_ADDRESS + i) >>> 0, ROM_COEX_VERSION.charCodeAt(i));
+    bus.writeUint8((layout.coexVersionAddress + i) >>> 0, ROM_COEX_VERSION.charCodeAt(i));
   }
-  bus.writeUint8((ROM_COEX_VERSION_ADDRESS + ROM_COEX_VERSION.length) >>> 0, 0);
+  bus.writeUint8((layout.coexVersionAddress + ROM_COEX_VERSION.length) >>> 0, 0);
 }
 
 /** Address range the ESP32-C3 maps its mask ROM into. */
@@ -1849,9 +1872,11 @@ export class UnimplementedRomCallError extends Error {
     readonly address: number,
     readonly symbol: string | undefined,
     readonly returnAddress: number,
+    /** Which part's ROM was being called, since the two publish different tables. */
+    readonly chip = 'ESP32-C3',
   ) {
     super(
-      `This sketch calls the ESP32-C3 boot ROM function ${symbol ? `${symbol} ` : ''}at ` +
+      `This sketch calls the ${chip} boot ROM function ${symbol ? `${symbol} ` : ''}at ` +
         `0x${(address >>> 0).toString(16)}, which CircuitDesk does not implement. Espressif does not publish the ` +
         'ROM\'s source and CircuitDesk is not licensed to redistribute it, so ROM behaviour is implemented ' +
         'independently for the functions firmware actually needs. Please report this address so it can be added.',
