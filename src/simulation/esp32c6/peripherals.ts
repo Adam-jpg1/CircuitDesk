@@ -50,6 +50,8 @@ export const ESP32C6_PERIPHERAL_BASE = {
   /** Where the first execution spike saw the firmware write. */
   assistDebug: 0x600c2000,
   intpri: 0x600c5000,
+  /** The RISC-V PLIC, which is the CPU interrupt controller on this part. */
+  plic: 0x20001000,
   extMem: 0x600c8000,
   /**
    * The modem clock blocks, which the C3 has no counterpart for.

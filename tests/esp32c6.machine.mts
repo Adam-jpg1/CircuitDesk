@@ -95,23 +95,48 @@ function check(cond: boolean, msg: string) {
   check(ESP32C6_PERIPHERAL_BASE.spi1 === 0x60003000, 'and SPI1 at 0x60003000 — the two swap against the C3');
 }
 
-// ---------- 3. the interrupt controller spans two blocks ----------
+// ---------- 3. the interrupt controller spans three blocks ----------
+//
+// This section used to assert that the C6's CPU interrupt controller is INTPRI
+// at 0x600c5000. It is not, and believing it was is what kept the chip from
+// booting: INTPRI carries a plausible-looking set of CPU interrupt registers
+// that the firmware never touches. `soc/esp32c6/include/soc/interrupt_reg.h`
+// maps every INTERRUPT_CORE0_CPU_INT_* name onto a PLIC_MXINT_* register at
+// DR_REG_PLIC_MX_BASE, and `soc_caps.h` sets SOC_INT_PLIC_SUPPORTED.
 {
-  check(ESP32C6_SOC.cpuInterrupts.base === 0x600c5000, 'the C6 CPU interrupt controller is INTPRI at 0x600c5000');
+  check(ESP32C6_SOC.cpuInterrupts.base === 0x20001000, 'the C6 CPU interrupt controller is the PLIC at 0x20001000');
   check(ESP32C3_SOC.cpuInterrupts.base === 0x600c2000, 'while the C3 keeps its inside the matrix at 0x600c2000');
   check(
-    ESP32C6_SOC.cpuInterrupts.enable !== ESP32C3_SOC.cpuInterrupts.enable &&
-      ESP32C6_SOC.cpuInterrupts.threshold !== ESP32C3_SOC.cpuInterrupts.threshold &&
-      ESP32C6_SOC.cpuInterrupts.priorityBase !== ESP32C3_SOC.cpuInterrupts.priorityBase,
-    'and every register offset differs',
+    ESP32C6_SOC.cpuInterrupts.base < ESP32C6_SOC.memory.peripheral.start,
+    'and it sits below the peripheral window entirely, which is why it needs its own MMIO window',
+  );
+
+  // The register offsets, by value, from plic_reg.h.
+  const plic = ESP32C6_SOC.cpuInterrupts;
+  check(plic.enable === 0x00, 'PLIC_MXINT_ENABLE_REG is at offset 0');
+  check(plic.type === 0x04, 'PLIC_MXINT_TYPE_REG at 4');
+  check(plic.clear === 0x08, 'PLIC_MXINT_CLEAR_REG at 8');
+  check(plic.eipStatus === 0x0c, 'PLIC_EMIP_STATUS_REG at 0xc');
+  check(plic.priorityBase === 0x10, 'PLIC_MXINT0_PRI_REG at 0x10, indexed from line 0');
+  check(plic.threshold === 0x90, 'PLIC_MXINT_THRESH_REG at 0x90');
+  check(
+    plic.base + plic.threshold === 0x20001090,
+    'so the threshold is at 0x20001090 — the address the firmware\'s interrupt entry really reads',
   );
   check(
-    ESP32C6_SOC.softwareInterrupts.base === ESP32C6_SOC.cpuInterrupts.base,
-    'the C6 software interrupts are inside INTPRI',
+    plic.base + plic.priorityBase + 5 * 4 === 0x20001024,
+    'and line 5\'s priority at 0x20001024, the address it reads next',
+  );
+
+  // The software interrupts really are in INTPRI; only the controller moved.
+  check(ESP32C6_SOC.softwareInterrupts.base === 0x600c5000, 'the C6 software interrupts are in INTPRI');
+  check(
+    ESP32C6_SOC.softwareInterrupts.base !== ESP32C6_SOC.cpuInterrupts.base,
+    'which is a different block from the controller',
   );
   check(
     ESP32C3_SOC.softwareInterrupts.base !== ESP32C3_SOC.cpuInterrupts.base,
-    'while the C3 keeps its in a different block again',
+    'and the C3 keeps its in a different block again',
   );
 
   // No source number carries over, which is what makes a shared table unsafe.
@@ -121,41 +146,81 @@ function check(cond: boolean, msg: string) {
   check(moved.length === 5, `all five named interrupt sources move between the parts (${moved.join(', ')})`);
   check(c6.gpio === 30 && c6.systimerTarget0 === 57 && c6.fromCpu0 === 22, 'and are the C6\'s own numbers');
 
-  // The controller reads routing from one block and everything else from the
-  // other, so a route written to the matrix has to reach a decision made in
-  // INTPRI. That crossing is the whole reason the class exists.
+  // The controller reads routing from one block and everything else from
+  // another, so a route written to the matrix has to reach a decision made in
+  // the PLIC. That crossing is the whole reason the class exists.
   const controller = new Esp32C6InterruptController();
-  const [map, priority] = controller.peripherals;
-  check(map.base === 0x60010000 && priority.base === 0x600c5000, 'its two windows sit at the C6\'s two addresses');
+  const [map, plicFile, intpri] = controller.peripherals;
+  check(map.base === 0x60010000, 'the routing window is INTMTX at 0x60010000');
+  check(plicFile.base === 0x20001000, 'the controller window is the PLIC at 0x20001000');
+  check(intpri.base === 0x600c5000, 'and INTPRI is present as a source, not as the controller');
 
   const LINE = 7;
   map.writeUint32(ESP32C6_INTERRUPT_SOURCE.systimerTarget0 * 4, LINE);
   check(controller.routeOf(ESP32C6_INTERRUPT_SOURCE.systimerTarget0) === LINE, 'a source routes to the line it was given');
 
-  priority.writeUint32(ESP32C6_SOC.cpuInterrupts.enable, 1 << LINE);
-  priority.writeUint32(ESP32C6_SOC.cpuInterrupts.priorityBase + LINE * 4, 3);
-  priority.writeUint32(ESP32C6_SOC.cpuInterrupts.threshold, 1);
+  plicFile.writeUint32(ESP32C6_SOC.cpuInterrupts.enable, 1 << LINE);
+  plicFile.writeUint32(ESP32C6_SOC.cpuInterrupts.priorityBase + LINE * 4, 3);
+  plicFile.writeUint32(ESP32C6_SOC.cpuInterrupts.threshold, 1);
   const pending = controller.evaluate([ESP32C6_INTERRUPT_SOURCE.systimerTarget0]);
   check(pending === 1 << LINE, 'and asserting it makes that line pending');
   check(controller.select(pending) === LINE, 'and the controller selects it');
 
-  // Below the threshold it is masked, which is how a handler stops itself
-  // being re-entered.
-  priority.writeUint32(ESP32C6_SOC.cpuInterrupts.threshold, 4);
-  check(controller.select(pending) === undefined, 'a line below the threshold is masked out');
+  // The threshold is what stops a handler pre-empting itself. ESP-IDF's
+  // interrupt entry reads the line's priority, writes priority+1 here, and only
+  // then re-enables interrupts.
+  plicFile.writeUint32(ESP32C6_SOC.cpuInterrupts.threshold, 3 + 1);
+  check(controller.select(pending) === undefined, 'raising the threshold above a line\'s priority masks it');
+  check(controller.threshold === 4, 'and the controller reports the threshold the firmware wrote');
+  plicFile.writeUint32(ESP32C6_SOC.cpuInterrupts.threshold, 3);
+  check(controller.select(pending) === LINE, 'while an equal priority still passes, so a higher one pre-empts');
 
-  // Priority words are indexed from line zero. Indexing from one leaves every
-  // interrupt able to re-enter itself, which is a bug this runtime has had.
-  priority.writeUint32(ESP32C6_SOC.cpuInterrupts.priorityBase + LINE * 4, 0);
-  priority.writeUint32(ESP32C6_SOC.cpuInterrupts.threshold, 1);
-  check(controller.select(pending) === undefined, 'the priority word for a line is at priorityBase + line*4');
+  // A line left at priority zero is disabled, as on any PLIC.
+  plicFile.writeUint32(ESP32C6_SOC.cpuInterrupts.priorityBase + LINE * 4, 0);
+  plicFile.writeUint32(ESP32C6_SOC.cpuInterrupts.threshold, 0);
+  check(controller.select(pending) === undefined, 'a line at priority zero is never delivered');
+  plicFile.writeUint32(ESP32C6_SOC.cpuInterrupts.priorityBase + LINE * 4, 3);
 
   // The software interrupts, which FreeRTOS yields through.
-  priority.writeUint32(ESP32C6_SOC.softwareInterrupts.fromCpu0, 1);
+  intpri.writeUint32(ESP32C6_SOC.softwareInterrupts.fromCpu0, 1);
   check(
     controller.interruptSource.assertedInterruptSources().includes(ESP32C6_INTERRUPT_SOURCE.fromCpu0),
     'writing FROM_CPU_0 asserts source 22, not the C3\'s 50',
   );
+}
+
+// ---------- 3b. MMIO is not one window on every part ----------
+//
+// The bug this guards against did not fault. Every access to 0x20001000 went
+// to plain RAM, where the writes stuck and read back, so the firmware saw a
+// controller that agreed with everything it said and did nothing.
+{
+  check(ESP32C3_SOC.mmio.length === 1, 'the C3 has one MMIO window');
+  check(ESP32C6_SOC.mmio.length === 2, 'and the C6 has two');
+  check(
+    ESP32C6_SOC.mmio.some((w) => 0x20001000 >= w.start && 0x20001000 < w.end),
+    'the C6 declares the PLIC window, so an access to it is a register access',
+  );
+  check(
+    !ESP32C3_SOC.mmio.some((w) => 0x20001000 >= w.start && 0x20001000 < w.end),
+    'and the C3 does not, because it has no such block',
+  );
+
+  const { machine } = createEsp32C6Machine();
+  // A write to the PLIC must reach the controller, not memory. If it reached
+  // memory it would read back unchanged, which is exactly what made this
+  // invisible.
+  machine.writeUint32(0x20001090, 0x5a);
+  check(machine.readUint32(0x20001090) === 0x5a, 'the PLIC threshold reads back what was written');
+  check(machine.peripheralAt(0x20001090)?.name === 'plic_mx', 'because a peripheral claims that address');
+  check(machine.peripheralAt(0x20001090)?.base === 0x20001000, 'and it is the PLIC');
+
+  // An address in the window that no peripheral claims must still be MMIO
+  // rather than silently becoming RAM.
+  let unclaimed = 0;
+  const traced = createEsp32C6Machine(undefined, { onUnclaimedMmio: () => unclaimed++ }).machine;
+  traced.readUint32(0x20001c00);
+  check(unclaimed === 1, 'an unclaimed address inside an MMIO window is reported rather than read as memory');
 }
 
 // ---------- 4. the low-power timer really counts ----------

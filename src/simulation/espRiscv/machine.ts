@@ -603,9 +603,22 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
 
   // ------------------------------------------------------------------ bus
 
+  /**
+   * True when an access is a register access rather than memory.
+   *
+   * Asks the SoC's list of MMIO windows rather than one hardcoded range,
+   * because it is not one range on every part: the C6's CPU interrupt
+   * controller is a PLIC at 0x20001000, far below the peripheral window. With a
+   * single window every access to it fell through to plain RAM, where the
+   * writes stuck and read back — so nothing faulted, and the interrupt
+   * controller the machine had built was simply never spoken to.
+   */
   private isPeripheralAddress(address: number): boolean {
     const a = address >>> 0;
-    return a >= this.soc.memory.peripheral.start && a < this.soc.memory.peripheral.end;
+    for (const window of this.soc.mmio) {
+      if (a >= window.start && a < window.end) return true;
+    }
+    return false;
   }
 
   private writeByte(address: number, value: number): void {
