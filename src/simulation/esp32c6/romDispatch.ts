@@ -21,6 +21,7 @@ import {
   type RomFunction,
 } from '../esp32c3/romFunctions';
 import { ESP32C6_ROM_ADDRESSES, NOT_PUBLISHED_ON_C6 } from './romAddresses';
+import { ESP32C6_ROM_WATCHDOG } from './romWatchdog';
 
 /** Chips this runtime can dispatch ROM calls for. */
 export type EspRomChip = 'esp32c3' | 'esp32c6';
@@ -65,6 +66,10 @@ function buildEsp32C6Table(): ChipRomTable {
       rationale: shared.rationale,
     });
   }
+  // Entry points this part publishes and the C3 does not, so they have no
+  // shared implementation to borrow. The watchdog HAL is the whole of it: the
+  // C3 links its own copy into the application, and the C6's ROM provides one.
+  for (const entry of ESP32C6_ROM_WATCHDOG) entries.set(entry.address >>> 0, entry);
   return { chip: 'esp32c6', entries, absent: new Set(NOT_PUBLISHED_ON_C6) };
 }
 

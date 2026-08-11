@@ -235,6 +235,18 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
     this.interruptsDirty = true;
   }
 
+  /**
+   * Names the interrupt router when it is not itself a peripheral.
+   *
+   * On the C3 the controller is one register block and announces itself when it
+   * is added. The C6's spans two blocks at unrelated addresses, so the object
+   * that reads both is not a peripheral and has to be named.
+   */
+  useInterruptRouter(router: InterruptRouter): void {
+    this.interruptRouter = router;
+    this.interruptsDirty = true;
+  }
+
   // ------------------------------------------------------ interrupt delivery
 
   /**

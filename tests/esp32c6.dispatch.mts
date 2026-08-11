@@ -127,7 +127,14 @@ const c6 = romTableFor('esp32c6');
 
 // ---------- 6. functions the C6 does not publish ----------
 {
-  for (const name of ['esprv_int_enable', 'esprv_int_set_threshold', 'esp_rom_regi2c_write']) {
+  // The regi2c helpers, which the C6 publishes under no spelling at all: its
+  // firmware reaches the analog master by writing MODEM_LPCON and I2C_ANA_MST
+  // directly, so there is nothing to call.
+  //
+  // The interrupt-controller helpers were on this list until the C6's own
+  // linker script showed them published as esprv_intc_int_*. They are checked
+  // in the section below instead, by address.
+  for (const name of ['esp_rom_regi2c_read', 'esp_rom_regi2c_write', 'esp_rom_efuse_get_flash_wp_gpio']) {
     check(isAbsentOnChip(c6, name), `${name} is recorded as absent on the C6`);
     const onC3 = ESP32C3_ROM_FUNCTIONS.find((f) => f.name === name);
     check(onC3 !== undefined, `while the C3 really does implement it`);
@@ -140,6 +147,24 @@ const c6 = romTableFor('esp32c6');
       refused = error instanceof UnimplementedRomCallError;
     }
     check(refused, `and its C3 address resolves to nothing on a C6, rather than to a neighbour`);
+  }
+}
+
+// ---------- 7. functions the C6 publishes under a different symbol ----------
+//
+// The same implementation must be reachable on both parts even where the two
+// linker scripts spell the name differently, and it must be reachable at each
+// chip's own address.
+{
+  for (const name of ['esprv_int_enable', 'esprv_int_set_threshold', 'esp_rom_set_cpu_ticks_per_us']) {
+    check(!isAbsentOnChip(c6, name), `${name} is not recorded as absent on the C6`);
+    const onC3 = ESP32C3_ROM_FUNCTIONS.find((f) => f.name === name);
+    const onC6 = [...c6.entries.values()].find((f) => f.name === name);
+    check(onC3 !== undefined && onC6 !== undefined, `and it is dispatchable on both parts`);
+    if (!onC3 || !onC6) continue;
+    check(onC3.handler === onC6.handler, `with one implementation serving both`);
+    check(onC3.address !== onC6.address, `at different addresses (C3 0x${onC3.address.toString(16)}, C6 0x${onC6.address.toString(16)})`);
+    check(dispatchRom(c6, 'esp32c6', onC6.address).name === name, `and the C6 address resolves to ${name}`);
   }
 }
 

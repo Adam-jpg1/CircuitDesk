@@ -96,6 +96,17 @@ export interface Esp32C3GpioOptions {
    * a board that is running rather than being flashed reads back.
    */
   strapping?: number;
+  /**
+   * Where this chip's GPIO block, IO MUX and pin count come from.
+   *
+   * The C6 uses the same register layout at different addresses with more
+   * pins — the offsets above are identical on both parts, the bases are not
+   * (0x60091000 against 0x60004000, 0x60090000 against 0x60009000) and the C6
+   * has 31 GPIOs to the C3's 22. Left out, these are the C3's.
+   */
+  base?: number;
+  ioMuxBase?: number;
+  pinCount?: number;
 }
 
 /**
@@ -104,8 +115,11 @@ export interface Esp32C3GpioOptions {
  */
 export class Esp32C3Gpio implements Peripheral {
   readonly name = 'gpio';
-  readonly base = GPIO_BASE;
+  readonly base: number;
   readonly size = 0x1000;
+
+  /** How many pads this part has. */
+  readonly pinCount: number;
 
   private readonly registers = new Map<number, number>();
 
@@ -124,7 +138,9 @@ export class Esp32C3Gpio implements Peripheral {
     private readonly clock: { readonly nanos: number },
     private readonly options: Esp32C3GpioOptions = {},
   ) {
-    this.ioMux = new Esp32C3IoMux(() => this.refresh());
+    this.base = options.base ?? GPIO_BASE;
+    this.pinCount = options.pinCount ?? ESP32C3_GPIO_COUNT;
+    this.ioMux = new Esp32C3IoMux(() => this.refresh(), options.ioMuxBase ?? IO_MUX_BASE, this.pinCount);
     this.reset();
   }
 
@@ -133,7 +149,7 @@ export class Esp32C3Gpio implements Peripheral {
     this.registers.set(GPIO_STRAP, (this.options.strapping ?? 0) >>> 0);
     // The matrix's reset state routes nothing: a pad only follows the GPIO
     // output register once firmware says so.
-    for (let pin = 0; pin < ESP32C3_GPIO_COUNT; pin++) {
+    for (let pin = 0; pin < this.pinCount; pin++) {
       this.registers.set(GPIO_FUNC_OUT_SEL_BASE + pin * 4, OUT_SEL_MASK);
     }
     this.external.clear();
@@ -258,7 +274,7 @@ export class Esp32C3Gpio implements Peripheral {
    */
   private inputRegister(): number {
     let value = 0;
-    for (let pin = 0; pin < ESP32C3_GPIO_COUNT; pin++) {
+    for (let pin = 0; pin < this.pinCount; pin++) {
       if (!this.ioMux.inputEnabled(pin)) continue;
       if (this.resolve(pin).level === 1) value |= 1 << pin;
     }
@@ -268,7 +284,7 @@ export class Esp32C3Gpio implements Peripheral {
   // --------------------------------------------------------- exposed state
 
   pinNumbers(): number[] {
-    return Array.from({ length: ESP32C3_GPIO_COUNT }, (_, i) => i);
+    return Array.from({ length: this.pinCount }, (_, i) => i);
   }
 
   pinState(pin: number): PinState {
@@ -287,7 +303,7 @@ export class Esp32C3Gpio implements Peripheral {
 
   /** Drives a pin from outside the chip, as a wire on the canvas would. */
   drivePin(pin: number, level: 0 | 1 | undefined): void {
-    if (pin < 0 || pin >= ESP32C3_GPIO_COUNT) return;
+    if (pin < 0 || pin >= this.pinCount) return;
     if (level === undefined) this.external.delete(pin);
     else this.external.set(pin, level);
     this.refresh();
@@ -306,7 +322,7 @@ export class Esp32C3Gpio implements Peripheral {
    * moment it happens and never later.
    */
   private refresh(): void {
-    for (let pin = 0; pin < ESP32C3_GPIO_COUNT; pin++) {
+    for (let pin = 0; pin < this.pinCount; pin++) {
       const current = this.pinState(pin);
       const previous = this.reported.get(pin);
       this.reported.set(pin, current);
@@ -325,18 +341,21 @@ export class Esp32C3Gpio implements Peripheral {
  */
 export class Esp32C3IoMux implements Peripheral {
   readonly name = 'io_mux';
-  readonly base = IO_MUX_BASE;
   readonly size = 0x1000;
 
   private readonly registers = new Map<number, number>();
 
-  constructor(private readonly onChange: () => void) {
+  constructor(
+    private readonly onChange: () => void,
+    readonly base = IO_MUX_BASE,
+    private readonly pinCount = ESP32C3_GPIO_COUNT,
+  ) {
     this.reset();
   }
 
   reset(): void {
     this.registers.clear();
-    for (let pin = 0; pin < ESP32C3_GPIO_COUNT; pin++) {
+    for (let pin = 0; pin < this.pinCount; pin++) {
       this.registers.set(IO_MUX_PIN_BASE + pin * 4, IO_MUX_RESET);
     }
   }

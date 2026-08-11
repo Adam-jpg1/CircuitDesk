@@ -89,11 +89,45 @@ const c6 = Object.entries(ESP32C6_ROM_ADDRESSES);
     'each names a function the C3 runtime really does implement',
   );
 
-  // The interrupt controller is the clearest case: the C6's is a different
-  // block, so the C3's esprv_int_* entry points have no counterpart.
-  for (const name of ['esprv_int_enable', 'esprv_int_set_threshold']) {
+  check(
+    NOT_PUBLISHED_ON_C6.every((name) => !(name in ESP32C6_ROM_ADDRESSES)),
+    'nothing is both mapped and recorded absent',
+  );
+
+  // The analog register access is the clearest genuinely-absent case: the C6
+  // publishes no regi2c entry point of any spelling, and its firmware bears
+  // that out by writing MODEM_LPCON and I2C_ANA_MST directly instead.
+  for (const name of ['esp_rom_regi2c_read', 'esp_rom_regi2c_write']) {
     check(NOT_PUBLISHED_ON_C6.includes(name), `${name} is recorded as absent rather than reused`);
   }
+
+  // The first draft of this file also listed the interrupt-controller helpers
+  // as absent, on the reasoning that the C6's controller is a different block.
+  // The C6's own linker script disproved it: they are published, under
+  // esprv_intc_int_* rather than esprv_int_*. Asserting the addresses by value
+  // is what stops that guess from being made a second time.
+  const RENAMED_ON_C6: Record<string, number> = {
+    esprv_int_set_priority: 0x40000718, // esprv_intc_int_set_priority
+    esprv_int_set_threshold: 0x4000071c, // esprv_intc_int_set_threshold
+    esprv_int_enable: 0x40000720, // esprv_intc_int_enable
+    esprv_int_disable: 0x40000724, // esprv_intc_int_disable
+    esprv_int_set_type: 0x40000728, // esprv_intc_int_set_type
+    esp_rom_set_cpu_ticks_per_us: 0x40000048, // ets_update_cpu_frequency
+    esp_rom_output_flush_tx: 0x40000074, // uart_tx_flush
+  };
+  for (const [name, address] of Object.entries(RENAMED_ON_C6)) {
+    check(
+      ESP32C6_ROM_ADDRESSES[name] === address,
+      `${name} is published on the C6 under another name, at 0x${address.toString(16)} ` +
+        `(0x${ESP32C6_ROM_ADDRESSES[name]?.toString(16)})`,
+    );
+    check(!NOT_PUBLISHED_ON_C6.includes(name), `and is not wrongly recorded as absent`);
+    check(c3ByName.get(name) !== address, `and does not sit where the C3 puts it`);
+  }
+
+  // ets_update_cpu_frequency is where real C6 firmware stopped when this was
+  // missing, so it is asserted by the address the run reported.
+  check(ESP32C6_ROM_ADDRESSES.esp_rom_set_cpu_ticks_per_us === 0x40000048, 'the CPU frequency setter is mapped');
 }
 
 // ---------- 4. the aliases the C6 publishes under older names ----------
