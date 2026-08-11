@@ -252,6 +252,55 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   // on IO5. IO18 and IO19 carry USB D-/D+ on this board, and IO8 drives the
   // on-board RGB LED, so both are annotated rather than presented as plain
   // GPIO.
+  // ESP32-C6-DevKitC-1, from Espressif's own user guide for the board rather
+  // than from the Arduino core's generic C6 variant — the core carries the
+  // chip's pin capabilities but not this board's header arrangement.
+  //
+  // The two headers are sixteen positions each, ending in a no-connect. ADC1
+  // reaches GPIO0-GPIO6, all of which sit on J1. GPIO12 and GPIO13 carry the
+  // native USB D-/D+ lines, GPIO8 drives the on-board RGB LED, and GPIO4, 5, 8,
+  // 9 and 15 are strapping pins the chip samples at reset — each annotated
+  // rather than presented as ordinary GPIO.
+  //
+  // The module carries 8 MB of flash. The Arduino core's generic esp32c6 target
+  // defaults to a 4 MB layout, which is a toolchain default rather than a
+  // property of this board.
+  simpleWiringBoard(
+    'board.esp32-c6-devkitc-1', 'ESP32-C6-DevKitC-1', 'Espressif', 'ESP32-C6 (RISC-V RV32IMC)', 25.4, 58.4, 3.3,
+    [
+      p3v3('3V3_1'), reset('RST', 'RST'),
+      { ...a3('IO4', 'IO4'), description: 'GPIO4 — ADC1 channel; MTMS strapping pin' },
+      { ...a3('IO5', 'IO5'), description: 'GPIO5 — ADC1 channel; MTDI strapping pin' },
+      { ...a3('IO6', 'IO6'), description: 'GPIO6 — ADC1 channel; MTCK' },
+      g3('IO7', 'IO7', { description: 'GPIO7 — MTDO' }),
+      a3('IO0', 'IO0'), a3('IO1', 'IO1'),
+      g3('IO8', 'IO8', { description: 'GPIO8 — drives the on-board RGB LED; strapping pin' }),
+      g3('IO10', 'IO10'), g3('IO11', 'IO11'),
+      a3('IO2', 'IO2'), a3('IO3', 'IO3'),
+      p5v('5V_1', '5V'), gnd('GND1'),
+    ],
+    [
+      gnd('GND2'),
+      g3('IO16', 'TX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-tx'] }),
+      g3('IO17', 'RX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-rx'] }),
+      g3('IO15', 'IO15', { description: 'GPIO15 — strapping pin' }),
+      g3('IO23', 'IO23'), g3('IO22', 'IO22'), g3('IO21', 'IO21'), g3('IO20', 'IO20'),
+      g3('IO19', 'IO19'), g3('IO18', 'IO18'),
+      g3('IO9', 'IO9', { description: 'GPIO9 — Boot button; strapping pin' }),
+      gnd('GND3'),
+      g3('IO13', 'IO13', { description: 'GPIO13 — native USB D+' }),
+      g3('IO12', 'IO12', { description: 'GPIO12 — native USB D-' }),
+      gnd('GND4'),
+    ],
+    'wiring',
+    {
+      color: '#1f3b52',
+      description:
+        'ESP32-C6-DevKitC-1 — Espressif development board carrying an ESP32-C6-WROOM-1 module with 8 MB flash. ' +
+        'Two USB Type-C ports (one to the native USB peripheral, one through the USB-to-UART bridge), Boot and Reset buttons, ' +
+        'and an addressable RGB LED on GPIO8. Wiring and pin metadata only at present; firmware execution is not implemented for this board.',
+    },
+  ),
   simpleWiringBoard(
     'board.esp32-c3', 'ESP32-C3-DevKitM-1', 'Espressif', 'ESP32-C3 (RISC-V RV32IMC)', 22.9, 51.1, 3.3,
     [
