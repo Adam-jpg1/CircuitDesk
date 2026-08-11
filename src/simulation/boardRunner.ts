@@ -183,10 +183,10 @@ export function rp2040PinIndex(pinId: string): number | undefined {
 
 /** ADC channel reachable at a board pin, in that board's own numbering. */
 export function runnerAdcChannel(board: BoardDefinition, pinId: string): number | undefined {
-  // The C3's ADC is not modelled, so no pin claims a channel. Reporting one
-  // and then returning an invented conversion would look like a working sensor
-  // while telling the student nothing true.
-  if (isEsp32C3(board)) return undefined;
+  // Neither Espressif RISC-V part has its ADC modelled, so no pin claims a
+  // channel. Reporting one and then returning an invented conversion would look
+  // like a working sensor while telling the student nothing true.
+  if (isEspRiscv(board)) return undefined;
   if (board.architecture === 'rp2040') {
     const index = rp2040PinIndex(pinId);
     if (index === undefined) return undefined;
@@ -201,13 +201,14 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
 
 /** Full-scale ADC reference for a board, in volts. */
 export function boardAdcReference(board: BoardDefinition): number {
-  if (board.architecture === 'rp2040' || isEsp32C3(board)) return 3.3;
+  if (board.architecture === 'rp2040' || isEspRiscv(board)) return 3.3;
   return 5;
 }
 
 /** How many runner pin indices a board's engine exposes. */
 export function runnerPinCount(board: BoardDefinition): number {
   if (board.architecture === 'rp2040') return 30;
-  if (isEsp32C3(board)) return 22;
+  const espPads = ESP_RISCV_PAD_COUNT[board.metadata?.variant ?? ''];
+  if (espPads !== undefined) return espPads;
   return avrProfileFor(board)?.pinCount ?? 0;
 }
