@@ -60,6 +60,17 @@ export interface SimulationWorldOptions {
 const DEFAULT_SLICE_MS = 1;
 
 /**
+ * Shortest slice the world will take.
+ *
+ * Without a floor, a board reporting an event every few nanoseconds would make
+ * the world take millions of slices to cross a millisecond and the browser
+ * would stop responding. Ten microseconds is far below any bit period these
+ * protocols use — a 115200 baud bit is 8.7 us, and this still resolves it —
+ * while keeping the number of slices per millisecond bounded.
+ */
+const MIN_SLICE_MS = 0.01;
+
+/**
  * Owns the running boards and the clock they share.
  *
  * The net settling itself is not done here — that is the circuit binding's
@@ -76,6 +87,9 @@ export class SimulationWorld {
 
   /** Called between slices to propagate whatever the boards just did. */
   settle: (() => void) | null = null;
+
+  /** Callbacks the world owes at a given simulated time, soonest first. */
+  private readonly scheduled: { at: number; run: () => void }[] = [];
 
   constructor(options: SimulationWorldOptions = {}) {
     this.sliceMs = options.sliceMs ?? DEFAULT_SLICE_MS;
@@ -110,20 +124,64 @@ export class SimulationWorld {
   }
 
   /**
+   * Runs something at a precise simulated time.
+   *
+   * The world will stop exactly there rather than running past it, which is
+   * what makes a net event land when it was meant to. Used for anything
+   * outside the boards that acts on a schedule — a canvas input, and later a
+   * bus line changing between bit periods.
+   */
+  scheduleAt(atMs: number, run: () => void): void {
+    this.scheduled.push({ at: atMs, run });
+    this.scheduled.sort((a, b) => a.at - b.at);
+  }
+
+  /** Simulated ms until the next thing the world already knows about. */
+  private nextBoundaryMs(): number | undefined {
+    let soonest: number | undefined;
+    const consider = (delta: number | undefined): void => {
+      if (delta === undefined || !Number.isFinite(delta) || delta < 0) return;
+      if (soonest === undefined || delta < soonest) soonest = delta;
+    };
+    for (const member of this.members) consider(member.runner.nextEventMs?.());
+    if (this.scheduled.length > 0) consider(this.scheduled[0].at - this.elapsedMs);
+    return soonest;
+  }
+
+  /**
    * Advances the whole world by a span of simulated time.
    *
-   * Boards move in lockstep through slices rather than one at a time. The
-   * order within a slice does not matter, because nothing is propagated until
-   * every board has run it — a board cannot observe another board's future.
+   * Boards move in lockstep rather than one at a time: nothing is propagated
+   * until every board has run the same slice, so a board can never observe
+   * another board's future.
+   *
+   * The slice is not a fixed millisecond. It is the earliest of the caller's
+   * remaining time, the coarse ceiling, and the next moment any board or any
+   * scheduled event says something will happen. That is what keeps the
+   * millisecond from becoming a communication resolution limit: a UART bit
+   * period or an I2C edge is far shorter, and the world will stop on it. When
+   * nothing has anything scheduled, the ceiling applies and behaviour is
+   * exactly what it was.
    */
   runFor(simMs: number): void {
     if (simMs <= 0 || this.members.length === 0) return;
     let remaining = simMs;
     while (remaining > 0) {
-      const slice = Math.min(this.sliceMs, remaining);
+      const boundary = this.nextBoundaryMs();
+      let slice = Math.min(this.sliceMs, remaining);
+      if (boundary !== undefined && boundary < slice) slice = Math.max(boundary, MIN_SLICE_MS);
+      slice = Math.min(slice, remaining);
+
       for (const member of this.members) member.runner.runFor(slice);
       this.elapsedMs += slice;
       remaining -= slice;
+
+      // Anything due at or before now runs before the nets are settled, so a
+      // scheduled change is visible to every board on the very next slice.
+      while (this.scheduled.length > 0 && this.scheduled[0].at <= this.elapsedMs) {
+        this.scheduled.shift()!.run();
+      }
+
       // Nets are resolved once per slice, after every board has had it, so a
       // level driven during the slice is visible to all of them next slice.
       this.settle?.();
@@ -170,6 +228,7 @@ export class SimulationWorld {
   dispose(): void {
     for (const member of this.members) member.runner.dispose?.();
     this.members.length = 0;
+    this.scheduled.length = 0;
   }
 }
 

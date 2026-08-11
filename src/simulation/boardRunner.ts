@@ -81,6 +81,20 @@ export interface BoardRunner {
   activeI2cPins?(): { sda?: number; scl?: number };
   activeSpiPins?(): { sck?: number; mosi?: number; miso?: number; cs?: number };
 
+  /**
+   * Simulated milliseconds until this board's next internal event, if it knows.
+   *
+   * The shared timeline uses it to decide how far every board may safely
+   * advance together. A board that answers lets the world stop exactly at the
+   * moment something happens on it — which is what board-to-board UART, I2C and
+   * SPI will need, since a bit period is far shorter than a scheduling slice.
+   *
+   * Optional, and omitting it costs only resolution: the world falls back to
+   * its coarse slice, which is what engines that cannot answer already get.
+   * Returning undefined means "nothing scheduled", not "nothing will happen".
+   */
+  nextEventMs?(): number | undefined;
+
   reset?(): void;
   dispose?(): void;
 }
