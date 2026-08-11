@@ -3,7 +3,7 @@ import type { BoardDefinition } from '../../types';
 import { MM } from '../pinHelpers';
 
 /**
- * Vector artwork for the Mega 2560-compatible board. Header strips and pin
+ * Vector artwork for the Arduino Mega 2560. Header strips and pin
  * holes are generated from the pin definitions themselves (same approach as
  * the Uno artwork), so the visual always matches the interactive connection
  * points — including the 2x18 double header.
@@ -115,12 +115,18 @@ export const MegaArtwork = memo(function MegaArtwork({ def }: { def: BoardDefini
         <text x={40 * MM} y={21.5 * MM}>ON</text>
       </g>
 
-      {/* silkscreen */}
+      {/* Board name silkscreen.
+
+          This is a third-party product, and the artwork says so. CircuitDesk
+          did not make this board, and marking it as though it had would
+          misrepresent whose hardware a learner is looking at. The name here is
+          the manufacturer's own; CircuitDesk's branding belongs in the
+          application around the canvas, not on the board on it. */}
       <text x={22 * MM} y={34 * MM} fontSize="10" fontWeight="700" fill="#e8f1f8" fontFamily="sans-serif" letterSpacing="0.5">
-        CIRCUITDESK MEGA
+        ARDUINO MEGA 2560
       </text>
       <text x={22 * MM} y={37 * MM} fontSize="6.5" fill="#a9c8dd" fontFamily="sans-serif">
-        ATmega2560 · Mega 2560-compatible
+        ATmega2560
       </text>
 
       {/* double-header body */}

@@ -67,7 +67,7 @@ export const ARDUINO_NANO = headerBoard({
   color: '#0b3d5e',
   usb: 'mini',
   description:
-    'Nano-compatible ATmega328P board. Fully simulated with its own pin profile (A6/A7 are ADC-only, as on real hardware) and compiled as arduino:avr:nano.',
+    'Arduino Nano — ATmega328P board. Fully simulated with its own pin profile (A6/A7 are ADC-only, as on real hardware) and compiled as arduino:avr:nano.',
   left: [
     gpio('D1', 'TX1', ['digital-in', 'digital-out', 'uart-tx']),
     gpio('D0', 'RX0', ['digital-in', 'digital-out', 'uart-rx']),

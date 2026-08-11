@@ -8,7 +8,7 @@
 // else — or implying CircuitDesk made it — misleads the person learning from
 // it.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { parseNotices, CATEGORY_LABELS, INDEPENDENCE_NOTICE } from '../src/app/noticesData';
 import { BOARD_DEFINITIONS, findBoardByIdOrAlias, getBoardDefinition } from '../src/boards/definitions';
 import { MULTI_VENDOR_DESIGN } from '../src/boards/capabilities';
@@ -215,6 +215,55 @@ const parsed = parseNotices(NOTICES);
     check(!apis.includes(unclaimed), `the ESP32-C3 still does not claim ${unclaimed}`);
   }
   check(apis.includes('digitalwrite') && apis.includes('digitalread'), 'while keeping the claims it earned');
+}
+
+// ---------- 10. board artwork does not brand other people's hardware ----------
+//
+// The registry can say "Arduino Uno R3" while the silkscreen drawn on the
+// canvas still says something else, and the silkscreen is what a learner
+// actually looks at. This reads the artwork source directly, because that is
+// where the label lives.
+{
+  const artworkDir = new URL('../src/boards/artwork/', import.meta.url);
+  const files = readdirSync(artworkDir).filter((f) => f.endsWith('.tsx'));
+  check(files.length > 0, `board artwork files were found (${files.length})`);
+
+  const branded: string[] = [];
+  for (const file of files) {
+    const source = readFileSync(new URL(file, artworkDir), 'utf8');
+    // Only the rendered text matters, so comments are stripped first —
+    // explaining the rule in a comment must not trip the rule.
+    const rendered = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    if (/circuit\s*desk/i.test(rendered)) branded.push(file);
+  }
+  check(branded.length === 0, `no board artwork carries CircuitDesk branding (${branded.join(', ') || 'none'})`);
+
+  // The three Arduino boards that had it, named individually so a regression
+  // on any one of them is unmistakable.
+  const expectSilkscreen: [string, string][] = [
+    ['UnoArtwork.tsx', 'ARDUINO UNO R3'],
+    ['MegaArtwork.tsx', 'ARDUINO MEGA 2560'],
+    ['LeonardoArtwork.tsx', 'ARDUINO LEONARDO'],
+  ];
+  for (const [file, silkscreen] of expectSilkscreen) {
+    const source = readFileSync(new URL(file, artworkDir), 'utf8');
+    const rendered = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    check(rendered.includes(silkscreen), `${file} silkscreens "${silkscreen}"`);
+    check(!/CIRCUITDESK\s+(UNO|MEGA|LEONARDO)/i.test(rendered), `${file} no longer silkscreens a CircuitDesk name`);
+  }
+}
+
+// ---------- 11. no user-visible surface calls a real product a clone ----------
+{
+  for (const [id, name] of [
+    ['board.arduino-uno', 'Arduino Uno R3'],
+    ['board.arduino-nano', 'Arduino Nano'],
+  ] as const) {
+    const board = getBoardDefinition(id)!;
+    const text = `${board.name} ${board.description ?? ''}`;
+    check(!/-compatible/i.test(text), `${name} is not described as merely compatible with itself`);
+    check(!/circuit\s*desk/i.test(text), `and ${name}'s description carries no CircuitDesk branding`);
+  }
 }
 
 console.log(failures === 0 ? '\nHome licensing and naming checks passed.' : `\n${failures} check(s) FAILED`);

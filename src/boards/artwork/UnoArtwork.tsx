@@ -3,7 +3,7 @@ import type { BoardDefinition } from '../../types';
 import { MM } from '../pinHelpers';
 
 /**
- * Detailed vector artwork for the Uno-compatible board. Header strips and pin
+ * Detailed vector artwork for the Arduino Uno R3. Header strips and pin
  * holes are generated from the pin definitions themselves, so the visual
  * always matches the interactive connection points.
  */
@@ -142,12 +142,18 @@ export const UnoArtwork = memo(function UnoArtwork({ def }: { def: BoardDefiniti
         <text x={41 * MM} y={17.5 * MM}>L</text>
       </g>
 
-      {/* board name silkscreen */}
+      {/* Board name silkscreen.
+
+          This is a third-party product, and the artwork says so. CircuitDesk
+          did not make this board, and marking it as though it had would
+          misrepresent whose hardware a learner is looking at. The name here is
+          the manufacturer's own; CircuitDesk's branding belongs in the
+          application around the canvas, not on the board on it. */}
       <text x={22 * MM} y={33 * MM} fontSize="11" fontWeight="700" fill="#e8f1f8" fontFamily="sans-serif" letterSpacing="0.5">
-        CIRCUITDESK UNO
+        ARDUINO UNO R3
       </text>
       <text x={22 * MM} y={35.6 * MM} fontSize="6.5" fill="#a9c8dd" fontFamily="sans-serif">
-        ATmega328P · Uno-compatible
+        ATmega328P
       </text>
       <text x={44 * MM} y={11.2 * MM} fontSize="6.5" fill="#cfe3f0" fontFamily="sans-serif" textAnchor="middle" letterSpacing="1">
         DIGITAL (PWM ~)
