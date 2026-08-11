@@ -47,9 +47,16 @@ export interface FlashMapper {
   translate(address: number): number | undefined;
 }
 
-/** Byte-addressable flash, as the cache reads it. */
+/**
+ * Byte-addressable flash, as the cache reads it.
+ *
+ * The size is here as well as the array because the C6's ROM flash driver
+ * answers `esp_flash_get_size` from the device, and a caller that trusted the
+ * array's length would be right only by coincidence.
+ */
 export interface FlashBytes {
   readonly bytes: Uint8Array;
+  readonly sizeBytes: number;
 }
 
 /** A peripheral that owns the flash device the cache reads through. */

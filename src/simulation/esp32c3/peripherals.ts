@@ -181,6 +181,23 @@ interface SysTimerComparator {
   periodBase: number;
   /** Alarms already reported in the current periodic run. */
   periodCount: number;
+  /**
+   * Whether a one-shot comparator has already raised its alarm.
+   *
+   * The hardware sets INT_RAW when the counter *reaches* the target — an event,
+   * latched — and firmware clears the latch through INT_CLR. Re-deriving the
+   * bit from a live `counter >= target` comparison instead makes the clear
+   * useless: the moment the handler returns, the comparison is still true and
+   * the interrupt fires again, for ever.
+   *
+   * That is not hypothetical. It is what stopped an ESP32-C6 dead: its
+   * esp_timer alarm is one-shot, the handler cleared it, it re-asserted
+   * immediately, and the interrupt nested until its stack walked down out of
+   * RAM and into the interrupt-entry code itself. The C3 never showed it
+   * because the FreeRTOS tick it runs is periodic, and a periodic comparator
+   * moves its own target forward.
+   */
+  served: boolean;
 }
 
 export class SysTimer extends RegisterFile implements InterruptingPeripheral {
@@ -209,7 +226,7 @@ export class SysTimer extends RegisterFile implements InterruptingPeripheral {
       this.units.push({ offset: 0, since: this.clock.nanos, running: (SYSTIMER_CONF_RESET & UNIT_WORK_EN[i]) !== 0 });
     }
     this.comparators.length = 0;
-    for (let i = 0; i < 3; i++) this.comparators.push({ target: 0, periodBase: 0, periodCount: 0 });
+    for (let i = 0; i < 3; i++) this.comparators.push({ target: 0, periodBase: 0, periodCount: 0, served: false });
   }
 
   /** Current value of a counter, in systimer ticks. */
@@ -235,12 +252,18 @@ export class SysTimer extends RegisterFile implements InterruptingPeripheral {
       if (alarm === undefined) continue;
       const value = this.counter(this.unitOf(i));
       if (value < alarm.at) continue;
+      // A one-shot alarm is raised once, when the counter reaches the target,
+      // and stays raised until firmware clears it. Raising it again on the next
+      // look would make INT_CLR do nothing at all.
+      if (alarm.period === 0 && this.comparators[i].served) continue;
       raw |= 1 << i;
-      // A periodic comparator reloads itself. How many periods have elapsed is
-      // taken from the counter rather than from how often this was read, so a
-      // late look cannot shift the repeat off its original phase.
       if (alarm.period > 0) {
+        // A periodic comparator reloads itself. How many periods have elapsed
+        // is taken from the counter rather than from how often this was read,
+        // so a late look cannot shift the repeat off its original phase.
         this.comparators[i].periodCount = Math.floor((value - this.comparators[i].periodBase) / alarm.period);
+      } else {
+        this.comparators[i].served = true;
       }
     }
     this.registers.set(SYSTIMER_INT_RAW, raw >>> 0);
@@ -305,6 +328,9 @@ export class SysTimer extends RegisterFile implements InterruptingPeripheral {
       if ((conf & TARGET_WORK_EN[i]) === 0 || (enabled & (1 << i)) === 0) continue;
       const alarm = this.alarmOf(i);
       if (alarm === undefined) continue;
+      // A one-shot alarm that has already been raised will not raise again on
+      // its own, so it is not a reason to wake a parked machine.
+      if (alarm.period === 0 && this.comparators[i].served) continue;
       const remaining = alarm.at - this.counter(this.unitOf(i));
       // Already past its target: the machine should look immediately.
       const at = remaining <= 0 ? this.clock.nanos : this.clock.nanos + (remaining * 1e9) / SYSTIMER_TICK_HZ;
@@ -386,6 +412,9 @@ export class SysTimer extends RegisterFile implements InterruptingPeripheral {
     // A periodic run counts from the moment its target was loaded.
     comparator.periodBase = this.counter(this.unitOf(index));
     comparator.periodCount = 0;
+    // Re-arming is what lets a one-shot fire again, exactly as on hardware:
+    // firmware moves the target on and loads it.
+    comparator.served = false;
   }
 }
 

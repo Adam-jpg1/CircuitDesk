@@ -148,6 +148,15 @@ export interface EspSocConfig {
   /** Flash offset of the application partition. */
   readonly applicationFlashOffset: number;
   readonly mmu: FlashMmuConfig;
+  /**
+   * Base of the block holding the per-source routing words.
+   *
+   * On the C3 this is the same block as `cpuInterrupts`; on the C6 the two are
+   * nowhere near each other.
+   */
+  readonly interruptMatrixBase: number;
+  /** How many sources that block has a routing word for. */
+  readonly interruptSourceCount: number;
   readonly cpuInterrupts: CpuInterruptLayout;
   readonly softwareInterrupts: SoftwareInterruptLayout;
   readonly interruptSources: InterruptSources;
@@ -186,6 +195,9 @@ export const ESP32C3_SOC: EspSocConfig = {
     validity: { kind: 'invalidBit', bit: 1 << 8 },
     vaddrMask: 0x7fffff,
   },
+  // DR_REG_INTERRUPT_BASE, which also holds the CPU controller on this part.
+  interruptMatrixBase: 0x600c2000,
+  interruptSourceCount: 62,
   cpuInterrupts: {
     // All inside the interrupt matrix block, DR_REG_INTERRUPT_BASE.
     base: 0x600c2000,
@@ -260,6 +272,10 @@ export const ESP32C6_SOC: EspSocConfig = {
     // 256 pages of 64 KB.
     vaddrMask: 0xffffff,
   },
+  // DR_REG_INTERRUPT_MATRIX_BASE, which on this part holds only the routing
+  // words. INTMTX_CORE0_ECC_INTR_MAP_REG, the last of them, is at 0x130.
+  interruptMatrixBase: 0x60010000,
+  interruptSourceCount: 77,
   cpuInterrupts: {
     // A block of its own, DR_REG_INTPRI_BASE — which on the C3 is where the
     // flash MMU table sits.

@@ -105,6 +105,19 @@ export interface RomMachineState {
    */
   coexVersionAddress: number;
   /**
+   * Where this chip's interrupt matrix and CPU interrupt controller live.
+   *
+   * The `esprv_*` and `intr_matrix_set` entry points behave identically on both
+   * parts and so are one implementation — but the C3 keeps its controller
+   * inside the matrix and the C6 keeps it in a separate block with every offset
+   * moved, so the addresses cannot be constants inside that implementation.
+   */
+  interruptLayout: {
+    matrixBase: number;
+    sourceCount: number;
+    cpu: { base: number; enable: number; type: number; priorityBase: number; threshold: number };
+  };
+  /**
    * State belonging to one chip's own ROM, keyed by whoever owns it.
    *
    * The C6's ROM carries an allocator that the C3's does not, and its state has
@@ -131,6 +144,18 @@ export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMac
     romConsoleDivider: 0,
     randState: 1,
     coexVersionAddress: ROM_COEX_VERSION_ADDRESS,
+    // The C3's, which a machine replaces with its own chip's.
+    interruptLayout: {
+      matrixBase: ESP32C3_SOC.cpuInterrupts.base,
+      sourceCount: 62,
+      cpu: {
+        base: ESP32C3_SOC.cpuInterrupts.base,
+        enable: ESP32C3_SOC.cpuInterrupts.enable,
+        type: ESP32C3_SOC.cpuInterrupts.type,
+        priorityBase: ESP32C3_SOC.cpuInterrupts.priorityBase,
+        threshold: ESP32C3_SOC.cpuInterrupts.threshold,
+      },
+    },
     chipState: new Map<string, unknown>(),
   };
 }
@@ -757,67 +782,67 @@ const uartDivModify: RomHandler = ({ args, machine }) => {
  * interrupt controller and anything reading the matrix back see the same
  * mapping the firmware established.
  */
-const routeIntrMatrix: RomHandler = ({ args, bus }) => {
+const routeIntrMatrix: RomHandler = ({ args, bus, machine }) => {
   const [, source, cpuInterrupt] = args;
-  if (source < 0 || source >= INTERRUPT_MATRIX_SOURCES) return 0;
-  bus.writeUint32((INTERRUPT_MATRIX_BASE + source * 4) >>> 0, cpuInterrupt >>> 0);
+  const { matrixBase, sourceCount } = machine.interruptLayout;
+  if (source < 0 || source >= sourceCount) return 0;
+  bus.writeUint32((matrixBase + source * 4) >>> 0, cpuInterrupt >>> 0);
   return 0;
 };
 
-/** Interrupt matrix base and source count, from the C3's register map. */
-const INTERRUPT_MATRIX_BASE = 0x600c2000;
-const INTERRUPT_MATRIX_SOURCES = 62;
-
-// The C3's RISC-V interrupt controller lives in the same block, above the
-// per-source mapping words. These offsets are from its register map.
-const INTC_ENABLE = 0x104;
-const INTC_TYPE = 0x108;
-const INTC_PRIORITY_BASE = 0x114;
-const INTC_THRESHOLD = 0x194;
-
 /**
- * The `esprv_*` family, which configures that controller.
+ * The `esprv_*` family, which configures the CPU interrupt controller.
  *
  * Each one performs the real register write, so the controller's state is the
  * firmware's own and anything that reads it back — including a later interrupt
  * dispatch — sees exactly what was configured.
+ *
+ * Every address comes from the machine rather than from a constant. The
+ * behaviour is identical on both parts, but the C3 keeps this controller inside
+ * its interrupt matrix at 0x600c2000 and the C6 keeps it in a separate INTPRI
+ * block at 0x600c5000 with every offset moved. A shared implementation with the
+ * C3's addresses written into it would run on a C6 and configure nothing — the
+ * writes would land in the C6's flash-MMU neighbourhood instead, and the
+ * scheduler would never receive a tick.
  */
-const intcEnable: RomHandler = ({ args, bus }) => {
-  const address = (INTERRUPT_MATRIX_BASE + INTC_ENABLE) >>> 0;
+const intcEnable: RomHandler = ({ args, bus, machine }) => {
+  const address = (machine.interruptLayout.cpu.base + machine.interruptLayout.cpu.enable) >>> 0;
   bus.writeUint32(address, (bus.readUint32(address) | (args[0] >>> 0)) >>> 0);
   return 0;
 };
 
-const intcDisable: RomHandler = ({ args, bus }) => {
-  const address = (INTERRUPT_MATRIX_BASE + INTC_ENABLE) >>> 0;
+const intcDisable: RomHandler = ({ args, bus, machine }) => {
+  const address = (machine.interruptLayout.cpu.base + machine.interruptLayout.cpu.enable) >>> 0;
   bus.writeUint32(address, (bus.readUint32(address) & ~(args[0] >>> 0)) >>> 0);
   return 0;
 };
 
 /** Interrupt type: 0 is level-triggered, 1 is edge-triggered. */
-const intcSetType: RomHandler = ({ args, bus }) => {
+const intcSetType: RomHandler = ({ args, bus, machine }) => {
   const [interrupt, type] = args;
   if (interrupt < 0 || interrupt > 31) return 0;
-  const address = (INTERRUPT_MATRIX_BASE + INTC_TYPE) >>> 0;
+  const address = (machine.interruptLayout.cpu.base + machine.interruptLayout.cpu.type) >>> 0;
   const current = bus.readUint32(address);
   bus.writeUint32(address, (type ? current | (1 << interrupt) : current & ~(1 << interrupt)) >>> 0);
   return 0;
 };
 
 /** Each CPU interrupt has its own priority word. */
-const intcSetPriority: RomHandler = ({ args, bus }) => {
+const intcSetPriority: RomHandler = ({ args, bus, machine }) => {
   const [interrupt, priority] = args;
   if (interrupt < 1 || interrupt > 31) return 0;
   // The priority words start at line 0 and run one per line, so a line's word
   // is at its own index. Offsetting by one puts every priority on the wrong
   // interrupt, which the firmware's own dispatcher then reads back.
-  bus.writeUint32((INTERRUPT_MATRIX_BASE + INTC_PRIORITY_BASE + interrupt * 4) >>> 0, priority >>> 0);
+  const { base, priorityBase } = machine.interruptLayout.cpu;
+  bus.writeUint32((base + priorityBase + interrupt * 4) >>> 0, priority >>> 0);
   return 0;
 };
 
 /** Interrupts at or below the threshold are masked. */
-const intcSetThreshold: RomHandler = ({ args, bus }) => {
-  bus.writeUint32((INTERRUPT_MATRIX_BASE + INTC_THRESHOLD) >>> 0, args[0] >>> 0);
+const intcSetThreshold: RomHandler = ({ args, bus, machine }) => {
+  const { base, threshold } = machine.interruptLayout.cpu;
+  bus.writeUint32((base + threshold) >>> 0, args[0] >>> 0);
   return 0;
 };
 
@@ -835,30 +860,20 @@ const intcSetThreshold: RomHandler = ({ args, bus }) => {
  * character conversions with a width and zero-padding, which is what the boot
  * messages use.
  */
-const romPrintf: RomHandler = ({ args, bus, machine, registers }) => {
-  const readString = (address: number): string => {
-    let out = '';
-    for (let i = 0; i < 512; i++) {
-      const byte = bus.readUint8((address + i) >>> 0);
-      if (byte === 0) break;
-      out += String.fromCharCode(byte);
-    }
-    return out;
-  };
-
-  const format = readString(args[0] >>> 0);
-  let argIndex = 0;
-  const stackBase = registers[2] >>> 0;
-  const nextArg = (): number => {
-    // a1..a7 first, then the stack, which is where the eighth onward live.
-    const value =
-      argIndex < 7
-        ? registers[ARG_REGISTER_BASE + 1 + argIndex] | 0
-        : bus.readUint32((stackBase + (argIndex - 7) * 4) >>> 0) | 0;
-    argIndex++;
-    return value;
-  };
-
+/**
+ * Formats one printf-style string.
+ *
+ * Split out from the ROM's own `printf` because the C6 publishes `vsnprintf`
+ * and its relatives as well, and those differ only in where the arguments come
+ * from — registers for one, a `va_list` for the other. Two copies of a format
+ * parser would be two places for the same mistake.
+ *
+ * The ROM's printf is a reduced one: the integer, string and character
+ * conversions with a width and zero-padding, which is what firmware messages
+ * use. An unrecognised conversion is reproduced verbatim rather than silently
+ * consuming an argument and desynchronising everything after it.
+ */
+export function formatPrintf(bus: Bus, format: string, nextArg: () => number): string {
   let out = '';
   for (let i = 0; i < format.length; i++) {
     if (format[i] !== '%') {
@@ -873,13 +888,21 @@ const romPrintf: RomHandler = ({ args, bus, machine, registers }) => {
     // Flags and width, then an optional length modifier which does not change
     // the size of anything on a 32-bit target.
     let pad = ' ';
-    if (format[i] === '-' || format[i] === '0') {
+    let leftAlign = false;
+    while (format[i] === '-' || format[i] === '0' || format[i] === '+' || format[i] === ' ' || format[i] === '#') {
       if (format[i] === '0') pad = '0';
+      if (format[i] === '-') leftAlign = true;
       i++;
     }
     let width = '';
     while (i < format.length && format[i] >= '0' && format[i] <= '9') width += format[i++];
-    while (i < format.length && 'lhz'.includes(format[i])) i++;
+    // A precision, which for strings truncates and for integers pads.
+    let precision = '';
+    if (format[i] === '.') {
+      i++;
+      while (i < format.length && format[i] >= '0' && format[i] <= '9') precision += format[i++];
+    }
+    while (i < format.length && 'lhzjt'.includes(format[i])) i++;
 
     const conversion = format[i];
     let piece: string;
@@ -897,25 +920,59 @@ const romPrintf: RomHandler = ({ args, bus, machine, registers }) => {
       case 'X':
         piece = (nextArg() >>> 0).toString(16).toUpperCase();
         break;
+      case 'o':
+        piece = (nextArg() >>> 0).toString(8);
+        break;
       case 'p':
         piece = '0x' + (nextArg() >>> 0).toString(16);
         break;
       case 'c':
         piece = String.fromCharCode(nextArg() & 0xff);
         break;
-      case 's':
-        piece = readString(nextArg() >>> 0);
+      case 's': {
+        piece = readCString(bus, nextArg() >>> 0, 512);
+        const limit = Number.parseInt(precision || '-1', 10);
+        if (limit >= 0) piece = piece.slice(0, limit);
         break;
+      }
       default:
-        // An unrecognised conversion is reproduced verbatim rather than
-        // silently consuming an argument and desynchronising the rest.
         piece = '%' + (conversion ?? '');
         break;
     }
     const target = Number.parseInt(width || '0', 10);
-    out += piece.length >= target ? piece : pad.repeat(target - piece.length) + piece;
+    if (piece.length >= target) out += piece;
+    else if (leftAlign) out += piece + ' '.repeat(target - piece.length);
+    else out += pad.repeat(target - piece.length) + piece;
   }
+  return out;
+}
 
+/**
+ * `esp_rom_printf(format, ...)` -> characters written
+ *
+ * ESP-IDF's early boot log goes through this before the logging driver is up,
+ * so implementing it properly turns the rest of startup from a guessing game
+ * into a readable narrative. The output is the firmware's own text, formatted
+ * from the firmware's own arguments — nothing is intercepted or invented.
+ *
+ * The RISC-V variadic convention puts the format string in a0 and the first
+ * seven remaining arguments in a1..a7, after which they continue on the stack.
+ */
+const romPrintf: RomHandler = ({ args, bus, machine, registers }) => {
+  const format = readCString(bus, args[0] >>> 0, 512);
+  let argIndex = 0;
+  const stackBase = registers[2] >>> 0;
+  const nextArg = (): number => {
+    // a1..a7 first, then the stack, which is where the eighth onward live.
+    const value =
+      argIndex < 7
+        ? registers[ARG_REGISTER_BASE + 1 + argIndex] | 0
+        : bus.readUint32((stackBase + (argIndex - 7) * 4) >>> 0) | 0;
+    argIndex++;
+    return value;
+  };
+
+  const out = formatPrintf(bus, format, nextArg);
   for (const character of out) {
     machine.romConsole.push(character.charCodeAt(0) & 0xff);
   }
@@ -933,7 +990,7 @@ const romPrintf: RomHandler = ({ args, bus, machine, registers }) => {
 // be a lot of round trips for behaviour that is entirely specified.
 
 /** Reads a NUL-terminated string, bounded so a runaway pointer cannot hang. */
-function readCString(bus: Bus, address: number, limit = 4096): string {
+export function readCString(bus: Bus, address: number, limit = 4096): string {
   let out = '';
   for (let i = 0; i < limit; i++) {
     const byte = bus.readUint8((address + i) >>> 0);

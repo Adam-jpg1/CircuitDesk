@@ -187,10 +187,37 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
     this.romState = createRomMachineState(options.resetReason ?? ResetReason.PowerOn);
     this.romState.cpuFrequencyMhz = soc.cpuMhz;
     this.romState.coexVersionAddress = soc.romData.coexVersionAddress;
+    // The shared esprv_* and intr_matrix_set entry points write real registers,
+    // and the two parts keep those registers in different blocks. Telling the
+    // ROM state which chip it is on is what stops a C6 configuring the C3's
+    // addresses and receiving no interrupts at all.
+    this.romState.interruptLayout = {
+      matrixBase: soc.interruptMatrixBase,
+      sourceCount: soc.interruptSourceCount,
+      cpu: {
+        base: soc.cpuInterrupts.base,
+        enable: soc.cpuInterrupts.enable,
+        type: soc.cpuInterrupts.type,
+        priorityBase: soc.cpuInterrupts.priorityBase,
+        threshold: soc.cpuInterrupts.threshold,
+      },
+    };
     this.core = new Rv32Core(this);
     this.core.customCsrRead = (number_) => this.readChipCsr(number_);
     this.core.selectInterrupt = (mask) => this.chooseInterrupt(mask);
     this.core.customPendingInterrupts = () => this.pendingInterruptLines;
+  }
+
+  /**
+   * The flash device the cache reads through, once one has been registered.
+   *
+   * Exposed because the C6's ROM publishes the whole flash driver, and those
+   * entry points have to reach the same device the cache does — reading it
+   * through the SPI1 registers instead would be driving the controller from
+   * inside the ROM call that the controller's own driver made.
+   */
+  get flashDevice(): FlashBytes | undefined {
+    return this.flash;
   }
 
   /** True when an address is inside this chip's mask-ROM window. */

@@ -146,13 +146,25 @@ const PERIOD_MODE = 1 << 30;
   check((timer.readUint32(INT_RAW) & 1) !== 0, 'and does fire once the counter reaches it');
   check((timer.readUint32(INT_ST) & 1) !== 0, 'the masked status follows the raw status when enabled');
 
-  // A one-shot comparator is a comparison, not a latch: once the counter has
-  // passed the target the condition stays true, so clearing the status only
-  // holds until the next look. Firmware moves the target on instead, which is
-  // exactly what the timer driver does for a one-shot alarm.
+  // A one-shot comparator raises its alarm when the counter *reaches* the
+  // target, and the alarm is a latch that firmware clears. It is not a live
+  // comparison: re-deriving the bit from `counter >= target` on every look
+  // makes INT_CLR useless, because the moment the handler returns the
+  // comparison is still true and the interrupt fires again.
+  //
+  // This assertion used to say the opposite, and the opposite is what stopped
+  // an ESP32-C6 dead. Its esp_timer alarm is one-shot; the handler cleared it,
+  // it re-asserted immediately, and the interrupt nested until its stack walked
+  // down out of RAM and into the interrupt-entry code. The C3 never showed it
+  // because the FreeRTOS tick it runs is periodic.
   timer.writeUint32(INT_CLR, 1);
-  check((timer.readUint32(INT_RAW) & 1) !== 0, 'a one-shot target already passed re-asserts after a clear');
+  check((timer.readUint32(INT_RAW) & 1) === 0, 'clearing a one-shot alarm really clears it');
+  clock.advanceMicros(1000);
+  check((timer.readUint32(INT_RAW) & 1) === 0, 'and it stays clear while the counter runs on past the target');
+  check((timer.readUint32(INT_ST) & 1) === 0, 'so the masked status is clear too, and no handler re-enters');
 
+  // Re-arming is what lets a one-shot fire again, exactly as firmware does it:
+  // write a new target, then load it.
   timer.writeUint32(TARGET0_LO, target * 4);
   timer.writeUint32(COMP0_LOAD, 1);
   timer.writeUint32(INT_CLR, 1);
