@@ -201,21 +201,130 @@ check(
     `with the overwhelming majority landing on it exactly (${exact}/${settled.length} within 0.5 ms)`,
   );
 
-  // The bound below is 6 ms rather than 1 because of a measured, periodic
-  // artefact: roughly one delay in twenty comes back 5 ms late, and it is
-  // always the twentieth. It is not the timer. The systimer alarm was measured
-  // firing exactly 1000 times per second at 1.0000 ms intervals, and
-  // SysTickIsrHandler and xTaskIncrementTick were each measured running exactly
-  // 1000 times per second on the same run — so every tick this runtime produces
-  // reaches the scheduler's own counter. The extra 5 ms is FreeRTOS resuming
-  // the task five ticks later than it was asked to, in firmware this runtime
-  // does not modify, and it has not yet been traced further.
+  // The bound is 6 ms rather than 1 because of a periodic 5 ms gap that is the
+  // Arduino core's own doing, not this runtime's. It is traced and asserted
+  // below rather than tolerated.
   //
-  // The bound is deliberately tight enough to still catch what matters: a tick
-  // rate wrong by any real factor moves the average and the 90% band together,
-  // and an earlier systimer HAL that wrote microseconds where ticks belonged
-  // produced gaps of 6.25 ms rather than 105.
+  // The bound still catches what matters: a tick rate wrong by any real factor
+  // moves the average and the 90% band together, and an earlier systimer HAL
+  // that wrote microseconds where ticks belonged produced gaps of 6.25 ms
+  // rather than 105.
   check(worst <= 6, `and none far off it (worst deviation ${worst.toFixed(3)} ms)`);
+
+  // ---------- the 5 ms gap is the Arduino core's periodic yield ----------
+  //
+  // Roughly one delay in twenty returns 5 ms late, always the twentieth. It is
+  // not the timer: the systimer alarm, SysTickIsrHandler and xTaskIncrementTick
+  // were each measured at exactly 1000 per second, 1.0000 ms apart, so every
+  // tick this runtime produces reaches the scheduler's own counter.
+  //
+  // It is `yieldIfNecessary()` in the Arduino core's own main.cpp:
+  //
+  //   void yieldIfNecessary(void) {
+  //     static uint64_t lastYield = 0;
+  //     uint64_t now = millis();
+  //     if ((now - lastYield) > 2000) { lastYield = now; vTaskDelay(5); }
+  //   }
+  //
+  // called from loopTask under CONFIG_FREERTOS_UNICORE — which the C6 is —
+  // before every loop(). Every two seconds the core deliberately gives up five
+  // ticks so lower-priority tasks, the idle task among them, get to run and
+  // feed the watchdog. A real ESP32-C6 does exactly this, so reproducing it is
+  // the simulation being right rather than wrong, and a runtime that did *not*
+  // show the gap would be the one to distrust.
+  const lateGaps = settled.map((g, i) => [i, g] as const).filter(([, g]) => g - 100 > 1);
+  check(lateGaps.length > 2, `the late gaps recur rather than happening once (${lateGaps.length} of them)`);
+  check(
+    lateGaps.every(([, g]) => Math.abs(g - 105) < 0.5),
+    `and every one is 5 ms rather than an arbitrary amount (${lateGaps.map(([, g]) => g.toFixed(3)).slice(0, 4).join(', ')})`,
+  );
+  // Every 2000 ms, which is the interval yieldIfNecessary tests for. Two
+  // consecutive late gaps are twenty ordinary 100 ms gaps apart.
+  const spacing = lateGaps.slice(1).map(([i], k) => i - lateGaps[k][0]);
+  check(
+    spacing.length > 0 && spacing.every((n) => n === spacing[0]),
+    `spaced evenly, one every ${spacing[0]} delays (${spacing.slice(0, 5).join(', ')})`,
+  );
+  check(
+    spacing.length > 0 && Math.abs(spacing[0] * 100 - 2000) < 150,
+    `which is one every ${(spacing[0] * 100) / 1000} seconds, the interval yieldIfNecessary tests for`,
+  );
+}
+
+// ---------- the yield is a real vTaskDelay(5) from loopTask ----------
+//
+// The check above shows the shape; this one shows the cause, by watching the
+// call itself. Without it the 5 ms could still be something else that happened
+// to be periodic.
+{
+  const vTaskDelay = addressOf('vTaskDelay');
+  const loopTask = map.get('loopTask(void*)');
+  check(vTaskDelay !== undefined, 'the firmware exports vTaskDelay');
+  check(loopTask !== undefined, 'and loopTask, which the Arduino core runs the sketch from');
+
+  if (vTaskDelay !== undefined && loopTask !== undefined) {
+    const second = createEsp32C6Machine(
+      createFlashFromBuild(
+        {
+          application: app,
+          bootloader: new Uint8Array(readFileSync(`${dir}/c6blink.ino.bootloader.bin`)),
+          partitionTable: new Uint8Array(readFileSync(`${dir}/c6blink.ino.partitions.bin`)),
+        },
+        8 * 1024 * 1024,
+      ),
+    ).machine;
+    second.loadImage(image);
+
+    /** Every vTaskDelay call: how many ticks it asked for, and who asked. */
+    const calls: { ms: number; ticks: number; fromLoopTask: boolean }[] = [];
+    for (let i = 0; i < 12_000_000; i++) {
+      const before = second.core.pc >>> 0;
+      second.step();
+      const after = second.core.pc >>> 0;
+      if (after === vTaskDelay && after !== before) {
+        const returnAddress = second.core.registers[1] >>> 0;
+        calls.push({
+          ms: second.nanos / 1e6,
+          ticks: second.core.registers[10] | 0,
+          // The compiler inlines loop() into loopTask, so a return address
+          // inside loopTask covers both the core's own yield and the sketch's
+          // delays. What separates them is what they ask for.
+          fromLoopTask: returnAddress >= loopTask && returnAddress < loopTask + 0x100,
+        });
+      }
+      if (second.nanos / 1e6 > 4400) break;
+    }
+
+    const sketchDelays = calls.filter((c) => c.ticks === 100);
+    const yields = calls.filter((c) => c.ticks === 5);
+
+    check(sketchDelays.length > 10, `the sketch's own delay(100) calls are seen (${sketchDelays.length})`);
+    // Three amounts appear and no others: 100 from the sketch, 5 from the
+    // core's periodic yield, and 0 — a plain "give up the CPU now" that
+    // FreeRTOS treats as a yield with no delay, used once during startup.
+    check(
+      calls.every((c) => c.ticks === 100 || c.ticks === 5 || c.ticks === 0),
+      `and nothing asks for any other amount (${[...new Set(calls.map((c) => c.ticks))].sort((a, b) => a - b).join(', ')} ticks)`,
+    );
+    check(
+      calls.filter((c) => c.ticks === 0).length <= 2,
+      `with the bare yield used only during startup (${calls.filter((c) => c.ticks === 0).length})`,
+    );
+
+    check(yields.length >= 2, `something calls vTaskDelay(5) of its own accord (${yields.length} times)`);
+    check(yields.every((c) => c.fromLoopTask), 'and every one of them comes from loopTask, not from the sketch');
+    const yieldGaps = yields.slice(1).map((c, i) => c.ms - yields[i].ms);
+    check(
+      yieldGaps.every((g) => g > 2000 && g < 2300),
+      `at intervals just over the 2000 ms yieldIfNecessary waits for (${yieldGaps.map((g) => g.toFixed(0)).join(', ')} ms)`,
+    );
+    // The five-tick yields and the late gaps are the same events: one per two
+    // seconds, and the sketch itself never asks for anything but 100.
+    check(
+      yields.length * 2 <= sketchDelays.length,
+      `and they are rare against the sketch's own delays (${yields.length} yields, ${sketchDelays.length} delays)`,
+    );
+  }
 
   const loopTimes = at('loop');
   const loopGaps = loopTimes.slice(1).map((t, i) => t - loopTimes[i]).slice(2);
