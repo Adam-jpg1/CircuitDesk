@@ -110,6 +110,22 @@ export const ESP32C6_ROM_ADDRESSES: Record<string, number> = {
   esp_rom_route_intr_matrix: 0x40000730,
   // Published as rtc_get_reset_reason on this part.
   esp_rom_get_reset_reason: 0x40000018,
+  // Published as ets_update_cpu_frequency on this part. The C3's linker script
+  // uses that name too; ESP-IDF's esp_rom_sys.h is where the esp_rom_ spelling
+  // comes from, so a first pass that searched the C6 script for the esp_rom_
+  // name found nothing and wrongly recorded it absent. Real C6 firmware calls
+  // it during clock setup, which is how the mistake surfaced.
+  esp_rom_set_cpu_ticks_per_us: 0x40000048,
+  // Published as uart_tx_flush on this part.
+  esp_rom_output_flush_tx: 0x40000074,
+  // The interrupt controller entry points, published as esprv_intc_int_* here
+  // against the C3's esprv_int_*. The C6's controller really is a different
+  // block, but its ROM helpers are published all the same.
+  esprv_int_disable: 0x40000724,
+  esprv_int_enable: 0x40000720,
+  esprv_int_set_priority: 0x40000718,
+  esprv_int_set_threshold: 0x4000071c,
+  esprv_int_set_type: 0x40000728,
 };
 
 /**
@@ -122,18 +138,17 @@ export const ESP32C6_ROM_ADDRESSES: Record<string, number> = {
  * neighbouring address.
  */
 export const NOT_PUBLISHED_ON_C6: string[] = [
+  // ets_efuse_get_spiconfig / ets_efuse_get_wp_pad: no counterpart of either
+  // name appears anywhere in esp32c6.rom.ld.
   'esp_rom_efuse_get_flash_gpio_info',
   'esp_rom_efuse_get_flash_wp_gpio',
-  'esp_rom_output_flush_tx',
+  // rom_i2c_readReg / writeReg and their masked forms. The C6 publishes no
+  // regi2c entry point at all, and its firmware bears that out: it reaches the
+  // analog master by writing MODEM_LPCON and I2C_ANA_MST directly instead.
   'esp_rom_regi2c_read',
   'esp_rom_regi2c_read_mask',
   'esp_rom_regi2c_write',
   'esp_rom_regi2c_write_mask',
-  'esp_rom_set_cpu_ticks_per_us',
-  'esprv_int_disable',
-  'esprv_int_enable',
-  'esprv_int_set_priority',
-  'esprv_int_set_threshold',
-  'esprv_int_set_type',
+  // No apb_backup symbol of any spelling.
   'ets_apb_backup_init_lock_func',
 ];

@@ -187,8 +187,17 @@ export class SysTimer extends RegisterFile implements InterruptingPeripheral {
   private readonly units: SysTimerUnit[] = [];
   private readonly comparators: SysTimerComparator[] = [];
 
-  constructor(private readonly clock: SimulatedClock) {
-    super('systimer', PERIPHERAL_BASE.systimer, 0x1000);
+  /**
+   * The C6 has the same system timer with the same register layout at a
+   * different base (0x6000A000 against 0x60023000) and different interrupt
+   * source numbers (57-59 against 37-39), so both are parameters.
+   */
+  constructor(
+    private readonly clock: SimulatedClock,
+    base = PERIPHERAL_BASE.systimer,
+    private readonly firstInterruptSource = INTERRUPT_SOURCE.systimerTarget0,
+  ) {
+    super('systimer', base, 0x1000);
     this.reset();
   }
 
@@ -275,7 +284,7 @@ export class SysTimer extends RegisterFile implements InterruptingPeripheral {
     const pending = this.pendingInterrupts();
     const sources: number[] = [];
     for (let i = 0; i < 3; i++) {
-      if ((pending & (1 << i)) !== 0) sources.push(INTERRUPT_SOURCE.systimerTarget0 + i);
+      if ((pending & (1 << i)) !== 0) sources.push(this.firstInterruptSource + i);
     }
     return sources;
   }

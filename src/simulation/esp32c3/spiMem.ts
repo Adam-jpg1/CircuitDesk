@@ -73,7 +73,11 @@ export class SpiMemController implements Peripheral, FlashOwner {
   /** This block owns the flash device the cache reads through. */
   readonly isFlashOwner = true;
   readonly name = 'spi1';
-  readonly base = SPI_MEM_BASE.spi1;
+  /**
+   * SPI1's base, which the two parts swap: 0x60002000 on the C3, 0x60003000 on
+   * the C6. The register layout is the same, so only this differs.
+   */
+  readonly base: number;
   readonly size = 0x1000;
 
   private readonly registers = new Map<number, number>();
@@ -82,7 +86,12 @@ export class SpiMemController implements Peripheral, FlashOwner {
   readonly recent: SpiFlashTransaction[] = [];
   private readonly recentLimit = 64;
 
-  constructor(readonly flash: SerialNorFlash) {}
+  constructor(
+    readonly flash: SerialNorFlash,
+    base = SPI_MEM_BASE.spi1,
+  ) {
+    this.base = base;
+  }
 
   readUint32(offset: number): number {
     return (this.registers.get(offset) ?? 0) >>> 0;
