@@ -21,7 +21,7 @@
 // Register offsets and bit positions are the documented ones from the ESP32-C3
 // technical reference manual.
 
-import type { Peripheral } from './esp32c3Machine';
+import type { Peripheral } from '../espRiscv/peripheral';
 import type { PinChange, PinLevel, PinPull, PinState } from '../gpioEvents';
 import { pinStateChanged } from '../gpioEvents';
 

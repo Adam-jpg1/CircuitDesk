@@ -16,6 +16,9 @@
 // from the ESP32-C3 technical reference manual.
 
 import { RegisterFile } from './registerFile';
+import type { InterruptingPeripheral, InterruptRouter } from '../espRiscv/peripheral';
+
+export { isInterrupting, type InterruptingPeripheral } from '../espRiscv/peripheral';
 
 export const INTERRUPT_MATRIX_BASE = 0x600c2000;
 
@@ -54,30 +57,10 @@ const CPU_INT_THRESH = 0x194;
 /** Line 0 does not exist; a routing word of zero means "not routed". */
 const LINE_COUNT = 32;
 
-/**
- * A peripheral that can raise an interrupt.
- *
- * Implementing this is what connects a block to the controller. The second
- * method exists so the machine does not have to re-evaluate every source after
- * every instruction: a block that will assert at a known future time says when,
- * and one whose state only changes when firmware writes to it says nothing.
- */
-export interface InterruptingPeripheral {
-  /** Source numbers this block is asserting right now. */
-  assertedInterruptSources(): number[];
-  /**
-   * Earliest simulated time, in nanoseconds, at which the answer above could
-   * change without a register write. Undefined when only a write can change it.
-   */
-  nextInterruptChangeNanos?(): number | undefined;
-}
+export class InterruptMatrix extends RegisterFile implements InterruptRouter {
+  /** This block decides which CPU interrupt line the core takes. */
+  readonly isInterruptRouter = true;
 
-/** True when a peripheral participates in interrupt delivery. */
-export function isInterrupting(value: unknown): value is InterruptingPeripheral {
-  return typeof (value as InterruptingPeripheral)?.assertedInterruptSources === 'function';
-}
-
-export class InterruptMatrix extends RegisterFile {
   /**
    * Edge-triggered lines latch when their source rises, and stay latched until
    * firmware clears them. Level-triggered lines simply follow their source, so

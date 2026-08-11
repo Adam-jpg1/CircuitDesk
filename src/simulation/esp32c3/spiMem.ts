@@ -15,7 +15,7 @@
 // Register offsets and bit positions are the documented ones from the ESP32-C3
 // technical reference manual.
 
-import type { Peripheral } from './esp32c3Machine';
+import type { FlashMapper, FlashOwner, Peripheral } from '../espRiscv/peripheral';
 import { FLASH_COMMAND, type SerialNorFlash } from './spiFlash';
 
 export const SPI_MEM_BASE = {
@@ -69,7 +69,9 @@ export interface SpiFlashTransaction {
 }
 
 /** SPI1, the controller ESP-IDF drives to reach the flash. */
-export class SpiMemController implements Peripheral {
+export class SpiMemController implements Peripheral, FlashOwner {
+  /** This block owns the flash device the cache reads through. */
+  readonly isFlashOwner = true;
   readonly name = 'spi1';
   readonly base = SPI_MEM_BASE.spi1;
   readonly size = 0x1000;
@@ -249,7 +251,9 @@ const MMU_VADDR_MASK = 0x7fffff;
  * Entries are writable because firmware really does rewrite them: mapping a
  * partition at runtime is exactly this.
  */
-export class FlashMmu implements Peripheral {
+export class FlashMmu implements Peripheral, FlashMapper {
+  /** This block is the machine's flash MMU. */
+  readonly isFlashMapper = true;
   readonly name = 'flash_mmu';
   readonly base = MMU_TABLE_BASE;
   readonly size = MMU_ENTRY_COUNT * 4;
@@ -279,7 +283,7 @@ export class FlashMmu implements Peripheral {
   }
 
   /** The entry a cache address falls in. */
-  static entryOf(address: number): number {
+  entryOf(address: number): number {
     return ((address & MMU_VADDR_MASK) >>> 16) % MMU_ENTRY_COUNT;
   }
 
@@ -289,7 +293,7 @@ export class FlashMmu implements Peripheral {
    * reports as a failure rather than a guess.
    */
   translate(address: number): number | undefined {
-    const entry = this.entries[FlashMmu.entryOf(address)];
+    const entry = this.entries[this.entryOf(address)];
     if ((entry & MMU_INVALID) !== 0) return undefined;
     return (entry & MMU_PAGE_MASK) * MMU_PAGE_SIZE + (address & (MMU_PAGE_SIZE - 1));
   }
