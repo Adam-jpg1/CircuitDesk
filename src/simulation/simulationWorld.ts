@@ -43,6 +43,26 @@ export interface NetSignalEvent {
   level: 'high' | 'low' | 'contended' | 'floating';
 }
 
+/**
+ * One byte a board put on its serial output, and which board put it there.
+ *
+ * A byte rather than a string because that is what the firmware actually
+ * wrote: a UTF-8 character can straddle two writes, and a runner that handed
+ * out half-decoded text would corrupt it. Decoding is the consumer's job and
+ * has to be kept per instance — see `SerialTranscript`.
+ *
+ * Shaped like `NetSignalEvent` on purpose. Both are "something observable
+ * happened on this instance at this simulated time", and a serial monitor, a
+ * transcript file and a challenge grader should not each invent their own.
+ */
+export interface SerialOutputEvent {
+  /** Simulated milliseconds since the world started. */
+  timestamp: number;
+  /** Board instance that wrote the byte. Two identical boards differ here. */
+  instanceId: string;
+  byte: number;
+}
+
 export interface SimulationWorldOptions {
   /**
    * Simulated milliseconds every board advances before nets are settled.
@@ -55,6 +75,8 @@ export interface SimulationWorldOptions {
   sliceMs?: number;
   /** Called after each settle, for anything watching signals. */
   onSignal?: (event: NetSignalEvent) => void;
+  /** Called for every byte any board writes to serial, tagged with which. */
+  onSerial?: (event: SerialOutputEvent) => void;
 }
 
 const DEFAULT_SLICE_MS = 1;
@@ -89,6 +111,16 @@ export class SimulationWorld {
   private readonly members: WorldMember[] = [];
   private readonly sliceMs: number;
   private readonly onSignal: ((event: NetSignalEvent) => void) | undefined;
+  private readonly onSerial: ((event: SerialOutputEvent) => void) | undefined;
+
+  /**
+   * Serial handlers each runner had before the world took ownership.
+   *
+   * The world intercepts `onSerialByte` so it can say which board wrote the
+   * byte, and calls whatever was there afterwards so nothing an engine's own
+   * caller had arranged is lost. Removing a board puts its handler back.
+   */
+  private readonly priorSerial = new Map<string, ((byte: number) => void) | null>();
 
   /**
    * Simulated time since the world started, in whole nanoseconds.
@@ -117,6 +149,7 @@ export class SimulationWorld {
   constructor(options: SimulationWorldOptions = {}) {
     this.sliceMs = options.sliceMs ?? DEFAULT_SLICE_MS;
     this.onSignal = options.onSignal;
+    this.onSerial = options.onSerial;
   }
 
   get timeMs(): number {
@@ -140,6 +173,45 @@ export class SimulationWorld {
   add(instanceId: string, runner: BoardRunner): void {
     if (this.members.some((m) => m.instanceId === instanceId)) return;
     this.members.push({ instanceId, runner });
+    this.captureSerial(instanceId, runner);
+  }
+
+  /**
+   * Tags this runner's serial output with the instance that produced it.
+   *
+   * Two Picos running the same sketch both print "Sending HIGH", and without
+   * this the monitor has no way to tell one from the other — the bytes arrive
+   * on the same callback shape from two objects that look alike. The instance
+   * id is the project's own, so it stays stable across a reset and is the same
+   * id the canvas, the nets and the Pin States panel already use.
+   */
+  private captureSerial(instanceId: string, runner: BoardRunner): void {
+    const downstream = runner.onSerialByte;
+    this.priorSerial.set(instanceId, downstream);
+    runner.onSerialByte = (byte: number) => {
+      this.onSerial?.({ timestamp: this.timeMs, instanceId, byte });
+      downstream?.(byte);
+    };
+  }
+
+  /** Gives a runner its own serial handler back, for a board leaving the world. */
+  private releaseSerial(instanceId: string, runner: BoardRunner): void {
+    if (!this.priorSerial.has(instanceId)) return;
+    runner.onSerialByte = this.priorSerial.get(instanceId) ?? null;
+    this.priorSerial.delete(instanceId);
+  }
+
+  /**
+   * Queues text into one board's serial input.
+   *
+   * The counterpart to attribution on the way out: with several boards on the
+   * canvas, "send this to the serial port" has to say which port.
+   */
+  sendSerial(instanceId: string, text: string): boolean {
+    const runner = this.runnerFor(instanceId);
+    if (!runner) return false;
+    runner.queueSerialInput(text);
+    return true;
   }
 
   runnerFor(instanceId: string): BoardRunner | undefined {
@@ -305,14 +377,20 @@ export class SimulationWorld {
   remove(instanceId: string): void {
     const index = this.members.findIndex((m) => m.instanceId === instanceId);
     if (index < 0) return;
-    this.members[index].runner.dispose?.();
+    const { runner } = this.members[index];
+    this.releaseSerial(instanceId, runner);
+    runner.dispose?.();
     this.members.splice(index, 1);
     this.settle?.();
   }
 
   dispose(): void {
-    for (const member of this.members) member.runner.dispose?.();
+    for (const member of this.members) {
+      this.releaseSerial(member.instanceId, member.runner);
+      member.runner.dispose?.();
+    }
     this.members.length = 0;
+    this.priorSerial.clear();
     this.scheduled.length = 0;
   }
 }
