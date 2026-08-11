@@ -104,6 +104,15 @@ export interface RomMachineState {
    * ends 0x10000 below the C3's, so a shared constant would be outside it.
    */
   coexVersionAddress: number;
+  /**
+   * State belonging to one chip's own ROM, keyed by whoever owns it.
+   *
+   * The C6's ROM carries an allocator that the C3's does not, and its state has
+   * to live somewhere the machine resets along with everything else. A bag
+   * keeps that out of the fields every chip shares, so nothing here has to know
+   * what a particular part's ROM keeps.
+   */
+  chipState: Map<string, unknown>;
 }
 
 export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMachineState {
@@ -122,6 +131,7 @@ export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMac
     romConsoleDivider: 0,
     randState: 1,
     coexVersionAddress: ROM_COEX_VERSION_ADDRESS,
+    chipState: new Map<string, unknown>(),
   };
 }
 
