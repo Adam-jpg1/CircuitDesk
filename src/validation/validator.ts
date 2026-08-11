@@ -5,6 +5,41 @@ import { buildCircuitGraph, splitNode, type CircuitGraph } from '../circuit/nets
 import { arduinoPinNumber } from '../boards/pinMaps';
 import { analyzeCodePins } from '../compiler/codeAnalysis';
 import { resolvePin } from '../project/partsRegistry';
+import {
+  getBoardBusProfile,
+  classifyBusPin,
+  channelsCarryingAll,
+  suggestedPinsFor,
+  busOfLine,
+  BUS_LINE_LABEL,
+  type BusLine,
+  type BoardBusProfile,
+} from '../boards/busProfile';
+
+/**
+ * The line the board's pad must carry, given the line the module's pin is.
+ *
+ * A module's TX goes to the board's RX and vice versa; SDA, SCL and the SPI
+ * clock are the same signal on both ends. MOSI and MISO are named from the
+ * controller's point of view on both sides, so they do not cross either.
+ */
+function crossedLine(line: BusLine): BusLine {
+  if (line === 'uart-tx') return 'uart-rx';
+  if (line === 'uart-rx') return 'uart-tx';
+  return line;
+}
+
+/** "Use Wire (GP4/GP5) or Wire1 (GP26/GP27)" — the working combinations. */
+function describeChannelChoices(profile: BoardBusProfile, lines: readonly BusLine[]): string {
+  const parts: string[] = [];
+  for (const channel of profile.channels) {
+    const pins = lines.map((line) => channel.defaults[line]).filter((p): p is string => p !== undefined);
+    if (pins.length !== lines.length) continue;
+    parts.push(`${channel.name} (${pins.join('/')})`);
+  }
+  if (parts.length === 0) return 'Move both wires onto pins belonging to the same controller.';
+  return `Put both lines on one controller — ${parts.join(' or ')}.`;
+}
 
 interface NetInfo {
   id: string;
@@ -330,44 +365,123 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
     }
   }
 
-  // --- I2C / UART pin checks ---
+  // --- bus pin checks, against the board each module is actually wired to ---
+  //
+  // The board comes from the wire, not from `project.boardInstances[0]`. With a
+  // Pico and an Uno on one canvas, a module wired to the Pico must be judged by
+  // the Pico's bus layout — and told about GP pins, not A4/A5.
   for (const inst of project.componentInstances) {
     const def = graph.definitions.get(inst.id);
     if (!def || def.isBoard) continue;
+    const moduleName = inst.label || def.name;
+
+    /**
+     * What this module presents to each board it is wired to.
+     *
+     * Keyed by board instance so two boards on one canvas are two separate
+     * verdicts, and a module bridging both is judged against each.
+     */
+    const perBoard = new Map<string, { line: BusLine; pinId: string; modulePin: PinDefinition }[]>();
     for (const pin of def.pins) {
-      const wants = pin.capabilities.find((c) => c === 'i2c-sda' || c === 'i2c-scl' || c === 'uart-tx' || c === 'uart-rx');
-      if (!wants) continue;
+      const line = pin.capabilities.find((c) => c in BUS_LINE_LABEL) as BusLine | undefined;
+      if (!line) continue;
       const info = netInfo(inst.id, pin.id);
       if (!info || info.pins.length <= 1) continue;
-      const boardPins = info.pins.filter((p) => p.isBoard);
-      if (boardPins.length === 0) continue;
-      const ok = boardPins.some((bp) => {
-        if (wants === 'i2c-sda') return bp.pin.capabilities.includes('i2c-sda');
-        if (wants === 'i2c-scl') return bp.pin.capabilities.includes('i2c-scl');
-        if (wants === 'uart-tx') return bp.pin.capabilities.includes('uart-rx') || bp.pin.capabilities.includes('digital-in');
-        return bp.pin.capabilities.includes('uart-tx') || bp.pin.capabilities.includes('digital-out');
-      });
-      if (!ok && (wants === 'i2c-sda' || wants === 'i2c-scl')) {
-        issues.push(
-          issue('i2c-pins', 'warning', `${def.name}: ${pin.label} not on an I2C-capable pin`,
-            `${pin.label} should connect to the board's ${wants === 'i2c-sda' ? 'SDA (A4)' : 'SCL (A5)'} pin for hardware I2C.`, {
-              affectedComponentIds: [inst.id],
-              affectedConnectionIds: connectionsOf(inst.id, pin.id),
-              suggestedFix: wants === 'i2c-sda' ? 'Move this wire to A4/SDA.' : 'Move this wire to A5/SCL.',
-            }),
-        );
+      for (const boardPin of info.pins.filter((p) => p.isBoard)) {
+        const list = perBoard.get(boardPin.instId) ?? [];
+        // A module's TX goes to the board's RX: the line the *board* pad has to
+        // carry is the opposite of the one the module's pin is named for.
+        list.push({ line: crossedLine(line), pinId: boardPin.pinId, modulePin: pin });
+        perBoard.set(boardPin.instId, list);
       }
-      if (wants === 'uart-tx') {
-        const wrongTx = boardPins.some((bp) => bp.pin.capabilities.includes('uart-tx'));
-        if (wrongTx) {
+    }
+
+    for (const [boardInstanceId, wiring] of perBoard) {
+      const boardOfWire = graph.definitions.get(boardInstanceId);
+      const profile = getBoardBusProfile(boardOfWire);
+      // No profile means CircuitDesk does not know this board's bus layout.
+      // Saying nothing is the only honest option: the alternative is telling
+      // the user about some other board's pins, which is the bug this replaces.
+      if (!profile || !boardOfWire) continue;
+      const boardInstance = project.boardInstances.find((b) => b.id === boardInstanceId);
+      const boardName = boardInstance?.label || profile.boardName;
+
+      for (const w of wiring) {
+        if (busOfLine(w.line) === 'uart') continue; // handled below, as a crossing
+        const verdict = classifyBusPin(profile, w.line, w.pinId);
+        const lineLabel = BUS_LINE_LABEL[w.line];
+        if (verdict.kind === 'incapable') {
+          const options = suggestedPinsFor(profile, w.line);
+          const where = options.length > 0 ? options.join(', ') : 'no pin on this board';
           issues.push(
-            issue('uart-pins', 'warning', `${def.name}: TX wired to TX`,
-              `The module's TX output is wired to the board's TX pin — serial lines must cross (TX→RX).`, {
+            issue('i2c-pins', 'warning', `${moduleName}: ${w.modulePin.label} is on ${w.pinId}, which ${boardName} cannot use for ${lineLabel}`,
+              `${w.pinId} on ${boardName} cannot carry ${lineLabel}. ` +
+                (options.length > 0
+                  ? `On this board ${lineLabel} can go on ${where}.`
+                  : `This board exposes no ${lineLabel}-capable pin.`), {
                 affectedComponentIds: [inst.id],
-                suggestedFix: 'Swap the two serial wires so module TX goes to board RX.',
+                affectedConnectionIds: connectionsOf(inst.id, w.modulePin.id),
+                why: profile.routing === 'fixed'
+                  ? `${boardName}'s ${lineLabel} line is bonded to a fixed pad and cannot be moved.`
+                  : `${boardName} can route ${lineLabel} to several pads, but not this one.`,
+                suggestedFix: options.length > 0 ? `Move this wire to ${options[0]}.` : undefined,
+              }),
+          );
+        } else if (verdict.kind === 'alternate') {
+          issues.push(
+            issue('bus-pins-need-config', 'info', `${moduleName}: ${w.modulePin.label} is on ${w.pinId}, an alternate ${lineLabel} pin`,
+              `${w.pinId} is a valid ${lineLabel} pin on ${boardName}, but it is not the default — ` +
+                `${profile.channels.find((c) => c.name === verdict.channel)?.defaults[w.line] ?? 'another pin'} is. ` +
+                'The sketch has to select it.', {
+                affectedComponentIds: [inst.id],
+                affectedConnectionIds: connectionsOf(inst.id, w.modulePin.id),
+                suggestedFix: verdict.configuration
+                  ? `Call ${verdict.configuration} before ${verdict.channel}.begin(), or move the wire to the default pin.`
+                  : `Move the wire to ${boardName}'s default ${lineLabel} pin.`,
               }),
           );
         }
+      }
+
+      // Both halves of a bus have to be on the same controller. Two pads that
+      // are each capable, on different controllers, is not a working bus — and
+      // checking the pins one at a time cannot see it.
+      for (const bus of ['i2c', 'spi'] as const) {
+        const onBus = wiring.filter((w) => busOfLine(w.line) === bus);
+        if (onBus.length < 2) continue;
+        const eachCapable = onBus.every((w) => classifyBusPin(profile, w.line, w.pinId).kind !== 'incapable');
+        if (!eachCapable) continue;
+        if (channelsCarryingAll(profile, onBus).length > 0) continue;
+        const described = onBus.map((w) => `${BUS_LINE_LABEL[w.line]} on ${w.pinId}`).join(' and ');
+        issues.push(
+          issue('bus-pins-split-controller', 'warning', `${moduleName}: its ${bus.toUpperCase()} lines are on different ${bus.toUpperCase()} controllers`,
+            `${boardName} can carry ${described}, but not on the same ${bus.toUpperCase()} peripheral — ` +
+              `so they cannot form one bus.`, {
+              affectedComponentIds: [inst.id],
+              affectedConnectionIds: connectionsOf(inst.id),
+              why: `${boardName} has more than one ${bus.toUpperCase()} controller, and each pad belongs to one of them.`,
+              suggestedFix: describeChannelChoices(profile, onBus.map((w) => w.line)),
+            }),
+        );
+      }
+    }
+
+    // UART crossing: a module's TX must reach the board's RX. This is about the
+    // direction of the wire, not about which pad the line can reach, so it is
+    // checked on the module's own pin capabilities.
+    for (const pin of def.pins) {
+      if (!pin.capabilities.includes('uart-tx')) continue;
+      const info = netInfo(inst.id, pin.id);
+      if (!info || info.pins.length <= 1) continue;
+      const boardPins = info.pins.filter((p) => p.isBoard);
+      if (boardPins.some((bp) => bp.pin.capabilities.includes('uart-tx'))) {
+        issues.push(
+          issue('uart-pins', 'warning', `${moduleName}: TX wired to TX`,
+            `The module's TX output is wired to the board's TX pin — serial lines must cross (TX→RX).`, {
+              affectedComponentIds: [inst.id],
+              suggestedFix: 'Swap the two serial wires so module TX goes to board RX.',
+            }),
+        );
       }
     }
   }

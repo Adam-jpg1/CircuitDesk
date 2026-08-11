@@ -29,7 +29,8 @@
     "test:rp2040:buses": "tsx tests/rp2040.buses.mts",
     "test:riscv": "tsx tests/riscv.core.mts",
     "test:esp32c3": "tsx tests/esp32c3.image.mts",
-    "test:serial": "tsx tests/sim.serialAttribution.mts"
+    "test:serial": "tsx tests/sim.serialAttribution.mts",
+    "test:validation": "tsx tests/validation.busPins.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
