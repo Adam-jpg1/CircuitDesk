@@ -157,6 +157,20 @@ export class Esp32C3Runner implements BoardRunner {
     this.machine.timeLimitNanos = undefined;
   }
 
+  /**
+   * How long until the machine's next scheduled event.
+   *
+   * Derived from the same sources the idle fast-forward uses, so the world and
+   * the machine agree on when something will happen rather than each keeping
+   * its own guess.
+   */
+  nextEventMs(): number | undefined {
+    if (this.disposed) return undefined;
+    const at = this.machine.nextEventNanos();
+    if (at === undefined) return undefined;
+    return Math.max(0, (at - this.machine.nanos) / 1_000_000);
+  }
+
   // ------------------------------------------------------------------ pins
 
   digitalPinLevel(pin: number): PinLevel | undefined {

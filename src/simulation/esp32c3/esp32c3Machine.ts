@@ -435,6 +435,23 @@ export class Esp32C3Machine implements Bus, SimulatedClock {
   }
 
   /**
+   * Simulated time at which something will next happen on its own.
+   *
+   * Exposed so a scheduler above the machine can align to it. Same sources the
+   * idle skip consults, so the two cannot disagree.
+   */
+  nextEventNanos(): number | undefined {
+    let soonest: number | undefined;
+    for (const source of this.eventSources()) {
+      const at = source.nextEventNanos();
+      if (at === undefined) continue;
+      const bounded = Math.max(at, this.elapsedNanos);
+      if (soonest === undefined || bounded < soonest) soonest = bounded;
+    }
+    return soonest;
+  }
+
+  /**
    * Advances simulated time to the next thing that can wake the machine.
    *
    * Only ever called with the core genuinely parked, so no instruction is
