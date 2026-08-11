@@ -90,7 +90,7 @@ export async function cliCompile(
   outputDir: string,
   fqbn: string,
   syntaxOnly: boolean,
-  arch: 'avr' | 'rp2040' | 'esp32c3' = 'avr',
+  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' = 'avr',
 ): Promise<CliBuildOutput> {
   const jobs = ['--jobs', String(COMPILE_JOBS)];
   const args = syntaxOnly
@@ -119,7 +119,7 @@ export async function cliCompile(
           binaryBase64 = (await readFile(path.join(outputDir, chosen))).toString('base64');
           binaryFormat = uf2 ? 'uf2' : 'bin';
         }
-      } else if (arch === 'esp32c3') {
+      } else if (arch === 'esp32c3' || arch === 'esp32c6') {
         // An ESP build writes several .bin files: the application image, the
         // second-stage bootloader, the partition table and a merged 4 MB flash
         // image. The application image is the one that is executed, and it is

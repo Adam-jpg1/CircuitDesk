@@ -76,7 +76,7 @@ export interface BoardTarget {
   id: string;
   fqbn: string;
   name: string;
-  arch: 'avr' | 'rp2040' | 'esp32c3';
+  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6';
   /** arduino-cli core that provides this target. */
   core: string;
   fCpuHz: number;
@@ -183,6 +183,18 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     core: 'esp32:esp32',
     mcu: 'esp32c3',
     variant: 'esp32c3',
+    fCpuHz: 160_000_000,
+    flashMaxBytes: 1_310_720,
+    ramMaxBytes: 327_680,
+  },
+  {
+    id: 'board.esp32-c6-devkitc-1',
+    fqbn: 'esp32:esp32:esp32c6',
+    name: 'ESP32-C6-DevKitC-1',
+    arch: 'esp32c6',
+    core: 'esp32:esp32',
+    mcu: 'esp32c6',
+    variant: 'esp32c6',
     fCpuHz: 160_000_000,
     flashMaxBytes: 1_310_720,
     ramMaxBytes: 327_680,

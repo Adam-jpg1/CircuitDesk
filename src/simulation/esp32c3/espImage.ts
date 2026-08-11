@@ -60,6 +60,32 @@ export const ESP32C3_REGIONS: { start: number; end: number; name: string }[] = [
   { start: 0x50000000, end: 0x50002000, name: 'RTC fast memory' },
 ];
 
+/**
+ * ESP32-C6 address ranges, which are not the C3's.
+ *
+ * The two parts are both RISC-V and both Espressif, and it would be easy to
+ * assume the address space carried over. It does not. The C6 unifies what the
+ * C3 splits: instruction and data RAM are one window at 0x40800000, and
+ * flash-mapped code and constants are one window at 0x42000000 rather than two
+ * at 0x42000000 and 0x3c000000. A C6 image loaded against the C3's table has
+ * every segment fall outside every region, which is exactly the rejection this
+ * table exists to make precise rather than accidental.
+ *
+ * Values are from the C6's own soc.h: SOC_IRAM_LOW/HIGH, SOC_IROM_LOW with
+ * 256 MMU entries of 64 KB, and the 16 KB of LP memory at 0x50000000.
+ */
+export const ESP32C6_REGIONS: { start: number; end: number; name: string }[] = [
+  { start: 0x40800000, end: 0x40880000, name: 'HP SRAM (instruction and data)' },
+  { start: 0x42000000, end: 0x43000000, name: 'flash-mapped code and constants' },
+  { start: 0x50000000, end: 0x50004000, name: 'LP memory' },
+];
+
+/** The region table for each chip this parser knows how to validate. */
+export const CHIP_REGIONS: Partial<Record<EspChipName, { start: number; end: number; name: string }[]>> = {
+  esp32c3: ESP32C3_REGIONS,
+  esp32c6: ESP32C6_REGIONS,
+};
+
 export class EspImageRejectedError extends Error {
   constructor(message: string) {
     super(message);
@@ -100,7 +126,7 @@ export function parseEspApplicationImage(
   options: { expectChip?: EspChipName; regions?: { start: number; end: number; name: string }[]; maxBytes?: number } = {},
 ): EspApplicationImage {
   const expectChip = options.expectChip ?? 'esp32c3';
-  const regions = options.regions ?? ESP32C3_REGIONS;
+  const regions = options.regions ?? CHIP_REGIONS[expectChip] ?? ESP32C3_REGIONS;
 
   if (buffer.length === 0) throw new EspImageRejectedError('The firmware file is empty.');
 
