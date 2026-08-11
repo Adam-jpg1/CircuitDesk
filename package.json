@@ -31,7 +31,8 @@
     "test:esp32c3": "tsx tests/esp32c3.image.mts",
     "test:serial": "tsx tests/sim.serialAttribution.mts",
     "test:validation": "tsx tests/validation.busPins.mts",
-    "test:production": "tsx tests/production.multiboard.mts"
+    "test:production": "tsx tests/production.multiboard.mts",
+    "test:artwork": "tsx tests/artwork.displays.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
