@@ -7,6 +7,21 @@
 import type { BoardDefinition, CircuitProject, ComponentInstance } from '../types';
 import { buildCircuitGraph, splitNode, type CircuitGraph } from '../circuit/nets';
 import type { BoardRunner } from './boardRunner';
+
+/**
+ * An MCU pin sitting on a net, together with the board instance that owns it.
+ *
+ * The instance id is what distinguishes two identical boards on one canvas.
+ * Without it a pin number is only meaningful when a project contains exactly
+ * one MCU, which is the assumption this replaces.
+ */
+export interface BoardPinEndpoint {
+  /** Board instance id from the project, not the board type. */
+  instance: string;
+  /** Pin index in that board's own runner numbering. */
+  pin: number;
+  board: BoardDefinition;
+}
 import { runnerPinIndex, runnerAdcChannel, boardAdcReference } from './boardRunner';
 import { avrProfileFor } from '../boards/pinMaps';
 import { Ssd1306Device, SSD1306_ADDRESSES } from './devices/ssd1306';
@@ -219,7 +234,37 @@ export class CircuitBinding {
   readonly boardInstance: ComponentInstance | null;
   readonly boardDef: BoardDefinition | null;
   private edges: ConductiveEdge[] = [];
+  /**
+   * MCU pins on each net, for the primary runner only.
+   *
+   * Kept as bare pin numbers because everything that consumes it — the
+   * ultrasonic pairing, the bus rebinding, an LED's source pin — belongs to
+   * one board by nature. Cross-board work uses `netEndpoints` below.
+   */
   private netBoardPins = new Map<string, number[]>();
+
+  /**
+   * Every MCU pin on every net, carrying which board instance owns it.
+   *
+   * This is what makes more than one board on a canvas possible. A bare pin
+   * number is ambiguous the moment a project holds two of the same part: GPIO8
+   * on one ESP32-C3 and GPIO8 on another are different pads on different
+   * chips, and a net driven by one must not be attributed to the other.
+   */
+  private netEndpoints = new Map<string, BoardPinEndpoint[]>();
+
+  /** Runners by board instance id. A single-board project simply has one. */
+  private runners = new Map<string, BoardRunner>();
+
+  /**
+   * Nets where two outputs disagreed on the last update.
+   *
+   * Reported rather than resolved. Two pins driving one wire in opposite
+   * directions is a short through both output stages, and presenting it as a
+   * settled HIGH or LOW would hide the single most damaging wiring mistake a
+   * student can make.
+   */
+  readonly contendedNets = new Set<string>();
   /** netId → emulated ADC channels reachable on that net (board-profile-aware). */
   private netAdcChannels = new Map<string, number[]>();
   private groundNets = new Set<string>();
@@ -231,6 +276,15 @@ export class CircuitBinding {
   constructor(
     readonly project: CircuitProject,
     readonly runner: BoardRunner | null,
+    /**
+     * Runners for every simulated board, keyed by board instance id.
+     *
+     * Omitted by single-board callers, which pass `runner` alone and get the
+     * same behaviour they always had. When supplied, `runner` is still the
+     * primary board — the one whose logic level and bus devices the
+     * component models use — and the rest participate through the nets.
+     */
+    runnersByInstance?: Map<string, BoardRunner>,
   ) {
     this.graph = buildCircuitGraph(project);
     // Bind ONLY to a board whose definition declares genuine simulation
@@ -243,6 +297,9 @@ export class CircuitBinding {
       }) ?? null;
     const bd = this.boardInstance ? this.graph.definitions.get(this.boardInstance.id) : undefined;
     this.boardDef = bd?.isBoard ? bd : null;
+
+    if (runnersByInstance) for (const [id, r] of runnersByInstance) this.runners.set(id, r);
+    else if (runner && this.boardInstance) this.runners.set(this.boardInstance.id, runner);
 
     this.indexNets();
     this.buildEdges();
@@ -465,6 +522,16 @@ export class CircuitBinding {
         const def = this.graph.definitions.get(instId);
         const pin = def?.pins.find((p) => p.id === pinId);
         if (!pin) continue;
+        if (def?.isBoard && def.simulation?.supported === true) {
+          // Ownership-carrying index, built for every simulated board on the
+          // canvas rather than only the primary one.
+          const ownerPin = runnerPinIndex(def, pinId);
+          if (ownerPin !== undefined) {
+            const list = this.netEndpoints.get(net.id) ?? [];
+            list.push({ instance: instId, pin: ownerPin, board: def });
+            this.netEndpoints.set(net.id, list);
+          }
+        }
         if (def?.isBoard && instId === this.boardInstance?.id && this.boardDef) {
           // Resolved through the board's own architecture: an RP2040 pad is
           // GP15, not "Arduino pin 15", and never resolves through the AVR map.
@@ -726,15 +793,24 @@ export class CircuitBinding {
     for (const netId of this.groundNets) setLevel(netId, 0, null, 0);
     for (const [netId, v] of this.supplyNets) if (!this.groundNets.has(netId)) setLevel(netId, v, null, 0);
 
-    // MCU-driven nets from real emulator pin states.
-    if (runner) {
-      for (const [netId, pins] of this.netBoardPins) {
-        for (const pin of pins) {
-          const level = runner.digitalPinLevel(pin);
-          if (level === 'high') setLevel(netId, highVolts, pin, 0);
-          else if (level === 'low') setLevel(netId, 0, pin, 0);
-        }
+    // MCU-driven nets, from every running board's real pin state.
+    //
+    // Each endpoint is asked of its own runner. Two boards driving one net in
+    // opposite directions is a genuine electrical fault, and setLevel already
+    // records that as a conflict rather than quietly picking a winner — which
+    // is the behaviour a learner needs to see, since on real hardware it is
+    // the thing that damages a pin.
+    this.contendedNets.clear();
+    for (const [netId, endpoints] of this.netEndpoints) {
+      for (const endpoint of endpoints) {
+        const owner = this.runners.get(endpoint.instance);
+        if (!owner) continue;
+        const level = owner.digitalPinLevel(endpoint.pin);
+        if (level !== 'high' && level !== 'low') continue;
+        const volts = level === 'high' ? Number(endpoint.board.metadata.logicVoltage ?? highVolts) : 0;
+        setLevel(netId, volts, endpoint.instance === this.boardInstance?.id ? endpoint.pin : null, 0);
       }
+      if (levels.get(netId)?.conflict) this.contendedNets.add(netId);
     }
 
     // Propagate through conductive elements to a fixpoint (bounded iterations).
@@ -831,22 +907,28 @@ export class CircuitBinding {
     const levelOf = (netId: string | undefined): NetLevel | undefined =>
       netId ? levels.get(netId) : undefined;
 
-    // Feed digital inputs into the emulator.
-    if (runner) {
-      for (const [netId, pins] of this.netBoardPins) {
-        const level = levels.get(netId);
-        for (const pin of pins) {
-          const state = runner.digitalPinLevel(pin);
-          if (state === 'input' || state === 'input-pullup') {
-            if (level?.volts != null) {
-              runner.setDigitalInput(pin, level.volts >= inputThreshold);
-            } else {
-              // Nothing on the canvas is holding this pad, so its own
-              // configuration decides: an enabled pull-up reads high, and a
-              // plain floating input keeps whatever it had.
-              runner.setDigitalInput(pin, null);
-            }
-          }
+    // Feed digital inputs back into every running board.
+    //
+    // Every board, not only the primary one: a second MCU reading a wire is
+    // exactly the case the multi-board world exists for, and feeding only the
+    // primary would leave it reading a pad nothing ever touched. Each board's
+    // own logic threshold is used, since a 3.3 V part and a 5 V part on the
+    // same wire do not switch at the same voltage.
+    for (const [netId, endpoints] of this.netEndpoints) {
+      const level = levels.get(netId);
+      for (const endpoint of endpoints) {
+        const owner = this.runners.get(endpoint.instance);
+        if (!owner) continue;
+        const state = owner.digitalPinLevel(endpoint.pin);
+        if (state !== 'input' && state !== 'input-pullup') continue;
+        const threshold = Number(endpoint.board.metadata.logicVoltage ?? highVolts) / 2;
+        if (level?.volts != null) {
+          owner.setDigitalInput(endpoint.pin, level.volts >= threshold);
+        } else {
+          // Nothing on the canvas is holding this pad, so its own
+          // configuration decides: an enabled pull-up reads high, and a
+          // plain floating input keeps whatever it had.
+          owner.setDigitalInput(endpoint.pin, null);
         }
       }
     }
