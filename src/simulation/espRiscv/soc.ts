@@ -42,6 +42,18 @@ export interface EspMemoryMap {
 }
 
 /**
+ * Every window in which an access is a register access rather than memory.
+ *
+ * This is a list rather than the single `peripheral` range because it is not
+ * one range on every part. The C6 puts its CPU interrupt controller in a RISC-V
+ * PLIC at 0x20001000, nowhere near 0x60000000, and an address space model that
+ * knew only about the peripheral window sent every access to it into plain RAM
+ * — where the writes stuck and read back, so nothing faulted and nothing
+ * worked. That is precisely the failure this list exists to make impossible.
+ */
+export type MmioWindows = readonly AddressRange[];
+
+/**
  * Where the CPU interrupt controller's registers live.
  *
  * On the C3 these offsets are inside the interrupt matrix itself. On the C6
@@ -133,6 +145,8 @@ export interface EspSocConfig {
   /** Espressif's own name for the part, for messages a user may see. */
   readonly displayName: string;
   readonly memory: EspMemoryMap;
+  /** Windows in which an access is MMIO. See `MmioWindows`. */
+  readonly mmio: MmioWindows;
   /**
    * The stack the mask ROM is running on when it enters the application.
    *
@@ -184,6 +198,8 @@ export const ESP32C3_SOC: EspSocConfig = {
     rtcFast: { start: 0x50000000, end: 0x50002000 },
     peripheral: { start: 0x60000000, end: 0x60100000 },
   },
+  // The C3 has one, and it is the peripheral window.
+  mmio: [{ start: 0x60000000, end: 0x60100000 }],
   romStackTop: 0x3fcde710,
   cpuMhz: 160,
   applicationFlashOffset: 0x10000,
@@ -260,6 +276,13 @@ export const ESP32C6_SOC: EspSocConfig = {
     rtcFast: { start: 0x50000000, end: 0x50004000 },
     peripheral: { start: 0x60000000, end: 0x60100000 },
   },
+  mmio: [
+    // DR_REG_PLIC_MX_BASE 0x20001000, DR_REG_PLIC_UX_BASE 0x20001400,
+    // DR_REG_CLINT_M_BASE 0x20001800: the RISC-V-standard controllers, which
+    // the C3 does not have and which sit far below the peripheral window.
+    { start: 0x20001000, end: 0x20002000 },
+    { start: 0x60000000, end: 0x60100000 },
+  ],
   romStackTop: 0x4087e610,
   cpuMhz: 160,
   applicationFlashOffset: 0x10000,
@@ -277,18 +300,26 @@ export const ESP32C6_SOC: EspSocConfig = {
   interruptMatrixBase: 0x60010000,
   interruptSourceCount: 77,
   cpuInterrupts: {
-    // A block of its own, DR_REG_INTPRI_BASE — which on the C3 is where the
-    // flash MMU table sits.
-    base: 0x600c5000,
-    size: 0x1000,
-    enable: 0x00,
-    type: 0x04,
-    clear: 0xa8,
-    eipStatus: 0x08,
-    priorityBase: 0x0c,
-    threshold: 0x8c,
+    // The RISC-V PLIC at DR_REG_PLIC_MX_BASE — *not* INTPRI.
+    //
+    // This is the correction that made the C6 boot. `soc/esp32c6/include/soc/
+    // interrupt_reg.h` maps every INTERRUPT_CORE0_CPU_INT_* name onto a
+    // PLIC_MXINT_* register, and `soc_caps.h` sets SOC_INT_PLIC_SUPPORTED.
+    // INTPRI exists and has a plausible-looking set of CPU interrupt registers
+    // of its own, which is exactly why the first model used it — but the
+    // firmware never touches them. Its interrupt entry reads the threshold from
+    // 0x20001090 and the line's priority from 0x20001010 + line*4.
+    base: 0x20001000,
+    size: 0x400,
+    enable: 0x00, // PLIC_MXINT_ENABLE_REG
+    type: 0x04, // PLIC_MXINT_TYPE_REG
+    clear: 0x08, // PLIC_MXINT_CLEAR_REG
+    eipStatus: 0x0c, // PLIC_EMIP_STATUS_REG
+    priorityBase: 0x10, // PLIC_MXINT0_PRI_REG, indexed from line 0
+    threshold: 0x90, // PLIC_MXINT_THRESH_REG
   },
-  // INTPRI_CPU_INTR_FROM_CPU_0_REG, inside the same block as the controller.
+  // INTPRI_CPU_INTR_FROM_CPU_0_REG. The software interrupts really are in
+  // INTPRI; it is only the CPU interrupt controller that is elsewhere.
   softwareInterrupts: { base: 0x600c5000, fromCpu0: 0x90 },
   interruptSources: {
     gpio: 30,

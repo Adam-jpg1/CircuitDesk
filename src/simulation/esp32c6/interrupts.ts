@@ -1,33 +1,46 @@
 // The ESP32-C6's interrupt matrix and CPU interrupt controller.
 //
-// On the C3 these are one block. On the C6 they are two, and not adjacent:
+// On the C3 these are one block. On the C6 they are two, and the second is not
+// where it looks like it should be:
 //
 //   * INTMTX at 0x60010000 holds the routing words, one per source, at
 //     `source * 4`. (`soc/esp32c6/interrupt_matrix_reg.h`.)
-//   * INTPRI at 0x600C5000 holds the enable mask, the trigger types, the
-//     per-line priorities, the threshold, the clear register and the four
-//     software interrupts — every one of them at a different offset from the
-//     C3's, and the block sits exactly where the C3 keeps its flash MMU table.
-//     (`soc/esp32c6/intpri_reg.h`.)
+//   * The CPU interrupt controller is a RISC-V PLIC at 0x20001000 —
+//     DR_REG_PLIC_MX_BASE — holding the enable mask, the trigger types, the
+//     per-line priorities, the threshold, the claim and the pending status.
+//     (`soc/esp32c6/register/soc/plic_reg.h`, and
+//     `soc/esp32c6/include/soc/interrupt_reg.h`, which maps every
+//     INTERRUPT_CORE0_CPU_INT_* name onto a PLIC_MXINT_* register.)
 //
-// Not one interrupt source number carries over either: GPIO is 30 here and 16
-// on the C3, the system timer's first target is 57 against 37, and the
+// The C6 also has an INTPRI block at 0x600C5000 that carries a plausible-
+// looking set of CPU interrupt registers, and a first version of this file used
+// it. The firmware never touches them. It reads its threshold from 0x20001090
+// and a line's priority from 0x20001010 + line*4, both in the PLIC — and
+// 0x20001000 is below the peripheral window, so with the wrong block modelled
+// every one of those accesses went to plain RAM. Nothing faulted. The
+// controller simply never heard from the firmware, the FreeRTOS tick was never
+// masked while its own handler ran, and it re-entered until its stack walked
+// out of RAM and into the interrupt-entry code.
+//
+// What INTPRI really carries is the four software interrupts a CPU raises on
+// itself, so that block is still here — as a source, not as the controller.
+//
+// Not one interrupt source number carries over from the C3 either: GPIO is 30
+// here and 16 there, the system timer's first target is 57 against 37, and the
 // software interrupts are 22-25 against 50-53.
-//
-// The machine asks one object which line to take, so this controller presents
-// itself as that object and exposes the two register blocks as peripherals for
-// the bus to route to. Splitting it any other way would mean the machine
-// knowing that this chip has two.
 
 import { RegisterFile } from '../esp32c3/registerFile';
 import { ESP32C6_SOC } from '../espRiscv/soc';
 import type { InterruptingPeripheral, InterruptRouter, Peripheral } from '../espRiscv/peripheral';
 
 /** INTMTX_CORE0, the routing words. */
-export const ESP32C6_INTERRUPT_MATRIX_BASE = 0x60010000;
+export const ESP32C6_INTERRUPT_MATRIX_BASE = ESP32C6_SOC.interruptMatrixBase;
 
-/** INTPRI, the CPU interrupt controller. */
-export const ESP32C6_INTPRI_BASE = ESP32C6_SOC.cpuInterrupts.base;
+/** DR_REG_PLIC_MX_BASE, the CPU interrupt controller. */
+export const ESP32C6_PLIC_BASE = ESP32C6_SOC.cpuInterrupts.base;
+
+/** DR_REG_INTPRI_BASE, which carries the software interrupts. */
+export const ESP32C6_INTPRI_BASE = ESP32C6_SOC.softwareInterrupts.base;
 
 /**
  * Peripheral interrupt source numbers.
@@ -56,10 +69,10 @@ export const ESP32C6_INTERRUPT_SOURCE = {
  * The matrix has one routing word per source. INTMTX_CORE0_ECC_INTR_MAP_REG,
  * the last of them, sits at offset 0x130, so there are 77.
  */
-const SOURCE_COUNT = 77;
+const SOURCE_COUNT = ESP32C6_SOC.interruptSourceCount;
 const MAP_BASE = 0x000;
 
-const LAYOUT = ESP32C6_SOC.cpuInterrupts;
+const PLIC = ESP32C6_SOC.cpuInterrupts;
 const SOFTWARE = ESP32C6_SOC.softwareInterrupts;
 
 /** Line 0 does not exist; a routing word of zero means "not routed". */
@@ -80,20 +93,20 @@ class Esp32C6InterruptMap extends RegisterFile {
 }
 
 /**
- * The prioritising half, INTPRI.
+ * The PLIC: enable, type, priority, threshold and pending status.
  *
- * It also carries the four software interrupts a CPU raises on itself, which
- * on the C3 live in a different block entirely. FreeRTOS switches tasks through
- * one of these: `vPortYield` writes 1 and then spins until the handler writes 0
- * back, so storing the write without delivering an interrupt turns that into an
- * endless loop.
+ * The threshold is the piece that makes the whole arrangement work. ESP-IDF's
+ * interrupt entry reads the priority of the line it is about to service, writes
+ * that priority plus one here, and only then re-enables interrupts — so a line
+ * of equal or lower priority cannot pre-empt its own handler. A controller that
+ * does not honour the threshold re-delivers the same line immediately.
  */
-class Esp32C6InterruptPriority extends RegisterFile implements InterruptingPeripheral {
+class Esp32C6Plic extends RegisterFile {
   /** Edge-triggered lines latch when their source rises; level lines follow theirs. */
   edgeLatched = 0;
 
   constructor() {
-    super('intpri', LAYOUT.base, LAYOUT.size);
+    super('plic_mx', PLIC.base, PLIC.size);
   }
 
   override reset(): void {
@@ -102,11 +115,54 @@ class Esp32C6InterruptPriority extends RegisterFile implements InterruptingPerip
   }
 
   protected override onWrite(offset: number, value: number): void {
-    if (offset !== LAYOUT.clear) return;
+    if (offset !== PLIC.clear) return;
     // Clearing is a pulse: the bits written are cleared and the register does
     // not stay set.
     this.edgeLatched &= ~value;
-    this.registers.set(LAYOUT.clear, 0);
+    this.registers.set(PLIC.clear, 0);
+  }
+
+  /**
+   * Priority assigned to a CPU line.
+   *
+   * PLIC_MXINT0_PRI_REG is the first, so a line's word is at its own index.
+   * Indexing from one instead leaves every interrupt able to re-enter itself,
+   * because the entry code would read a neighbour's priority and mask the
+   * wrong level.
+   */
+  priorityOf(line: number): number {
+    if (line < 1 || line >= LINE_COUNT) return 0;
+    return this.peek(PLIC.priorityBase + line * 4) & 0xff;
+  }
+
+  /** Lines below this priority are masked. PLIC_CPU_MXINT_THRESH is 8 bits. */
+  get threshold(): number {
+    return this.peek(PLIC.threshold) & 0xff;
+  }
+
+  get enableMask(): number {
+    return this.peek(PLIC.enable) >>> 0;
+  }
+
+  get typeMask(): number {
+    return this.peek(PLIC.type) >>> 0;
+  }
+
+  setStatus(value: number): void {
+    this.registers.set(PLIC.eipStatus, value >>> 0);
+  }
+}
+
+/**
+ * INTPRI, which carries the four software interrupts a CPU raises on itself.
+ *
+ * FreeRTOS switches tasks through one of these: `vPortYield` writes 1 and then
+ * spins until the handler writes 0 back, so storing the write without
+ * delivering an interrupt turns that into an endless loop.
+ */
+class Esp32C6IntPri extends RegisterFile implements InterruptingPeripheral {
+  constructor() {
+    super('intpri', ESP32C6_INTPRI_BASE, 0x1000);
   }
 
   assertedInterruptSources(): number[] {
@@ -116,62 +172,33 @@ class Esp32C6InterruptPriority extends RegisterFile implements InterruptingPerip
     }
     return sources;
   }
-
-  /**
-   * Priority assigned to a CPU line.
-   *
-   * The priority words are indexed by line number from zero — INTPRI_CORE0_
-   * CPU_INT_PRI_0_REG is the first — which the firmware's own dispatcher relies
-   * on: it reads the priority of the line it is servicing and writes that plus
-   * one to the threshold so an equal or lower interrupt cannot pre-empt it.
-   * Indexing from one instead leaves every interrupt able to re-enter itself.
-   */
-  priorityOf(line: number): number {
-    if (line < 1 || line >= LINE_COUNT) return 0;
-    return this.peek(LAYOUT.priorityBase + line * 4) & 0xf;
-  }
-
-  get threshold(): number {
-    return this.peek(LAYOUT.threshold) & 0xf;
-  }
-
-  get enableMask(): number {
-    return this.peek(LAYOUT.enable) >>> 0;
-  }
-
-  get typeMask(): number {
-    return this.peek(LAYOUT.type) >>> 0;
-  }
-
-  setStatus(value: number): void {
-    this.registers.set(LAYOUT.eipStatus, value >>> 0);
-  }
 }
 
 /**
- * The C6's interrupt controller, spanning both of its blocks.
+ * The C6's interrupt controller, spanning its three blocks.
  *
- * This is the object the machine consults. `peripherals` are the two register
- * windows the bus must route to, and `interruptSource` is INTPRI in its other
+ * This is the object the machine consults. `peripherals` are the register
+ * windows the bus must route to, and INTPRI appears in that list in its other
  * capacity as a block that can assert.
  */
 export class Esp32C6InterruptController implements InterruptRouter {
   readonly isInterruptRouter = true;
 
   private readonly map = new Esp32C6InterruptMap();
-  private readonly priority = new Esp32C6InterruptPriority();
+  private readonly plic = new Esp32C6Plic();
+  private readonly intpri = new Esp32C6IntPri();
 
   /** Sources asserted at the previous evaluation, to spot an edge. */
   private previousSources = new Set<number>();
 
-  /** The two register windows this controller occupies. */
+  /** The register windows this controller occupies. */
   get peripherals(): Peripheral[] {
-    return [this.map, this.priority];
+    return [this.map, this.plic, this.intpri];
   }
 
-  /** INTPRI, which also raises the software interrupts. */
+  /** INTPRI, which raises the software interrupts. */
   get interruptSource(): InterruptingPeripheral {
-    return this.priority;
+    return this.intpri;
   }
 
   /** The CPU line a source is routed to. Exposed for tests and diagnostics. */
@@ -179,15 +206,25 @@ export class Esp32C6InterruptController implements InterruptRouter {
     return this.map.routeOf(source);
   }
 
+  /** A line's configured priority, for tests and diagnostics. */
+  priorityOf(line: number): number {
+    return this.plic.priorityOf(line);
+  }
+
+  /** The controller's current masking threshold. */
+  get threshold(): number {
+    return this.plic.threshold;
+  }
+
   /**
    * Recomputes which CPU lines are asserted and returns the enabled ones.
    *
-   * Routing comes from one block and everything else from the other, which is
-   * the whole reason this class exists.
+   * Routing comes from one block and everything else from another, which is the
+   * whole reason this class exists.
    */
   evaluate(asserted: Iterable<number>): number {
     const sources = new Set(asserted);
-    const type = this.priority.typeMask;
+    const type = this.plic.typeMask;
 
     let level = 0;
     for (const source of sources) {
@@ -196,33 +233,37 @@ export class Esp32C6InterruptController implements InterruptRouter {
       const bit = 1 << line;
       if ((type & bit) !== 0) {
         // Only a source that was not asserted a moment ago is an edge.
-        if (!this.previousSources.has(source)) this.priority.edgeLatched |= bit;
+        if (!this.previousSources.has(source)) this.plic.edgeLatched |= bit;
       } else {
         level |= bit;
       }
     }
     this.previousSources = sources;
 
-    const pending = (level | this.priority.edgeLatched) >>> 0;
-    const enabled = (pending & this.priority.enableMask) >>> 0;
-    this.priority.setStatus(enabled);
+    const pending = (level | this.plic.edgeLatched) >>> 0;
+    const enabled = (pending & this.plic.enableMask) >>> 0;
+    this.plic.setStatus(enabled);
     return enabled;
   }
 
   /**
    * Picks the line to take from those pending.
    *
-   * A line whose priority is below the threshold is masked out entirely. Among
-   * the rest the highest priority wins, and the highest-numbered line breaks a
-   * tie — the order the controller itself resolves in.
+   * A line whose priority is below the threshold is masked out entirely — which
+   * is how a handler stops its own line pre-empting it, and without which the
+   * FreeRTOS tick re-enters itself for ever. Among the rest the highest
+   * priority wins, and the highest-numbered line breaks a tie.
    */
   select(pending: number): number | undefined {
     let best: number | undefined;
     let bestPriority = -1;
+    const threshold = this.plic.threshold;
     for (let line = 1; line < LINE_COUNT; line++) {
       if ((pending & (1 << line)) === 0) continue;
-      const priority = this.priority.priorityOf(line);
-      if (priority < this.priority.threshold) continue;
+      const priority = this.plic.priorityOf(line);
+      // A line left at priority zero is disabled, as on any PLIC.
+      if (priority === 0) continue;
+      if (priority < threshold) continue;
       if (priority >= bestPriority) {
         bestPriority = priority;
         best = line;
@@ -233,7 +274,8 @@ export class Esp32C6InterruptController implements InterruptRouter {
 
   reset(): void {
     this.map.reset();
-    this.priority.reset();
+    this.plic.reset();
+    this.intpri.reset();
     this.previousSources.clear();
   }
 }

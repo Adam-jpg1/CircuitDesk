@@ -87,6 +87,29 @@ function return64(context: RomCallContext, value: number): number {
   return value >>> 0;
 }
 
+/**
+ * Converts microseconds to systimer ticks through the firmware's own function.
+ *
+ * The HAL's alarm setters take **microseconds**, not ticks, and convert with
+ * `hal->us_to_ticks` before touching the register — the tick rate is not this
+ * layer's to assume, which is the entire reason the context carries the
+ * function pointer. Writing the microsecond value straight into the period
+ * register instead makes every alarm fire sixteen times too early on a part
+ * whose counter runs at 16 MHz, and a sketch's `delay(100)` returns after
+ * 6.25 ms.
+ */
+function usToTicks(context: RomCallContext, microseconds: number): number {
+  const convert = context.bus.readUint32((((context.args[0] >>> 0) + CONTEXT_US_TO_TICKS) >>> 0)) >>> 0;
+  if (convert === 0) return microseconds;
+  const result = context.callGuest(convert, [microseconds >>> 0, Math.floor(microseconds / 0x1_0000_0000) | 0]);
+  return (result.high | 0) * 0x1_0000_0000 + (result.value >>> 0);
+}
+
+/** Enables or disables a comparator, which the setters bracket their work with. */
+function enableAlarm(context: RomCallContext, alarm: number, on: boolean): void {
+  update(context, CONF, on ? TARGET_WORK_EN[alarm] : 0, on ? 0 : TARGET_WORK_EN[alarm]);
+}
+
 /** Latches a counter and reads the snapshot back, which is a real handshake. */
 function counterValue(context: RomCallContext, unit: number): number {
   write(context, UNIT_OP[unit], UNIT_UPDATE);
@@ -124,31 +147,47 @@ const setTickRateOps: RomHandler = ({ args, bus }) => {
 };
 
 /**
- * `systimer_hal_set_alarm_target(hal, alarm_id, target)`.
+ * `systimer_hal_set_alarm_target(hal, alarm_id, target_us)`.
  *
- * A 64-bit argument arrives in a register pair, and on RISC-V ILP32 that pair
- * is aligned — so the target is in a2/a3 rather than a1/a2, with a1 holding the
- * alarm id. Reading it from the wrong pair would arm the comparator at a
- * nonsense time, which is the sort of mistake that looks like a timer bug.
+ * Two things here are easy to get wrong and both were.
+ *
+ * The target is 64 bits, and on RISC-V ILP32 a 64-bit argument arrives in an
+ * *aligned* register pair — so it is in a2/a3, not a1/a2, with a1 holding the
+ * alarm id. Reading the wrong pair arms the comparator at a nonsense time.
+ *
+ * And the target is in microseconds, not ticks. The HAL converts it through the
+ * firmware's own `us_to_ticks` before writing the register.
  */
 const setAlarmTarget: RomHandler = (context) => {
   const alarm = context.args[1] & 3;
-  const low = context.args[2] >>> 0;
-  const high = context.args[3] & HI_MASK;
+  const microseconds = (context.args[3] & HI_MASK) * 0x1_0000_0000 + (context.args[2] >>> 0);
+  const ticks = usToTicks(context, microseconds);
+  enableAlarm(context, alarm, false);
   // One-shot: the comparator compares against a fixed target rather than
-  // reloading itself.
+  // reloading itself, so the period is cleared as well as the mode.
   update(context, TARGET_CONF[alarm], 0, TARGET_PERIOD_MODE | TARGET_PERIOD_MASK);
-  write(context, TARGET_HI[alarm], high);
-  write(context, TARGET_LO[alarm], low);
+  write(context, TARGET_HI[alarm], Math.floor(ticks / 0x1_0000_0000) & HI_MASK);
+  write(context, TARGET_LO[alarm], ticks >>> 0);
   // COMP_LOAD is what makes the written target take effect.
   write(context, COMP_LOAD[alarm], 1);
+  enableAlarm(context, alarm, true);
 };
 
+/**
+ * `systimer_hal_set_alarm_period(hal, alarm_id, period_us)`.
+ *
+ * The FreeRTOS tick is this call: the port asks for 1000000/CONFIG_FREERTOS_HZ,
+ * which is 1000 microseconds. Writing 1000 into the period register as though
+ * it were ticks gives a 62.5 microsecond tick on a 16 MHz counter, and every
+ * delay in the sketch comes back sixteen times too early.
+ */
 const setAlarmPeriod: RomHandler = (context) => {
   const alarm = context.args[1] & 3;
-  const period = context.args[2] & TARGET_PERIOD_MASK;
-  update(context, TARGET_CONF[alarm], TARGET_PERIOD_MODE | period, TARGET_PERIOD_MASK);
+  const ticks = usToTicks(context, context.args[2] >>> 0) & TARGET_PERIOD_MASK;
+  enableAlarm(context, alarm, false);
+  update(context, TARGET_CONF[alarm], TARGET_PERIOD_MODE | ticks, TARGET_PERIOD_MASK);
   write(context, COMP_LOAD[alarm], 1);
+  enableAlarm(context, alarm, true);
 };
 
 const getAlarmValue: RomHandler = (context) => {
