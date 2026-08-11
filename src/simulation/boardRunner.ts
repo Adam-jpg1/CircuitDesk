@@ -109,9 +109,22 @@ export interface BoardRunner {
  */
 export function runnerPinIndex(board: BoardDefinition, pinId: string): number | undefined {
   if (board.architecture === 'rp2040') return rp2040PinIndex(pinId);
-  if (isEsp32C3(board)) return esp32c3PinIndex(pinId);
+  const espPads = ESP_RISCV_PAD_COUNT[board.metadata?.variant ?? ''];
+  if (espPads !== undefined) return espPadIndex(pinId, espPads);
   return arduinoPinNumber(board, pinId);
 }
+
+/**
+ * How many pads each Espressif RISC-V part has, by variant.
+ *
+ * `SOC_GPIO_PIN_COUNT`: 22 on the C3, 31 on the C6. A board brings out only
+ * some of them, and the board definition is what decides which — this is only
+ * the upper bound on what a pad name could legitimately mean.
+ */
+const ESP_RISCV_PAD_COUNT: Record<string, number | undefined> = {
+  esp32c3: 22,
+  esp32c6: 31,
+};
 
 /**
  * True for the ESP32-C3.
@@ -125,19 +138,39 @@ export function isEsp32C3(board: BoardDefinition): boolean {
   return board.metadata?.variant === 'esp32c3';
 }
 
+/** True for the ESP32-C6, on the same reasoning as the C3. */
+export function isEsp32C6(board: BoardDefinition): boolean {
+  return board.metadata?.variant === 'esp32c6';
+}
+
+/** True for either Espressif RISC-V part this runtime executes. */
+export function isEspRiscv(board: BoardDefinition): boolean {
+  return ESP_RISCV_PAD_COUNT[board.metadata?.variant ?? ''] !== undefined;
+}
+
 /**
  * IO<n> is runner index n, which is the pad's own name on the die.
  *
- * The ESP32-C3 has no Arduino pin numbering, so there is nothing to translate
- * and nothing to invent. Power, ground and reset pins have no index, and the
- * legacy aliases old projects used resolve through the board definition before
- * ever reaching here.
+ * Neither Espressif RISC-V part has Arduino pin numbering, so there is nothing
+ * to translate and nothing to invent — no D0, no A0, no GP0. Power, ground and
+ * reset pins have no index, and the legacy aliases old projects used resolve
+ * through the board definition before ever reaching here.
  */
-export function esp32c3PinIndex(pinId: string): number | undefined {
+export function espPadIndex(pinId: string, padCount: number): number | undefined {
   const match = /^IO(\d{1,2})$/.exec(pinId);
   if (!match) return undefined;
   const index = Number(match[1]);
-  return index >= 0 && index <= 21 ? index : undefined;
+  return index >= 0 && index < padCount ? index : undefined;
+}
+
+/** The ESP32-C3's 22 pads. */
+export function esp32c3PinIndex(pinId: string): number | undefined {
+  return espPadIndex(pinId, 22);
+}
+
+/** The ESP32-C6's 31 pads. */
+export function esp32c6PinIndex(pinId: string): number | undefined {
+  return espPadIndex(pinId, 31);
 }
 
 /** GP<n> is runner index n. Power, ground and debug pins have no index. */

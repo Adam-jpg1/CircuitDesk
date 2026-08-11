@@ -107,12 +107,31 @@ if (!board) {
   check(board.pins.some((p) => p.type === 'reset'), 'as is the reset pin');
 }
 
-// ---------- 6. it does not claim a runtime it does not have ----------
+// ---------- 6. it claims a runtime, and only the runtime it has ----------
+//
+// This section used to assert the opposite, because the runtime did not exist.
+// It does now — real firmware reaches setup() and loop(), GPIO works in both
+// directions, and the board talks to a Pico over a shared net — so the badge is
+// earned. What has to stay true is that the claim is no wider than the runtime.
 {
   check(board.compiler?.supported === true, 'the board compiles for the real target');
   check(board.compiler?.fqbn === 'esp32:esp32:esp32c6', `through the C6 target (${board.compiler?.fqbn})`);
-  check(board.simulation?.supported !== true, 'and does not claim simulation, because the runtime is not built');
-  check(board.supportLevel === 'compile', `so its badge is Compile (${board.supportLevel})`);
+  check(board.simulation?.supported === true, 'and executes that firmware');
+  check(board.simulation?.engine === 'esp32c6', `on its own engine (${board.simulation?.engine})`);
+  check(board.supportLevel === 'simulated', `so its badge is Simulated (${board.supportLevel})`);
+
+  // Narrow and truthful. Everything absent here is absent from the runtime.
+  const apis = (board.simulation?.supportedApis ?? []).join(' ').toLowerCase();
+  for (const claim of ['pinmode', 'digitalwrite', 'digitalread', 'delay', 'setup']) {
+    check(apis.includes(claim), `the API list names ${claim}, which really works`);
+  }
+  for (const absent of ['wifi', 'bluetooth', 'ble', 'zigbee', 'thread', 'usb', 'uart', 'serial', 'adc', 'analogread', 'pwm', 'analogwrite', 'i2c', 'wire', 'spi']) {
+    check(!apis.includes(absent), `and does not name ${absent}, which does not`);
+  }
+  const limitationText = (board.metadata?.limitation ?? '').toLowerCase();
+  for (const named of ['wi-fi', 'bluetooth', 'zigbee', 'thread', 'usb', 'adc', 'pwm', 'i2c', 'spi', 'uart']) {
+    check(limitationText.includes(named), `and the limitation note says ${named} is not simulated`);
+  }
 
   const limitation = String(board.metadata.limitation ?? '');
   for (const feature of ['Wi-Fi', 'Bluetooth', 'Zigbee', 'Thread']) {
@@ -130,8 +149,9 @@ if (!board) {
   const ids = BOARD_DEFINITIONS.map((b) => b.id);
   check(new Set(ids).size === ids.length, 'no board id is duplicated');
   const simulated = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'simulated').map((b) => b.id);
-  check(!simulated.includes('board.esp32-c6-devkitc-1'), 'the C6 is not among the Simulated boards');
-  check(simulated.length === 7, `and the Simulated set is unchanged at ${simulated.length}`);
+  check(simulated.includes('board.esp32-c6-devkitc-1'), 'the C6 is among the Simulated boards');
+  check(simulated.includes('board.esp32-c3'), 'and has not displaced the C3');
+  check(simulated.length === 8, `and the Simulated set has grown by exactly one, to ${simulated.length}`);
 }
 
 console.log(failures === 0 ? '\nESP32-C6 board checks passed.' : `\n${failures} check(s) FAILED`);

@@ -202,13 +202,27 @@ const parsed = parseNotices(NOTICES);
         'board.arduino-nano',
         'board.arduino-uno',
         'board.esp32-c3',
+        'board.esp32-c6-devkitc-1',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
       ]),
     `the set of Simulated boards is unchanged (${simulated.join(', ')})`,
   );
 
-  // The ESP32-C3's claims in particular must not have grown.
+  // The two Espressif RISC-V boards' claims in particular must not have grown.
+  // Both execute real firmware and real GPIO and nothing else, and a list that
+  // quietly gained a peripheral would be the first sign of a claim outrunning
+  // the runtime.
+  const c6 = getBoardDefinition('board.esp32-c6-devkitc-1')!;
+  const c6Apis = (c6.simulation?.supportedApis ?? []).join(' ').toLowerCase();
+  for (const unclaimed of ['uart', 'serial', 'analogread', 'adc', 'wire', 'i2c', 'spi', 'analogwrite', 'pwm', 'wifi', 'bluetooth', 'ble', 'zigbee', 'thread', 'usb']) {
+    check(!c6Apis.includes(unclaimed), `the ESP32-C6 does not claim ${unclaimed}`);
+  }
+  const c6Limitation = (c6.metadata?.limitation ?? '').toLowerCase();
+  for (const named of ['wi-fi', 'bluetooth', 'zigbee', 'thread', 'usb', 'adc', 'pwm', 'i2c', 'spi', 'uart']) {
+    check(c6Limitation.includes(named), `and its limitation note names ${named} as unsupported`);
+  }
+
   const c3 = getBoardDefinition('board.esp32-c3')!;
   const apis = (c3.simulation?.supportedApis ?? []).join(' ').toLowerCase();
   for (const unclaimed of ['uart', 'serial', 'analogread', 'adc', 'wire', 'i2c', 'spi', 'analogwrite', 'pwm', 'wifi', 'bluetooth', 'ble']) {

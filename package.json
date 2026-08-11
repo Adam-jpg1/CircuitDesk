@@ -2,7 +2,7 @@
   "name": "circuitdesk",
   "version": "0.9.0",
   "private": true,
-  "description": "CircuitDesk \u2014 a realistic electronics project workspace for planning, wiring, coding, validating, simulating, testing, and documenting hardware projects before physically assembling them.",
+  "description": "CircuitDesk — a realistic electronics project workspace for planning, wiring, coding, validating, simulating, testing, and documenting hardware projects before physically assembling them.",
   "type": "module",
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
