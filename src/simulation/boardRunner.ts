@@ -40,7 +40,7 @@ export interface PinSnapshot {
 }
 
 export interface BoardRunner {
-  readonly engine: 'avr8js' | 'rp2040js' | 'esp32c3';
+  readonly engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6';
 
   /** Advances the simulation by a slice of simulated time. Always bounded. */
   runFor(simMs: number): void;

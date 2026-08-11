@@ -14,7 +14,7 @@ import { AVR_BOARD_PROFILES } from '../boards/pinMaps';
 import { decodeBase64Firmware, parseRp2040Uf2, FirmwareRejectedError } from './rp2040/uf2';
 // The ESP image parser imports no emulator, so a wrong-architecture or
 // malformed artifact is refused before any engine chunk is downloaded.
-import { decodeBase64Image, parseEspApplicationImage } from './esp32c3/espImage';
+import { decodeBase64Image, parseEspApplicationImage, ESP32C6_REGIONS } from './esp32c3/espImage';
 
 /** The compiler service's artifact, as handed to the simulator. */
 export interface FirmwareArtifact {
@@ -31,7 +31,7 @@ export interface FirmwareArtifact {
 }
 
 export interface BoardSimulatorAdapter {
-  engine: 'avr8js' | 'rp2040js' | 'esp32c3';
+  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6';
   /** Canonical board ids this adapter genuinely supports (tested). */
   boardIds: string[];
   /** The artifact format this engine executes. */
@@ -121,7 +121,29 @@ const esp32c3Adapter: BoardSimulatorAdapter = {
   },
 };
 
-const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32c3Adapter];
+const esp32c6Adapter: BoardSimulatorAdapter = {
+  engine: 'esp32c6',
+  boardIds: ['board.esp32-c6-devkitc-1'],
+  firmwareFormat: 'esp-image',
+  async createRunner(firmware, board) {
+    assertFormat(this, firmware, board);
+    // Parsed against the C6's own region table before the engine chunk is
+    // fetched, so a C3 build — whose segments all fall outside the C6's memory
+    // map — is refused here rather than executed on the wrong machine.
+    const image = parseEspApplicationImage(decodeBase64Image(firmware.data), {
+      expectChip: 'esp32c6',
+      regions: ESP32C6_REGIONS,
+    });
+    const { Esp32C6Runner } = await import('./esp32c6Runner');
+    const { decodeRegion } = await import('./espRiscvRunner');
+    return new Esp32C6Runner(
+      image,
+      (firmware.regions ?? []).map((r) => ({ offset: r.offset, data: decodeRegion(r.data) })),
+    );
+  },
+};
+
+const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32c3Adapter, esp32c6Adapter];
 
 /** Returns the adapter for a board, or null when the board is not genuinely simulated. */
 export function getSimulatorAdapter(board: BoardDefinition | undefined | null): BoardSimulatorAdapter | null {
