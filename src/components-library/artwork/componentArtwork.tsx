@@ -436,55 +436,210 @@ function BatteryArt({ def }: ArtProps) {
  * SSD1306 panel drawn straight from the device's display RAM — one rect per
  * lit pixel, nothing pre-rendered. A dark panel means firmware wrote nothing.
  */
+/**
+ * The SSD1306 module: dark glass, lit pixels, and nothing competing with them.
+ *
+ * Two things were wrong before. The glass was 90×54 units for a 128×64 panel,
+ * so every pixel was stretched 1.67:1 and a circle came out an ellipse; and a
+ * full frame emitted up to 8192 individual rects, one per lit pixel, which is a
+ * lot of DOM for a part 27 mm across. The glass is now exactly 2:1 and each row
+ * of adjacent lit pixels is drawn as one rect, which is the same picture out of
+ * far fewer nodes.
+ *
+ * The pixels themselves still come from the simulated SSD1306's GDDRAM. Nothing
+ * here draws a picture the firmware did not put there.
+ */
 function OledArt({ def, visual }: ArtProps) {
   const w = def.widthMm * MM;
   const h = def.heightMm * MM;
   const display = visual?.display;
-  const glass = { x: w * 0.08, y: h * 0.3, w: w * 0.84, h: h * 0.5 };
+
+  // 128×64 at a true 2:1, as large as the module allows.
+  const glassW = w * 0.92;
+  const glassH = glassW / 2;
+  const glass = { x: (w - glassW) / 2, y: h * 0.3, w: glassW, h: glassH };
   const px = glass.w / 128;
   const py = glass.h / 64;
+
   const lit: JSX.Element[] = [];
   if (display?.on && display.pixels) {
     const ram = display.pixels;
-    for (let page = 0; page < 8; page++) {
-      for (let x = 0; x < 128; x++) {
-        const bits = ram[page * 128 + x];
-        if (!bits) continue;
-        for (let bit = 0; bit < 8; bit++) {
-          if ((bits >> bit) & 1) {
-            lit.push(
-              <rect
-                key={`${x}-${page}-${bit}`}
-                x={glass.x + x * px}
-                y={glass.y + (page * 8 + bit) * py}
-                width={Math.max(px, 0.6)}
-                height={Math.max(py, 0.6)}
-                fill="#8bdcff"
-              />,
-            );
-          }
+    for (let row = 0; row < 64; row++) {
+      const page = row >> 3;
+      const bit = row & 7;
+      let runStart = -1;
+      for (let x = 0; x <= 128; x++) {
+        const on = x < 128 && ((ram[page * 128 + x] >> bit) & 1) === 1;
+        if (on && runStart < 0) runStart = x;
+        if (!on && runStart >= 0) {
+          lit.push(
+            <rect
+              key={`${row}-${runStart}`}
+              x={glass.x + runStart * px}
+              y={glass.y + row * py}
+              width={(x - runStart) * px}
+              height={Math.max(py, 0.5)}
+              fill="#a9e6ff"
+            />,
+          );
+          runStart = -1;
         }
       }
     }
   }
+
   return (
     <g>
-      <rect width={w} height={h} rx="3" fill="#12161b" stroke="#2b323a" />
-      <rect x={glass.x} y={glass.y} width={glass.w} height={glass.h} fill="#05070a" stroke="#1d242c" />
+      <rect x="1" y="1.5" width={w} height={h} rx="4" fill="rgba(0,0,0,0.35)" />
+      <rect width={w} height={h} rx="4" fill="#101318" stroke="#333c46" />
+      {/* Pin header, over the four pads along the top edge. */}
+      <rect x={w * 0.22} y="0" width={w * 0.56} height={h * 0.1} rx="1.5" fill="#15181c" />
+      {[7.5, 11.5, 15.5, 19.5].map((mm) => (
+        <rect key={mm} x={mm * MM - 1.4} y={h * 0.02} width="2.8" height={h * 0.06} rx="1" fill="#d8b25c" />
+      ))}
+      {/* The glass sits in a slightly raised frame so the panel reads as glass. */}
+      <rect
+        x={glass.x - 2}
+        y={glass.y - 2}
+        width={glass.w + 4}
+        height={glass.h + 4}
+        rx="1.5"
+        fill="#1b2028"
+        stroke="#39424c"
+      />
+      <rect x={glass.x} y={glass.y} width={glass.w} height={glass.h} fill="#04060a" />
       {lit}
       {!display?.on && (
-        <text x={w / 2} y={h * 0.58} fontSize="5" fill="#3d454e" textAnchor="middle" fontFamily="monospace">
+        <text
+          x={w / 2}
+          y={glass.y + glass.h * 0.62}
+          fontSize={glass.h * 0.3}
+          fill="#2b333d"
+          textAnchor="middle"
+          fontFamily="'DejaVu Sans Mono', 'Courier New', monospace"
+        >
           OLED
         </text>
       )}
-      <text x={w / 2} y={h * 0.94} fontSize="4" fill="#6d7681" textAnchor="middle" fontFamily="monospace">
-        SSD1306 I2C
-      </text>
+    </g>
+  );
+}
+
+// ------------------------------------------------------------- the LCD panel
+//
+// This part had no renderer of its own and fell through to the generic box,
+// which drew the sixteen characters at a fixed 5.5 units — about 1.4 mm on a
+// part 80 mm wide. It read as small print on a plastic rectangle rather than as
+// a lit display, which is the opposite of what a display is for.
+//
+// The module is drawn the way one looks on a bench: a dark PCB, a metal bezel
+// around a recessed panel, and an illuminated character area that dominates
+// everything else on the part. What is drawn *in* that area is the HD44780's
+// own DDRAM, unchanged — the artwork is the glass, not the content.
+//
+// The geometry is purely inside the part's existing box. No pin moves.
+
+/** Rows and columns of a 1602, which is what the name means. */
+const LCD_COLS = 16;
+const LCD_ROWS = 2;
+
+function Lcd1602Art({ def, visual }: ArtProps) {
+  const w = def.widthMm * MM;
+  const h = def.heightMm * MM;
+  const lines = visual?.readout ?? [];
+  // Backlight follows the real PCF8574 backlight bit. An unlit panel is dark
+  // and its characters are barely legible, which is true of the hardware.
+  const lit = visual?.ledOn !== false && lines.length > 0;
+
+  // The header sits over the four pins the definition already places along the
+  // top-left edge, so the connector is drawn where the wires actually land.
+  const headerH = h * 0.13;
+  const bezel = { x: w * 0.045, y: headerH + h * 0.06, w: w * 0.91, h: h * 0.74 };
+  const glass = { x: bezel.x + w * 0.025, y: bezel.y + h * 0.06, w: bezel.w - w * 0.05, h: bezel.h - h * 0.12 };
+  // Characters live inside a small margin so the outermost column is not flush
+  // against the bezel, as on a real panel.
+  const area = { x: glass.x + glass.w * 0.03, y: glass.y + glass.h * 0.08, w: glass.w * 0.94, h: glass.h * 0.84 };
+  const cellW = area.w / LCD_COLS;
+  const rowH = area.h / LCD_ROWS;
+  const fontSize = Math.min(rowH * 0.82, cellW * 1.5);
+
+  const backlight = lit ? '#1f5fd0' : '#101c30';
+  const character = lit ? '#eaf4ff' : '#2b3c55';
+
+  const cells: JSX.Element[] = [];
+  for (let row = 0; row < LCD_ROWS; row++) {
+    const text = (lines[row] ?? '').slice(0, LCD_COLS);
+    for (let col = 0; col < LCD_COLS; col++) {
+      const ch = text[col];
+      if (!ch || ch === ' ') continue;
+      cells.push(
+        <text
+          key={`${row}-${col}`}
+          className="device-readout"
+          x={area.x + (col + 0.5) * cellW}
+          y={area.y + (row + 0.5) * rowH + fontSize * 0.35}
+          fontSize={fontSize}
+          fill={character}
+          textAnchor="middle"
+          fontFamily="'DejaVu Sans Mono', 'Courier New', monospace"
+        >
+          {ch}
+        </text>,
+      );
+    }
+  }
+
+  return (
+    <g>
+      {/* PCB */}
+      <rect x="1" y="1.5" width={w} height={h} rx="5" fill="rgba(0,0,0,0.35)" />
+      <rect width={w} height={h} rx="5" fill="#123a2c" stroke="#0a241b" />
+      {/* Pin header, over the pads the definition places at 2/6/10/14 mm. */}
+      <rect x={w * 0.01} y="0" width={w * 0.22} height={headerH} rx="2" fill="#15181c" />
+      {[2, 6, 10, 14].map((mm) => (
+        <rect key={mm} x={mm * MM - 1.6} y={headerH * 0.18} width="3.2" height={headerH * 0.64} rx="1" fill="#d8b25c" />
+      ))}
+      {/* Bezel: a metal frame with a lit edge, so the panel reads as recessed. */}
+      <rect x={bezel.x} y={bezel.y} width={bezel.w} height={bezel.h} rx="3" fill="#39424c" stroke="#1c2228" />
+      <rect x={bezel.x} y={bezel.y} width={bezel.w} height={bezel.h * 0.12} rx="3" fill="rgba(255,255,255,0.14)" />
+      {/* The panel itself. */}
+      <rect x={glass.x} y={glass.y} width={glass.w} height={glass.h} fill={backlight} stroke="#0c1420" />
+      {lit && (
+        <rect
+          x={glass.x}
+          y={glass.y}
+          width={glass.w}
+          height={glass.h * 0.45}
+          fill="rgba(255,255,255,0.10)"
+        />
+      )}
+      {/* Character cells, faintly, the way a dot-matrix panel shows them. */}
+      {Array.from({ length: LCD_COLS - 1 }, (_, i) => (
+        <line
+          key={`c${i}`}
+          x1={area.x + (i + 1) * cellW}
+          y1={area.y}
+          x2={area.x + (i + 1) * cellW}
+          y2={area.y + area.h}
+          stroke="rgba(0,0,0,0.10)"
+          strokeWidth="0.6"
+        />
+      ))}
+      <line
+        x1={area.x}
+        y1={area.y + rowH}
+        x2={area.x + area.w}
+        y2={area.y + rowH}
+        stroke="rgba(0,0,0,0.10)"
+        strokeWidth="0.6"
+      />
+      {cells}
     </g>
   );
 }
 
 const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
+  lcd1602: (p) => <Lcd1602Art {...p} />,
   oled: (p) => <OledArt {...p} />,
   led: (p) => <LedArt {...p} />,
   'rgb-led': (p) => <RgbLedArt {...p} />,
@@ -504,6 +659,15 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   'battery-9v': (p) => <BatteryArt {...p} />,
   'battery-aa': (p) => <BatteryArt {...p} />,
 };
+
+/**
+ * Builtin ids that have a renderer of their own.
+ *
+ * Anything not in here falls back to the generic box, which is a legitimate
+ * placeholder and also how the LCD ended up drawing 1.4 mm characters — so the
+ * list is exported and the artwork tests report what is still on it.
+ */
+export const BUILTIN_ARTWORK_IDS: readonly string[] = Object.keys(REGISTRY);
 
 export const ComponentArtwork = memo(function ComponentArtwork(props: ArtProps) {
   const { def } = props;
