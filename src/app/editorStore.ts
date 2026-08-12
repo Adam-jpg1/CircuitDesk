@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { loadProject, saveProject } from '../project/projectService';
 import { resolveDefinition } from '../project/partsRegistry';
+import { assignSketch, createSeparateSketch, renameSketch, sketchIdFor } from '../project/sketches';
 import { loadSetting, saveSetting, DEFAULT_PANEL_SIZES, type PanelSizes } from '../persistence/settings';
 import { renderProjectThumbnail } from '../canvas/thumbnail';
 
@@ -48,6 +49,14 @@ interface EditorState {
   hoveredPin: { componentId: string; pinId: string } | null;
   bottomTab: BottomTab;
   activeFileId: string | null;
+  /**
+   * The board whose sketch the editor is showing, or null for the sketch view.
+   *
+   * The editor edits a *document*; this is only which board's document it has
+   * open, so switching boards never copies or moves anything. Null means the
+   * user picked a sketch directly rather than through a board.
+   */
+  activeBoardId: string | null;
   panelSizes: PanelSizes;
 
   compiling: boolean;
@@ -69,6 +78,14 @@ interface EditorState {
   setHoveredPin(pin: { componentId: string; pinId: string } | null): void;
   setBottomTab(tab: BottomTab): void;
   setActiveFile(id: string): void;
+  /** Opens the sketch a board runs. Does not copy or reassign anything. */
+  setActiveBoard(boardInstanceId: string | null): void;
+  /** Points a board at an existing sketch document. */
+  assignSketchToBoard(boardInstanceId: string, sketchId: string): void;
+  /** Clones what a board is running into a sketch only it uses. */
+  createSeparateSketchForBoard(boardInstanceId: string): void;
+  /** Renames a sketch. Assignments are by id, so nothing else moves. */
+  renameSketchDocument(sketchId: string, name: string): void;
   setPanelSizes(sizes: Partial<PanelSizes>): void;
   setWireDraft(draft: WireDraft | null): void;
   setCompiling(v: boolean): void;
@@ -163,6 +180,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     hoveredPin: null,
     bottomTab: 'code',
     activeFileId: null,
+    activeBoardId: null,
     panelSizes: loadSetting('panelSizes', DEFAULT_PANEL_SIZES),
     compiling: false,
     lastCompile: null,
@@ -188,6 +206,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           loading: false,
           project,
           activeFileId: project.codeFiles[0]?.id ?? null,
+          activeBoardId: null,
           selection: { componentIds: [], connectionIds: [] },
           saveState: 'saved',
           undoDepth: 0,
@@ -225,7 +244,42 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setSelection: (selection) => set({ selection }),
     setHoveredPin: (hoveredPin) => set({ hoveredPin }),
     setBottomTab: (bottomTab) => set({ bottomTab }),
-    setActiveFile: (activeFileId) => set({ activeFileId }),
+    setActiveFile: (activeFileId) => set({ activeFileId, activeBoardId: null }),
+
+    setActiveBoard(boardInstanceId) {
+      const { project } = get();
+      if (!project || !boardInstanceId) {
+        set({ activeBoardId: null });
+        return;
+      }
+      set({ activeBoardId: boardInstanceId, activeFileId: sketchIdFor(project, boardInstanceId) ?? null });
+    },
+
+    assignSketchToBoard(boardInstanceId, sketchId) {
+      const { project } = get();
+      if (!project) return;
+      const next = assignSketch(project, boardInstanceId, sketchId);
+      if (next === project) return;
+      set({ project: next, activeBoardId: boardInstanceId, activeFileId: sketchId });
+      scheduleSave();
+    },
+
+    createSeparateSketchForBoard(boardInstanceId) {
+      const { project } = get();
+      if (!project) return;
+      const { project: next, sketchId } = createSeparateSketch(project, boardInstanceId);
+      set({ project: next, activeBoardId: boardInstanceId, activeFileId: sketchId });
+      scheduleSave();
+    },
+
+    renameSketchDocument(sketchId, name) {
+      const { project } = get();
+      if (!project) return;
+      const next = renameSketch(project, sketchId, name);
+      if (next === project) return;
+      set({ project: next });
+      scheduleSave();
+    },
     setPanelSizes(sizes) {
       const next = { ...get().panelSizes, ...sizes };
       saveSetting('panelSizes', next);
