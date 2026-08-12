@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "The arduino-cli cores CircuitDesk's compiler service is built and validated against.",
+    "",
+    "One source of truth, read by three things that must never disagree: the Docker",
+    "image bootstrap (server/compiler/installCores.mjs), the capability endpoint that",
+    "tells the app which targets exist, and the deployment smoke test.",
+    "",
+    "Versions are PINNED. An unpinned 'latest' means the compiler service silently",
+    "moves under the emulator: the ESP32 runtime here is validated against the ROM",
+    "entry tables and startup sequence of one core release, and a core upgrade that",
+    "nobody chose would change the firmware the emulator is asked to execute.",
+    "Changing a version here is a deliberate act that needs the runtime tests re-run."
+  ],
+  "arduinoCli": {
+    "version": "1.5.1",
+    "note": "Pinned for the same reason the cores are. The image used to install whatever install.sh from master offered, which is how the deployed service ended up on 1.5.1 while a development container ran a 1.5.2 release candidate."
+  },
+  "cores": [
+    {
+      "id": "arduino:avr",
+      "version": "1.8.8",
+      "targets": ["arduino:avr:uno", "arduino:avr:nano", "arduino:avr:mega", "arduino:avr:leonardo"],
+      "required": true,
+      "note": "AVR boards. Also reachable through the avr-g++ fallback, so a failed install degrades rather than breaks."
+    },
+    {
+      "id": "rp2040:rp2040",
+      "version": "6.0.0",
+      "additionalUrl": "https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json",
+      "targets": ["rp2040:rp2040:rpipico", "rp2040:rp2040:rpipicow"],
+      "required": true,
+      "note": "Arduino-Pico. Emits .uf2 without a .hex, so an RP2040 build can never be delivered as Intel HEX."
+    },
+    {
+      "id": "esp32:esp32",
+      "version": "3.3.11",
+      "additionalUrl": "https://espressif.github.io/arduino-esp32/package_esp32_index.json",
+      "targets": ["esp32:esp32:esp32c3", "esp32:esp32:esp32c6"],
+      "required": true,
+      "keepChips": ["esp32c3", "esp32c6"],
+      "note": "Arduino-ESP32. CircuitDesk compiles only the two RISC-V parts it can execute, so the Xtensa toolchain and the per-chip libraries for parts it does not support are pruned after install — see installCores.mjs."
+    }
+  ]
+}

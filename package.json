@@ -34,7 +34,10 @@
     "test:production": "tsx tests/production.multiboard.mts",
     "test:artwork": "tsx tests/artwork.displays.mts",
     "test:artwork:discrete": "tsx tests/artwork.discrete.mts",
-    "test:contention": "tsx tests/sim.contention.mts"
+    "test:contention": "tsx tests/sim.contention.mts",
+    "test:deployment": "tsx tests/compiler.deployment.mts",
+    "cores:verify": "node server/compiler/installCores.mjs --verify",
+    "cores:install": "node server/compiler/installCores.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

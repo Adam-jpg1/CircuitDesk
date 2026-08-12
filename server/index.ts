@@ -7,6 +7,7 @@ import { getCompilerHealth, compileProject } from './compiler/compilerService.js
 import { SUPPORTED_TARGETS, findTarget, type CompileRequest } from './compiler/types.js';
 import { detectGccToolchain, ensureCoreArchive } from './compiler/gccToolchain.js';
 import { detectArduinoCli } from './compiler/arduinoCli.js';
+import { PINNED_CORES, pinnedCore } from './compiler/cores.js';
 import { rateLimit } from './rateLimit.js';
 import { CompileGate, CompilerBusyError } from './compileGate.js';
 
@@ -71,25 +72,54 @@ app.get('/api/compiler/boards', (_req, res) => {
 });
 
 /**
- * Live per-board compiler capability report: which allowlisted targets can
- * actually be built on THIS instance (installed cores/toolchains), with an
- * explicit reason when they cannot. The frontend uses this for honest
- * badges/tooltips — a missing core is reported, never papered over.
+ * What this compiler service can actually build, core by core and target by
+ * target.
+ *
+ * "The service is up" and "the service can build for your board" are different
+ * questions, and conflating them is how a deployment shipped without the ESP32
+ * core and reported itself healthy. The answer here is machine-readable so the
+ * app can tell "compiler unreachable" from "compiler reachable, that core is
+ * missing" without parsing a sentence.
  */
 app.get('/api/compiler/capabilities', async (_req, res) => {
   try {
     const cli = await detectArduinoCli();
     const gcc = await detectGccToolchain();
+
+    const cores = PINNED_CORES.map((core) => {
+      const installedVersion = cli.coreVersions[core.id];
+      const installed = Boolean(installedVersion);
+      return {
+        id: core.id,
+        /** The version this service is built and validated against. */
+        expectedVersion: core.version,
+        installedVersion: installedVersion ?? null,
+        installed,
+        /** True only when the installed core is the pinned one. */
+        matchesPin: installed && installedVersion === core.version,
+        required: core.required,
+        fqbnFamilies: core.targets,
+        reason: installed
+          ? installedVersion === core.version
+            ? undefined
+            : `Installed ${core.id} is ${installedVersion}, but this service is validated against ${core.version}.`
+          : `The ${core.id} core is not installed on this compiler service.`,
+      };
+    });
+
     const targets = SUPPORTED_TARGETS.map((t) => {
       const cliHasCore = cli.available && cli.installedCores.includes(t.core);
       const installed = t.arch === 'avr' ? cliHasCore || gcc.available : cliHasCore;
       const toolchain = cliHasCore ? 'arduino-cli' : t.arch === 'avr' && gcc.available ? 'avr-gcc' : 'none';
+      const pin = pinnedCore(t.core);
       return {
         id: t.id,
         name: t.name,
         fqbn: t.fqbn,
         arch: t.arch,
         core: t.core,
+        coreVersion: cli.coreVersions[t.core] ?? null,
+        expectedCoreVersion: pin?.version ?? null,
         installed,
         toolchain,
         reason: installed
@@ -97,10 +127,22 @@ app.get('/api/compiler/capabilities', async (_req, res) => {
           : `The ${t.core} core is not installed on this compiler service (arduino-cli ${cli.available ? 'present' : 'missing'}).`,
       };
     });
-    res.json({ targets });
+
+    // A service missing a required core is reachable but degraded, and says so
+    // rather than being reported as simply healthy.
+    const missingRequired = cores.filter((c) => c.required && !c.installed).map((c) => c.id);
+    const drifted = cores.filter((c) => c.installed && !c.matchesPin).map((c) => c.id);
+    res.json({
+      status: missingRequired.length > 0 ? 'degraded' : drifted.length > 0 ? 'drifted' : 'healthy',
+      arduinoCli: { available: cli.available, version: cli.version },
+      missingRequiredCores: missingRequired,
+      driftedCores: drifted,
+      cores,
+      targets,
+    });
   } catch (err) {
     console.error('[CircuitDesk] capabilities check failed:', err);
-    res.status(500).json({ targets: [] });
+    res.status(500).json({ status: 'error', cores: [], targets: [] });
   }
 });
 

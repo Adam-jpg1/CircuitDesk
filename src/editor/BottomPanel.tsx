@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore, type BottomTab } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
 import { simulationController } from '../simulation/simulationController';
-import { fetchCompilerHealth } from '../compiler/compilerClient';
+import { fetchCompilerHealth, fetchCompilerCapabilities, type CompilerCapabilities } from '../compiler/compilerClient';
 import { resolveDefinition } from '../project/partsRegistry';
 import { buildPinStatesModel, pinStateCell } from '../simulation/pinStatesModel';
 import { CodePanel } from './CodePanel';
@@ -136,10 +136,14 @@ function CompilerPanel() {
   const compiling = useEditorStore((s) => s.compiling);
   const builds = useSimulationStore((s) => s.builds);
   const [health, setHealth] = useState<CompilerHealth | null>(null);
+  // Asked of the backend, never assumed. A service can be up and still be
+  // unable to build for a board on the canvas.
+  const [capabilities, setCapabilities] = useState<CompilerCapabilities | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void fetchCompilerHealth().then((h) => !cancelled && setHealth(h));
+    void fetchCompilerCapabilities().then((c) => !cancelled && setCapabilities(c));
     return () => {
       cancelled = true;
     };
@@ -150,6 +154,25 @@ function CompilerPanel() {
       {health && (
         <div style={{ color: health.available ? 'var(--text-2)' : '#e8c35a', marginBottom: 8 }}>
           Toolchain: {health.available ? `${health.toolchain} — ${health.version}` : 'unavailable'}. {health.detail}
+        </div>
+      )}
+      {capabilities && capabilities.status !== 'unreachable' && capabilities.cores.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          {capabilities.cores.map((core) => (
+            <div
+              key={core.id}
+              style={{ color: core.installed ? (core.matchesPin ? 'var(--text-2)' : '#e8c35a') : '#e8c35a' }}
+            >
+              {core.installed ? (core.matchesPin ? '•' : '!') : '✗'} {core.id}{' '}
+              {core.installed ? core.installedVersion : 'not installed'}
+              {core.reason ? ` — ${core.reason}` : ''}
+            </div>
+          ))}
+        </div>
+      )}
+      {capabilities?.status === 'unreachable' && (
+        <div style={{ color: '#e8c35a', marginBottom: 8 }}>
+          The compiler service could not be reached, so which targets it can build is unknown.
         </div>
       )}
       {compiling && <div>Compiling…</div>}
