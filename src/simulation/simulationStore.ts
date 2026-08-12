@@ -13,6 +13,16 @@ export type SimStatus = 'stopped' | 'running' | 'paused' | 'error';
 export interface BoardBuildSummary {
   boardName: string;
   fqbn: string;
+  /** The sketch this build compiled, so a failure names the file to open. */
+  sketchName: string;
+  /**
+   * Display names of the boards this one build serves.
+   *
+   * One build result, however many boards share it: three Picos on one failing
+   * sketch is one error and a list of who is affected, not the same message
+   * three times.
+   */
+  usedBy: string[];
   status: 'built' | 'compile-failed' | 'not-simulated' | 'artifact-mismatch' | 'no-toolchain' | 'needs-build';
   detail: string;
 }

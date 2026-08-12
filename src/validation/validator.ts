@@ -5,6 +5,7 @@ import { buildCircuitGraph, splitNode, type CircuitGraph } from '../circuit/nets
 import { arduinoPinNumber } from '../boards/pinMaps';
 import { analyzeCodePins } from '../compiler/codeAnalysis';
 import { resolvePin } from '../project/partsRegistry';
+import { filesForBoard } from '../project/sketches';
 import {
   getBoardBusProfile,
   classifyBusPin,
@@ -102,8 +103,11 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
     const n = netOf(instId, pinId);
     return n ? nets.get(n) : undefined;
   };
-  const code = analyzeCodePins(project.codeFiles);
   const board = project.boardInstances[0];
+  // The sketch this board actually runs, not every sketch in the project.
+  // Once boards can run different code, analysing all of it would attribute
+  // one board's pins to another.
+  const code = analyzeCodePins(board ? filesForBoard(project, board.id) : project.codeFiles);
   const boardDef = board ? graph.definitions.get(board.id) : undefined;
   const boardLogicVoltage = boardDef?.isBoard ? Number(boardDef.metadata.logicVoltage ?? 5) : 5;
 

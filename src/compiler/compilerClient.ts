@@ -20,14 +20,19 @@ export async function fetchCompilerHealth(): Promise<CompilerHealth> {
 
 export async function compileProjectCode(
   project: CircuitProject,
-  target: { boardId: string; fqbn: string },
+  target: { boardId: string; fqbn: string; files?: { name: string; content: string }[] },
   syntaxOnly = false,
 ): Promise<CompileResult> {
   const body = {
     projectId: project.id,
     boardId: target.boardId,
     fqbn: target.fqbn,
-    files: project.codeFiles.map((f) => ({ name: f.name, content: f.content })),
+    // The caller says which files this build is. It matters once boards run
+    // different sketches: the builder merges every .ino it is handed, so
+    // sending the whole project would compile two boards' sketches together
+    // and fail on a duplicate setup(). Callers with one source still send it
+    // all, which is what they always did.
+    files: (target.files ?? project.codeFiles).map((f) => ({ name: f.name, content: f.content })),
   };
   try {
     const res = await fetch(compilerApiUrl(syntaxOnly ? '/api/compiler/validate' : '/api/compiler/compile'), {

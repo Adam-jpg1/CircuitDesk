@@ -184,11 +184,15 @@ function CompilerPanel() {
       {!compiling && builds.length > 0 && (
         <div style={{ marginBottom: 8 }}>
           {builds.map((b, i) => (
-            <div
-              key={`${b.fqbn}-${i}`}
-              style={{ color: b.status === 'built' ? 'var(--ok)' : b.status === 'compile-failed' ? 'var(--error)' : '#e8c35a' }}
-            >
-              {b.status === 'built' ? '✓' : b.status === 'compile-failed' ? '✗' : '•'} {b.detail}
+            <div key={`${b.fqbn}-${b.sketchName}-${i}`}>
+              <div style={{ color: b.status === 'built' ? 'var(--ok)' : b.status === 'compile-failed' ? 'var(--error)' : '#e8c35a' }}>
+                {b.status === 'built' ? '✓' : b.status === 'compile-failed' ? '✗' : '•'} {b.detail}
+              </div>
+              {/* One result, and who it is for. Three boards sharing a failing
+                  sketch is one error and a list, not the message three times. */}
+              {b.usedBy.length > 0 && (
+                <div style={{ color: 'var(--text-2)', paddingLeft: 14 }}>Used by: {b.usedBy.join(', ')}</div>
+              )}
             </div>
           ))}
         </div>
