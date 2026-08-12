@@ -4,9 +4,9 @@
 // images; what is asserted here is everything that is not a matter of taste —
 // above all that the artwork changed and the electrical model did not.
 //
-// The seven parts are the ones that were still drawn as a coloured rectangle
-// with a caption in the middle: diode, transistor, MOSFET, speaker, relay,
-// DC motor, stepper.
+// Checkpoint A: diode, transistor, MOSFET, speaker, relay, DC motor, stepper.
+// Checkpoint B: motor driver, regulator, level converter — the driver and power
+// parts, all three of which were also a coloured rectangle with a caption.
 
 import { renderToStaticMarkup } from 'react-dom/server';
 import React, { createElement } from 'react';
@@ -67,6 +67,27 @@ const render = (def: ComponentDefinition, visual?: unknown): string =>
       size: [30, 30],
       pins: [['in1', 2.4, 36], ['in2', 2.4, 52], ['in3', 2.4, 68], ['in4', 2.4, 84]],
     },
+    // ---- Checkpoint B ----
+    'comp.motor-driver': {
+      size: [43, 43],
+      pins: [
+        ['vcc', 8, 170.4], ['gnd', 24, 170.4], ['v5', 40, 170.4],
+        ['ena', 60, 170.4], ['in1', 76, 170.4], ['in2', 92, 170.4],
+        ['in3', 108, 170.4], ['in4', 124, 170.4], ['enb', 140, 170.4],
+        ['out1', 1.6, 32], ['out2', 1.6, 56], ['out3', 170.4, 32], ['out4', 170.4, 56],
+      ],
+    },
+    'comp.regulator': {
+      size: [10, 9],
+      pins: [['vin', 6.8, 34.4], ['gnd', 20, 34.4], ['vout', 33.2, 34.4]],
+    },
+    'comp.level-converter': {
+      size: [16, 16],
+      pins: [
+        ['hv', 8, 2.4], ['hv1', 24, 2.4], ['hv2', 40, 2.4], ['gnd_h', 56, 2.4],
+        ['lv', 8, 61.6], ['lv1', 24, 61.6], ['lv2', 40, 61.6], ['gnd_l', 56, 61.6],
+      ],
+    },
   };
 
   for (const [id, want] of Object.entries(expected)) {
@@ -111,11 +132,46 @@ const render = (def: ComponentDefinition, visual?: unknown): string =>
   check(relay.pins.find((p) => p.id === 'vcc')?.type === 'power-5v', 'the relay\'s VCC is still a 5 V supply pin');
   check(relay.pins.find((p) => p.id === 'gnd')?.type === 'ground', 'its GND is still ground');
   check(relay.pins.find((p) => p.id === 'in')?.capabilities.includes('digital-in'), 'and IN is still a digital input');
+
+  // Checkpoint B, same reasoning: the artwork follows the electrical model.
+  const driver = defOf('comp.motor-driver');
+  check(driver.pins.find((p) => p.id === 'vcc')?.voltage === 12, 'the motor driver\'s 12 V rail is still 12 V');
+  check(
+    ['ena', 'enb'].every((id) => driver.pins.find((p) => p.id === id)?.capabilities.includes('pwm')),
+    'its enables are still PWM-capable inputs',
+  );
+  check(
+    ['in1', 'in2', 'in3', 'in4'].every((id) => driver.pins.find((p) => p.id === id)?.capabilities.includes('digital-in')),
+    'and IN1..IN4 still digital inputs',
+  );
+
+  const reg = defOf('comp.regulator');
+  check(
+    reg.pins.map((p) => p.id).join(',') === 'vin,gnd,vout',
+    `the regulator's VIN/GND/VOUT order is unchanged (${reg.pins.map((p) => p.id).join(',')})`,
+  );
+  check(reg.pins[0].x < reg.pins[2].x, 'and VOUT is still to the right of VIN, which is the direction the artwork reads');
+  check(reg.pins.find((p) => p.id === 'vout')?.type === 'power-3v3', 'its output is still a 3.3 V rail');
+
+  const shifter = defOf('comp.level-converter');
+  check(shifter.pins.find((p) => p.id === 'hv')?.voltage === 5, 'the level converter\'s HV side is still 5 V');
+  check(shifter.pins.find((p) => p.id === 'lv')?.voltage === 3.3, 'and its LV side 3.3 V');
+  check(
+    (shifter.pins.find((p) => p.id === 'hv1')?.y ?? 1) < (shifter.pins.find((p) => p.id === 'lv1')?.y ?? 0),
+    'with the HV pins on the edge the HV band is drawn along',
+  );
+  check(
+    shifter.internalGroups?.gnd_h === 'gnd' && shifter.internalGroups?.gnd_l === 'gnd',
+    'and both grounds still joined internally, which the dashed line stands for',
+  );
 }
 
 // ================================= 2. each part now has a renderer of its own =
 {
-  const ids = ['diode', 'transistor', 'mosfet', 'speaker', 'relay', 'dc-motor', 'stepper'];
+  const ids = [
+    'diode', 'transistor', 'mosfet', 'speaker', 'relay', 'dc-motor', 'stepper',
+    'motor-driver', 'regulator', 'level-converter',
+  ];
   for (const id of ids) {
     check(BUILTIN_ARTWORK_IDS.includes(id), `"${id}" has a dedicated renderer`);
   }
@@ -131,7 +187,10 @@ const render = (def: ComponentDefinition, visual?: unknown): string =>
 // the box would overlap a neighbouring part on the canvas and would mean the
 // hitbox and the picture had diverged.
 {
-  for (const id of ['comp.diode', 'comp.transistor-npn', 'comp.mosfet', 'comp.speaker', 'comp.relay', 'comp.dc-motor', 'comp.stepper']) {
+  for (const id of [
+    'comp.diode', 'comp.transistor-npn', 'comp.mosfet', 'comp.speaker', 'comp.relay', 'comp.dc-motor', 'comp.stepper',
+    'comp.motor-driver', 'comp.regulator', 'comp.level-converter',
+  ]) {
     const def = defOf(id);
     const w = def.widthMm * 4;
     const h = def.heightMm * 4;
@@ -172,7 +231,13 @@ const render = (def: ComponentDefinition, visual?: unknown): string =>
 
   // The parts with no simulated state must be identical whatever they are told,
   // which is the mechanical guarantee that nothing here is faking activity.
-  for (const id of ['comp.dc-motor', 'comp.stepper', 'comp.speaker', 'comp.diode', 'comp.transistor-npn', 'comp.mosfet']) {
+  for (const id of [
+    'comp.dc-motor', 'comp.stepper', 'comp.speaker', 'comp.diode', 'comp.transistor-npn', 'comp.mosfet',
+    // Checkpoint B. Enable, direction, PWM, powered state and channel activity
+    // are all absent from the simulation for these parts, so all three are
+    // static and this is what proves it.
+    'comp.motor-driver', 'comp.regulator', 'comp.level-converter',
+  ]) {
     const def = defOf(id);
     const idle = render(def, {});
     const busy = render(def, { coilOn: true, ledOn: true, buzzerOn: true, value: 1, brightness: 1 });
@@ -199,6 +264,31 @@ const render = (def: ComponentDefinition, visual?: unknown): string =>
   check(/<path/.test(bjt), 'the transistor is drawn as a rounded TO-92 body');
   check(/>G</.test(fet) && />D</.test(fet) && />S</.test(fet), 'the MOSFET carries G/D/S on its package');
   check(!/>E</.test(bjt), 'the 6 mm transistor does not repeat pin names the canvas already draws');
+
+  // Checkpoint B: three power-ish parts that must not look like each other, nor
+  // like the relay module or a bare IC.
+  const md = render(defOf('comp.motor-driver'), {});
+  const rg = render(defOf('comp.regulator'), {});
+  const lc = render(defOf('comp.level-converter'), {});
+  const relayArt = render(defOf('comp.relay'), {});
+  const ic = render(defOf('comp.generic-ic'), {});
+  const all = { md, rg, lc, relayArt, ic };
+  const names = Object.keys(all);
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      check(
+        all[names[i] as keyof typeof all] !== all[names[j] as keyof typeof all],
+        `${names[i]} and ${names[j]} are different drawings`,
+      );
+    }
+  }
+  // Each says what it is by structure, not only by a caption.
+  check(/DUAL H-BRIDGE/.test(md) && /OUT A/.test(md) && /OUT B/.test(md), 'the motor driver shows two output channels and its control side');
+  check(/VIN→VOUT/.test(rg), 'the regulator reads in the direction the energy goes');
+  check(/>HV</.test(lc) && />LV</.test(lc), 'the level converter names both of its domains');
+  // Bidirectional: no arrowheads anywhere in the level shifter.
+  check(!/marker-end|marker-start|polygon/.test(lc), 'and draws no arrows, because the part is bidirectional');
+  check(!/HV.*→|→.*LV/.test(lc), 'nor a direction in its markings');
 }
 
 console.log(failures === 0 ? '\nDiscrete-part artwork checks passed.' : `\n${failures} check(s) FAILED`);

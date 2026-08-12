@@ -988,7 +988,173 @@ function StepperArt({ def }: ArtProps) {
   );
 }
 
+// ------------------------------------------------------------- motor driver
+//
+// The definition is specifically a dual H-bridge module: a 12 V rail, a 5 V
+// rail, ENA/IN1..IN4/ENB along the bottom edge, and two motor outputs on each
+// side. So the drawing says the same thing the pinout does, and reads in the
+// direction the signal travels:
+//
+//     control header (bottom)  ->  power stage (middle)  ->  motor terminals
+//
+// The finned heatsink over the bridge is the feature that makes one of these
+// recognisable across a bench, and it is what separates this from a relay
+// module or a bare IC at a glance.
+//
+// No state. The part is validation-level: nothing reports enable, direction or
+// PWM to the renderer, so nothing here moves.
+function MotorDriverArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const heat = { x: W * 0.3, y: H * 0.24, w: W * 0.4, h: H * 0.38 };
+  const term = (y: number) => ({ y: y * MM - 3.6 * MM, h: 7.2 * MM });
+  const left = term(11);
+  const right = term(11);
+  return (
+    <g>
+      {/* PCB */}
+      <rect x="1" y="1.5" width={W} height={H} rx="4" fill="rgba(0,0,0,0.34)" />
+      <rect width={W} height={H} rx="4" fill="#123a2c" stroke="#0a241b" />
+      {/* Motor output terminal blocks, over OUT1/OUT2 and OUT3/OUT4. */}
+      {[{ x: 0, side: 'l' }, { x: W - W * 0.14, side: 'r' }].map(({ x, side }) => (
+        <g key={side}>
+          <rect x={x} y={side === 'l' ? left.y : right.y} width={W * 0.14} height={left.h} rx="2" fill="#1a5fa8" stroke="#0d3766" />
+          <rect x={x} y={side === 'l' ? left.y : right.y} width={W * 0.14} height={left.h * 0.3} rx="2" fill="rgba(255,255,255,0.16)" />
+          {[8, 14].map((mm) => (
+            <circle key={mm} cx={x + W * 0.07} cy={mm * MM} r={W * 0.035} fill="#2b3138" stroke="#0d1114" />
+          ))}
+        </g>
+      ))}
+      {/* Power stage: the bridge under a finned heatsink. */}
+      <MouldedBody x={heat.x} y={heat.y + heat.h * 0.62} w={heat.w} h={heat.h * 0.38} r={2} fill="#15181c" stroke="#080a0c" />
+      <rect x={heat.x} y={heat.y} width={heat.w} height={heat.h * 0.66} rx="2" fill="#6f7982" stroke="#3f464d" />
+      <rect x={heat.x} y={heat.y} width={heat.w} height={heat.h * 0.2} rx="2" fill="rgba(255,255,255,0.26)" />
+      {Array.from({ length: 6 }, (_, i) => (
+        <line
+          key={i}
+          x1={heat.x + ((i + 0.5) / 6) * heat.w}
+          y1={heat.y + 2}
+          x2={heat.x + ((i + 0.5) / 6) * heat.w}
+          y2={heat.y + heat.h * 0.66 - 2}
+          stroke="rgba(0,0,0,0.35)"
+          strokeWidth="2"
+        />
+      ))}
+      {/* Reservoir capacitor on the 12 V rail — the other thing that says
+          "this drives motors" rather than "this is a logic board". */}
+      <circle cx={W * 0.15} cy={H * 0.54} r={W * 0.095} fill="#20262d" stroke="#0b0e11" />
+      <circle cx={W * 0.15} cy={H * 0.54} r={W * 0.095} fill="rgba(255,255,255,0.08)" clipPath="inset(0 0 55% 0)" />
+      <path d={`M ${W * 0.085} ${H * 0.54} h ${W * 0.13}`} stroke="rgba(255,255,255,0.35)" strokeWidth="1.4" />
+      {/* Control header along the bottom edge, over the logic pins. */}
+      <rect x={W * 0.02} y={H - H * 0.12} width={W * 0.86} height={H * 0.085} rx="1.5" fill="#15181c" />
+      {[2, 6, 10, 15, 19, 23, 27, 31, 35].map((mm) => (
+        <rect key={mm} x={mm * MM - 1.5} y={H - H * 0.113} width="3" height={H * 0.07} rx="1" fill="#d8b25c" />
+      ))}
+      {/* Enable jumpers, which sit over ENA/ENB on a board like this. */}
+      {[15, 35].map((mm) => (
+        <rect key={mm} x={mm * MM - 3} y={H - H * 0.175} width="6" height={H * 0.05} rx="1.5" fill="#2d5fbd" stroke="#16306a" />
+      ))}
+      <Marking x={W / 2} y={H * 0.2} text="DUAL H-BRIDGE" size={6} fill="rgba(255,255,255,0.5)" />
+      {/* Which terminal block is which channel, beside the pins themselves. */}
+      <Marking x={W * 0.17} y={H * 0.42} text="OUT A" size={5.4} fill="rgba(255,255,255,0.42)" />
+      <Marking x={W * 0.83} y={H * 0.42} text="OUT B" size={5.4} fill="rgba(255,255,255,0.42)" />
+      {/* Silkscreen line between the power stage and the control header, so the
+          board reads as two halves rather than one empty rectangle. */}
+      <line x1={W * 0.06} y1={H * 0.7} x2={W * 0.94} y2={H * 0.7} stroke="rgba(255,255,255,0.13)" strokeWidth="1.2" />
+      <Marking x={W / 2} y={H * 0.78} text="CONTROL" size={5.4} fill="rgba(255,255,255,0.38)" />
+    </g>
+  );
+}
+
+// ----------------------------------------------------------------- regulator
+//
+// The definition is a three-terminal LDO in the shape those come in: a moulded
+// body with a wide metal tab behind it and three leads at the bottom, VIN, GND
+// and VOUT left to right. The drawing keeps that order, so what a reader sees
+// matches which pin the wire lands on.
+//
+// No state. Nothing reports whether it is powered, and a lit part that is not
+// actually powered would be worse than a plain one.
+function RegulatorArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const pins = [1.7, 5.0, 8.3].map((mm) => mm * MM);
+  const legY = 8.6 * MM;
+  const tab = { x: W * 0.1, y: H * 0.08, w: W * 0.8, h: H * 0.2 };
+  const body = { x: W * 0.1, y: tab.y + tab.h, w: W * 0.8, h: H * 0.42 };
+  return (
+    <g>
+      {pins.map((x, i) => (
+        <Lead key={i} x1={x} y1={body.y + body.h - 1} x2={x} y2={legY} width={2} />
+      ))}
+      {/* The tab. On a package like this it is the output-side thermal pad, and
+          it is most of what makes the silhouette recognisable. */}
+      <rect x={tab.x} y={tab.y} width={tab.w} height={tab.h} rx="1.5" fill="#9aa3ab" stroke="#5b636b" />
+      <rect x={tab.x} y={tab.y} width={tab.w} height={tab.h * 0.42} rx="1.5" fill="rgba(255,255,255,0.3)" />
+      <MouldedBody x={body.x} y={body.y} w={body.w} h={body.h} r={2} fill="#1b1f24" stroke="#0a0d10" />
+      {/* Reads left to right in the direction the energy goes, which is also
+          the order the pins are in. */}
+      <Marking x={W / 2} y={body.y + body.h * 0.48} text="VIN→VOUT" size={5.2} fill="rgba(196,208,220,0.85)" />
+      <Marking x={W / 2} y={body.y + body.h * 0.92} text="3V3" size={5.6} fill="rgba(150,205,255,0.9)" />
+    </g>
+  );
+}
+
+// ----------------------------------------------------------- level converter
+//
+// Two voltage domains and the channels between them. The whole point of the
+// part is that its two sides are at different voltages, so the drawing is
+// built around that: a warm band along the high side, a cool band along the
+// low side, and the channel devices in the gap between them.
+//
+// No arrows. The part is bidirectional — the simulation models each channel as
+// an undirected edge — and an arrow would state something untrue about it.
+//
+// No state. Nothing reports channel activity or domain voltage to the renderer.
+function LevelConverterArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const bandH = H * 0.17;
+  const hv = { y: H * 0.06 };
+  const lv = { y: H - H * 0.06 - bandH };
+  const channelXs = [6, 10].map((mm) => mm * MM);
+  return (
+    <g>
+      <rect x="1" y="1.5" width={W} height={H} rx="3" fill="rgba(0,0,0,0.34)" />
+      <rect width={W} height={H} rx="3" fill="#123a2c" stroke="#0a241b" />
+      {/* The two domains, as bands the eye separates before it reads anything. */}
+      <rect x={W * 0.03} y={hv.y} width={W * 0.94} height={bandH} rx="2" fill="#7a3a1e" stroke="#4a2211" />
+      <rect x={W * 0.03} y={hv.y} width={W * 0.94} height={bandH * 0.35} rx="2" fill="rgba(255,255,255,0.14)" />
+      <rect x={W * 0.03} y={lv.y} width={W * 0.94} height={bandH} rx="2" fill="#1a4a7a" stroke="#0d2a47" />
+      <rect x={W * 0.03} y={lv.y} width={W * 0.94} height={bandH * 0.35} rx="2" fill="rgba(255,255,255,0.14)" />
+      <Marking x={W * 0.13} y={hv.y + bandH * 0.78} text="HV" size={6.2} fill="rgba(255,224,200,0.95)" />
+      <Marking x={W * 0.13} y={lv.y + bandH * 0.78} text="LV" size={6.2} fill="rgba(200,228,255,0.95)" />
+      {/* Header pads on both edges, over the pins the definition places. */}
+      {[2, 6, 10, 14].map((mm) => (
+        <rect key={`h${mm}`} x={mm * MM - 1.5} y={hv.y - 3} width="3" height={bandH * 0.45} rx="1" fill="#d8b25c" />
+      ))}
+      {[2, 6, 10, 14].map((mm) => (
+        <rect key={`l${mm}`} x={mm * MM - 1.5} y={lv.y + bandH * 0.6} width="3" height={bandH * 0.45} rx="1" fill="#d8b25c" />
+      ))}
+      {/* One channel device per shifted pair, drawn between the pads it joins.
+          Undirected, because the part is. */}
+      {channelXs.map((x) => (
+        <g key={x}>
+          <line x1={x} y1={hv.y + bandH} x2={x} y2={lv.y} stroke="rgba(216,178,92,0.55)" strokeWidth="1.6" />
+          <MouldedBody x={x - W * 0.07} y={H * 0.42} w={W * 0.14} h={H * 0.16} r={1.5} fill="#15181c" stroke="#080a0c" />
+        </g>
+      ))}
+      {/* The ground both domains share, which is why the part works at all. */}
+      <line x1={14 * MM} y1={hv.y + bandH} x2={14 * MM} y2={lv.y} stroke="rgba(255,255,255,0.22)" strokeWidth="1.4" strokeDasharray="3 3" />
+    </g>
+  );
+}
+
 const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
+  'motor-driver': (p) => <MotorDriverArt {...p} />,
+  regulator: (p) => <RegulatorArt {...p} />,
+  'level-converter': (p) => <LevelConverterArt {...p} />,
+
   diode: (p) => <DiodeArt {...p} />,
   transistor: (p) => <TransistorArt {...p} />,
   mosfet: (p) => <MosfetArt {...p} />,
