@@ -42,7 +42,15 @@ function skip(msg: string) {
 // `--verify` is the same check the image runs at build time. Running it here
 // proves a clean environment came up with the pinned cores rather than being
 // patched by hand afterwards — which is exactly what went wrong.
-{
+//
+// Only meaningful when the service under test is the one on this machine.
+// Pointed at a deployed service, this would check the wrong computer: the
+// deployment's own environment is what /api/compiler/capabilities reports, and
+// that is verified below.
+const LOCAL_TARGET = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(BASE);
+if (!LOCAL_TARGET) {
+  skip(`${BASE} is a remote deployment — its environment is checked through /api/compiler/capabilities, not this machine's arduino-cli`);
+} else {
   const verify = spawnSync('node', ['server/compiler/installCores.mjs', '--verify'], {
     encoding: 'utf8',
     cwd: new URL('..', import.meta.url).pathname,
