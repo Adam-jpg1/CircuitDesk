@@ -181,6 +181,15 @@ export interface ComponentInstance {
   properties: Record<string, unknown>;
   simulationState: Record<string, unknown>;
   label?: string;
+  /**
+   * For a board instance: the sketch document it runs, by stable id.
+   *
+   * A reference rather than a copy, so several boards can intentionally run one
+   * source without the user having to edit it in several places. Absent on
+   * projects written before per-board sketches, and on components, where it
+   * means nothing; `sketchIdFor()` resolves the fallback.
+   */
+  sketchId?: string;
 }
 
 export interface Connection {

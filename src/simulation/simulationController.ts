@@ -32,6 +32,7 @@ import { getSimulatorAdapter, assertFirmwareMatchesBoard, type FirmwareArtifact 
 import { resolveWorkspaceTargets, type WorkspaceTarget } from '../compiler/targets';
 import { compileProjectCode } from '../compiler/compilerClient';
 import { resolveDefinition } from '../project/partsRegistry';
+import { filesForBoard, sketchIdFor } from '../project/sketches';
 import { useSimulationStore } from './simulationStore';
 import type { BoardDefinition, CircuitProject, CompileResult } from '../types';
 
@@ -51,6 +52,10 @@ export interface BoardBuild {
   fqbn: string;
   boardId: string;
   boardName: string;
+  /** The sketch this build compiled, by stable id. */
+  sketchId: string;
+  /** And by the name a person gave it. */
+  sketchName: string;
   instanceIds: string[];
   status: 'built' | 'compile-failed' | 'not-simulated' | 'artifact-mismatch' | 'no-toolchain' | 'needs-build';
   /** One line a person can act on. Always names the board, never just "failed". */
@@ -70,7 +75,7 @@ export interface BuildReport {
 /** Injectable so tests and offline modes can supply their own compiler. */
 export type CompileFn = (
   project: CircuitProject,
-  target: { boardId: string; fqbn: string },
+  target: { boardId: string; fqbn: string; files?: { name: string; content: string }[] },
 ) => Promise<CompileResult>;
 
 class SimulationController {
@@ -139,27 +144,29 @@ class SimulationController {
   // ------------------------------------------------------------------ build
 
   /**
-   * Compiles the workspace sketch once per distinct target.
+   * Compiles each sketch once per target that runs it.
    *
-   * The editor holds one source. Every runnable board gets that source built
-   * for *its* target, so a Pico and a C6 in one project produce two artifacts
-   * from one sketch — and a failure on one is reported as that board's failure,
-   * not as "Build failed".
+   * The build unit is target + sketch, not board: two boards on one sketch and
+   * one FQBN produce one artifact loaded into two machines, and two boards on
+   * different sketches produce two even though they are the same kind of board.
+   * A failure is reported as that sketch's failure on that board family, with
+   * the boards affected named — not as "Build failed".
    */
   async build(project: CircuitProject): Promise<BuildReport> {
     this.project = project;
     const { targets, unbuildable } = resolveWorkspaceTargets(project);
-    const source = sourceKey(project);
     const builds: BoardBuild[] = [];
 
     for (const target of targets) {
-      builds.push(await this.buildTarget(project, target, source));
+      builds.push(await this.buildTarget(project, target));
     }
     for (const board of unbuildable) {
       builds.push({
         fqbn: '',
         boardId: '',
         boardName: board.boardName,
+        sketchId: '',
+        sketchName: '',
         instanceIds: [board.instanceId],
         status: 'no-toolchain',
         detail: board.reason,
@@ -167,7 +174,7 @@ class SimulationController {
     }
 
     this.builds = builds;
-    useSimulationStore.getState().setBuilds(builds);
+    this.publishBuilds();
     return {
       builds,
       anyRunnable: builds.some((b) => b.status === 'built'),
@@ -175,31 +182,67 @@ class SimulationController {
     };
   }
 
-  private async buildTarget(
-    project: CircuitProject,
-    target: WorkspaceTarget,
-    source: string,
-  ): Promise<BoardBuild> {
+  /**
+   * Sends the build report to the UI with the boards each build serves.
+   *
+   * Board names come from the same labelling the serial monitor uses, so one
+   * board is called one thing everywhere in the app.
+   */
+  private publishBuilds(): void {
+    const labels = new Map(this.serialBoards().map((b) => [b.instanceId, b.label]));
+    useSimulationStore.getState().setBuilds(
+      this.builds.map((b) => ({
+        boardName: b.boardName,
+        fqbn: b.fqbn,
+        sketchName: b.sketchName,
+        usedBy: b.instanceIds.map((id) => labels.get(id) ?? this.boardLabel(id)),
+        status: b.status,
+        detail: b.detail,
+      })),
+    );
+  }
+
+  /** A readable name for a board instance that is not running yet. */
+  private boardLabel(instanceId: string): string {
+    const project = this.project;
+    const inst = project?.boardInstances.find((b) => b.id === instanceId);
+    if (!inst) return instanceId;
+    if (inst.label) return inst.label;
+    const def = project ? resolveDefinition(inst.definitionId, project) : undefined;
+    return def?.name ?? instanceId;
+  }
+
+  private async buildTarget(project: CircuitProject, target: WorkspaceTarget): Promise<BoardBuild> {
+    const files = filesForBoard(project, target.instanceIds[0]);
     const base = {
       fqbn: target.fqbn,
       boardId: target.boardId,
       boardName: target.board.name,
+      sketchId: target.sketchId,
+      sketchName: target.sketchName,
       instanceIds: [...target.instanceIds],
     };
     const adapter = getSimulatorAdapter(target.board);
-    const cacheKey = `${target.fqbn}|${source}`;
+    // Keyed by what actually determines the bytes: the target and the exact
+    // text going into it. Not the board instance — an artifact is a file, and
+    // two machines can load the same one.
+    const cacheKey = buildKey(target.fqbn, files);
 
     const cached = this.artifacts.get(cacheKey);
     if (cached) {
-      return { ...base, status: 'built', detail: `${target.board.name} — up to date (${target.fqbn})` };
+      return { ...base, status: 'built', detail: `${describe(target)} — up to date` };
     }
 
-    const result = await this.compileFn(project, { boardId: target.boardId, fqbn: target.fqbn });
+    const result = await this.compileFn(project, {
+      boardId: target.boardId,
+      fqbn: target.fqbn,
+      files: files.map((f) => ({ name: f.name, content: f.content })),
+    });
     if (!result.success || !result.firmware) {
       return {
         ...base,
         status: 'compile-failed',
-        detail: `${target.board.name} — build failed${result.error ? `: ${firstLine(result.error)}` : ''}`,
+        detail: `${describe(target)} — build failed${result.error ? `: ${firstLine(result.error)}` : ''}`,
         durationMs: result.durationMs,
         result,
       };
@@ -208,7 +251,7 @@ class SimulationController {
       return {
         ...base,
         status: 'not-simulated',
-        detail: `${target.board.name} — built for the real hardware, but CircuitDesk cannot execute this board yet`,
+        detail: `${describe(target)} — built for the real hardware, but CircuitDesk cannot execute this board yet`,
         durationMs: result.durationMs,
         result,
       };
@@ -218,7 +261,7 @@ class SimulationController {
         ...base,
         status: 'artifact-mismatch',
         detail:
-          `${target.board.name} — built as ${result.firmware.format}, but its engine expects ${adapter.firmwareFormat}`,
+          `${describe(target)} — built as ${result.firmware.format}, but its engine expects ${adapter.firmwareFormat}`,
         durationMs: result.durationMs,
         result,
       };
@@ -227,18 +270,18 @@ class SimulationController {
     return {
       ...base,
       status: 'built',
-      detail: `${target.board.name} — build succeeded (${target.fqbn})`,
+      detail: `${describe(target)} — build succeeded`,
       durationMs: result.durationMs,
       result,
     };
   }
 
-  /** Firmware for a board instance, if its target built. */
+  /** Firmware for a board instance, if the build for its sketch succeeded. */
   private artifactForInstance(instanceId: string): FirmwareArtifact | undefined {
     if (!this.project) return undefined;
-    const source = sourceKey(this.project);
     const build = this.builds.find((b) => b.status === 'built' && b.instanceIds.includes(instanceId));
-    return build ? this.artifacts.get(`${build.fqbn}|${source}`) : undefined;
+    if (!build) return undefined;
+    return this.artifacts.get(buildKey(build.fqbn, filesForBoard(this.project, instanceId)));
   }
 
   // -------------------------------------------------------------- lifecycle
@@ -305,12 +348,14 @@ class SimulationController {
         fqbn: def.compiler?.fqbn ?? '',
         boardId: def.id,
         boardName: def.name,
+        sketchId: sketchIdFor(this.project!, instanceId) ?? '',
+        sketchName: this.project?.codeFiles.find((f) => f.id === sketchIdFor(this.project!, instanceId))?.name ?? '',
         instanceIds: [instanceId],
         status: 'needs-build',
         detail: `${def.name} — on the canvas but not built yet. Recompile to include it.`,
       },
     ];
-    useSimulationStore.getState().setBuilds(this.builds);
+    this.publishBuilds();
   }
 
   /** Creates and installs a runner for one board instance. */
@@ -696,9 +741,21 @@ class SimulationController {
   }
 }
 
-/** Identifies the sketch, so an artifact is reused only for the source it is. */
-function sourceKey(project: CircuitProject): string {
-  return project.codeFiles.map((f) => `${f.name}\u0000${f.content}`).join('\u0001');
+/**
+ * What decides whether two builds are the same build.
+ *
+ * The target and the exact text of every file going into it. Same key means
+ * the same bytes come out, so the artifact is reused; different text or a
+ * different FQBN means a real compilation. The board instance is deliberately
+ * absent — sharing a file is not sharing a CPU.
+ */
+function buildKey(fqbn: string, files: readonly { name: string; content: string }[]): string {
+  return `${fqbn}\u0002${files.map((f) => `${f.name}\u0000${f.content}`).join('\u0001')}`;
+}
+
+/** "receiver.ino — Raspberry Pi Pico", which is what a build report needs. */
+function describe(target: WorkspaceTarget): string {
+  return `${target.sketchName} — ${target.board.name}`;
 }
 
 function firstLine(text: string): string {

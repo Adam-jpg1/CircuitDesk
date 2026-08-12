@@ -15,6 +15,7 @@
 
 import type { BoardDefinition, CircuitProject } from '../types';
 import { resolveDefinition } from '../project/partsRegistry';
+import { sketchFor, sketchIdFor } from '../project/sketches';
 
 export type CompileTargetResolution =
   | { ok: true; board: BoardDefinition; boardId: string; fqbn: string }
@@ -55,6 +56,10 @@ export interface WorkspaceTarget {
   fqbn: string;
   boardId: string;
   board: BoardDefinition;
+  /** The sketch document this build compiles. */
+  sketchId: string;
+  /** Its display name, for a build report a person can read. */
+  sketchName: string;
   /**
    * Board instances that will run this artifact — each in its own runner.
    *
@@ -82,13 +87,19 @@ export interface WorkspaceTargets {
 }
 
 /**
- * Every compilation this workspace needs, grouped by target.
+ * Every compilation this workspace needs.
+ *
+ * Grouped by target *and* sketch, which is the real build unit: two Picos
+ * running one sketch is one compilation loaded into two machines, two Picos
+ * running different sketches is two, and one sketch on a Pico and a C6 is two
+ * because the target differs. Board instance is deliberately not part of the
+ * key — an artifact is a file, and the same file can be loaded twice.
  *
  * Order follows the canvas, so the first board placed is the first target
  * built and messages read in the order the user thinks about their boards.
  */
 export function resolveWorkspaceTargets(project: CircuitProject): WorkspaceTargets {
-  const byFqbn = new Map<string, WorkspaceTarget>();
+  const byBuild = new Map<string, WorkspaceTarget>();
   const unbuildable: UnbuildableBoard[] = [];
 
   for (const inst of project.boardInstances) {
@@ -112,10 +123,30 @@ export function resolveWorkspaceTargets(project: CircuitProject): WorkspaceTarge
       });
       continue;
     }
-    const existing = byFqbn.get(compiler.fqbn);
+    const sketchId = sketchIdFor(project, inst.id);
+    const sketch = sketchFor(project, inst.id);
+    if (!sketchId || !sketch) {
+      unbuildable.push({
+        instanceId: inst.id,
+        boardName: inst.label || def.name,
+        reason: `${inst.label || def.name} has no sketch assigned, so there is nothing to build for it.`,
+      });
+      continue;
+    }
+    const key = `${compiler.fqbn}\u0000${sketchId}`;
+    const existing = byBuild.get(key);
     if (existing) existing.instanceIds.push(inst.id);
-    else byFqbn.set(compiler.fqbn, { fqbn: compiler.fqbn, boardId: def.id, board: def, instanceIds: [inst.id] });
+    else {
+      byBuild.set(key, {
+        fqbn: compiler.fqbn,
+        boardId: def.id,
+        board: def,
+        sketchId,
+        sketchName: sketch.name,
+        instanceIds: [inst.id],
+      });
+    }
   }
 
-  return { targets: [...byFqbn.values()], unbuildable };
+  return { targets: [...byBuild.values()], unbuildable };
 }

@@ -1,5 +1,6 @@
 import { dbGetProject, dbListProjects, dbPutProject, dbDeleteProject } from '../persistence/db';
 import { resolveDefinition } from './partsRegistry';
+import { ensureSketchAssignments } from './sketches';
 import {
   PROJECT_SCHEMA_VERSION,
   uid,
@@ -92,6 +93,10 @@ export function normalizeProject(raw: unknown): CircuitProject {
   if (project.codeFiles.length === 0) {
     project.codeFiles = [{ id: uid('file'), name: 'sketch.ino', content: '', language: 'cpp' }];
   }
+  // Sketch assignments. A project saved before per-board sketches has one
+  // source and no assignments; every board is put on it, which is exactly what
+  // it was already doing. Idempotent, so a new-format project is untouched.
+  Object.assign(project, ensureSketchAssignments(project));
   // Drop connections that reference missing instances or pins.
   const instMap = new Map(
     [...project.boardInstances, ...project.componentInstances].map((i) => [i.id, i] as const),
