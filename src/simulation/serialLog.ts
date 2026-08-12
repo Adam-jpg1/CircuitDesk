@@ -205,3 +205,42 @@ export function buildSerialLabels(
   }
   return labels;
 }
+
+// ------------------------------------------------------- contention reporting
+//
+// "Net contention detected" tells a user that something is wrong and nothing
+// about where. The binding already knows exactly which board pins are fighting;
+// this turns that into the sentence, using the same stable-id-to-label rule the
+// serial monitor uses so a board is called the same thing everywhere.
+
+/** One board pin driving a contended net, as the reporter needs it. */
+export interface ContentionDriverInfo {
+  instanceId: string;
+  pinId: string;
+  level: 'high' | 'low';
+}
+
+/**
+ * Describes a contended net in terms of the boards driving it.
+ *
+ * `label` maps a stable instance id to whatever the project calls that board —
+ * the user's own name when they gave one, otherwise a numbered product name.
+ * Fewer than two drivers is not contention and returns null, so a caller cannot
+ * accidentally produce a conflict message for a single driver.
+ */
+export function describeContention(
+  drivers: readonly ContentionDriverInfo[],
+  label: SerialLabeller,
+): string | null {
+  if (drivers.length < 2) return null;
+  // Agreement is not a conflict. Three outputs all driving HIGH are wired
+  // together, which is legal and common.
+  if (new Set(drivers.map((d) => d.level)).size < 2) return null;
+
+  const named = drivers.map((d) => `${label(d.instanceId)} ${d.pinId} (${d.level.toUpperCase()})`);
+  const list =
+    named.length === 2
+      ? `${named[0]} and ${named[1]}`
+      : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+  return `Net contention: ${list} are driving conflicting levels.`;
+}

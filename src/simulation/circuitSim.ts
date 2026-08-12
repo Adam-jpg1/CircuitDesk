@@ -20,7 +20,27 @@ export interface BoardPinEndpoint {
   instance: string;
   /** Pin index in that board's own runner numbering. */
   pin: number;
+  /** The pin as the board itself names it — GP14, IO2, D13. */
+  pinId: string;
   board: BoardDefinition;
+}
+
+/**
+ * One board pin driving a net that turned out to be contended.
+ *
+ * Recorded so a report can say *who* is fighting rather than only that a fight
+ * is happening. The identity is the project's stable board instance id; the
+ * name a person sees is derived from it at the UI layer, so renaming a board
+ * cannot change what the runtime thinks a driver is.
+ */
+export interface ContendedDriver {
+  instanceId: string;
+  /** The pin as the board names it. */
+  pinId: string;
+  /** What this pin was actually driving when the conflict was seen. */
+  level: 'high' | 'low';
+  /** The board's product name, for a caller with no project to hand. */
+  boardName: string;
 }
 import { runnerPinIndex, runnerAdcChannel, boardAdcReference } from './boardRunner';
 import { avrProfileFor } from '../boards/pinMaps';
@@ -265,6 +285,15 @@ export class CircuitBinding {
    * student can make.
    */
   readonly contendedNets = new Set<string>();
+
+  /**
+   * Who is driving each contended net, and to what.
+   *
+   * Only pins actually driving a level appear: an input on the same net is a
+   * participant, not a driver, and naming it would send a student to fix the
+   * wrong wire.
+   */
+  readonly contentionDrivers = new Map<string, ContendedDriver[]>();
   /** netId → emulated ADC channels reachable on that net (board-profile-aware). */
   private netAdcChannels = new Map<string, number[]>();
   private groundNets = new Set<string>();
@@ -528,7 +557,7 @@ export class CircuitBinding {
           const ownerPin = runnerPinIndex(def, pinId);
           if (ownerPin !== undefined) {
             const list = this.netEndpoints.get(net.id) ?? [];
-            list.push({ instance: instId, pin: ownerPin, board: def });
+            list.push({ instance: instId, pin: ownerPin, pinId, board: def });
             this.netEndpoints.set(net.id, list);
           }
         }
@@ -801,16 +830,29 @@ export class CircuitBinding {
     // is the behaviour a learner needs to see, since on real hardware it is
     // the thing that damages a pin.
     this.contendedNets.clear();
+    this.contentionDrivers.clear();
     for (const [netId, endpoints] of this.netEndpoints) {
+      const driving: ContendedDriver[] = [];
       for (const endpoint of endpoints) {
         const owner = this.runners.get(endpoint.instance);
         if (!owner) continue;
         const level = owner.digitalPinLevel(endpoint.pin);
         if (level !== 'high' && level !== 'low') continue;
+        driving.push({
+          instanceId: endpoint.instance,
+          pinId: endpoint.pinId,
+          level,
+          boardName: endpoint.board.name,
+        });
         const volts = level === 'high' ? Number(endpoint.board.metadata.logicVoltage ?? highVolts) : 0;
         setLevel(netId, volts, endpoint.instance === this.boardInstance?.id ? endpoint.pin : null, 0);
       }
-      if (levels.get(netId)?.conflict) this.contendedNets.add(netId);
+      if (levels.get(netId)?.conflict) {
+        this.contendedNets.add(netId);
+        // Every driver on the net, not only the two that happened to disagree
+        // first: with three outputs on one wire the user needs all of them.
+        this.contentionDrivers.set(netId, driving);
+      }
     }
 
     // Propagate through conductive elements to a fixpoint (bounded iterations).

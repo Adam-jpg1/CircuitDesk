@@ -298,6 +298,7 @@ function DebugPanel() {
   const speedFactor = useSimulationStore((s) => s.speedFactor);
   const status = useSimulationStore((s) => s.status);
   const error = useSimulationStore((s) => s.error);
+  const contention = useSimulationStore((s) => s.contention);
   const lastCompile = useEditorStore((s) => s.lastCompile);
   const project = useEditorStore((s) => s.project);
 
@@ -324,6 +325,14 @@ function DebugPanel() {
   return (
     <div className="mono-out">
       <div>Simulation status : {status}{error ? ` — ${error}` : ''}</div>
+      {/*
+        Contention names the boards and pins that are fighting. Two outputs on
+        one wire is the most damaging mistake a learner can make, and "somewhere
+        on your canvas" is not enough to go and fix it.
+      */}
+      {contention.map((line, i) => (
+        <div key={i} className="err-line">{line}</div>
+      ))}
       <div>Simulated time    : {(simTimeMs / 1000).toFixed(3)} s</div>
       <div>Execution speed   : {(speedFactor * 100).toFixed(0)}% of real time (16 MHz AVR)</div>
       <div>Firmware          : {lastCompile?.success ? `${lastCompile.memory?.flashBytes ?? '?'} bytes flash, built by ${lastCompile.toolchain} in ${(lastCompile.durationMs / 1000).toFixed(1)} s` : 'not compiled'}</div>

@@ -27,7 +27,7 @@
 import type { BoardRunner } from './boardRunner';
 import { CircuitBinding, emptyControls, type SimControls } from './circuitSim';
 import { SimulationWorld, type SerialOutputEvent } from './simulationWorld';
-import { SerialTranscript, buildSerialLabels } from './serialLog';
+import { SerialTranscript, buildSerialLabels, describeContention } from './serialLog';
 import { getSimulatorAdapter, assertFirmwareMatchesBoard, type FirmwareArtifact } from './adapters';
 import { resolveWorkspaceTargets, type WorkspaceTarget } from '../compiler/targets';
 import { compileProjectCode } from '../compiler/compilerClient';
@@ -601,6 +601,26 @@ class SimulationController {
     });
     this.publishSerial();
     this.publishSerialTargets();
+    this.publishContention();
+  }
+
+  /**
+   * Turns the binding's contended nets into sentences that name the boards.
+   *
+   * The drivers come from the circuit binding, which knows them by stable
+   * instance id; the names come from the same labelling the serial monitor
+   * uses, so one board is called one thing across the whole app.
+   */
+  private publishContention(): void {
+    const binding = this.binding;
+    if (!binding) return;
+    const labels = new Map(this.serialBoards().map((b) => [b.instanceId, b.label]));
+    const messages: string[] = [];
+    for (const drivers of binding.contentionDrivers.values()) {
+      const line = describeContention(drivers, (id) => labels.get(id) ?? id);
+      if (line) messages.push(line);
+    }
+    useSimulationStore.getState().setContention(messages);
   }
 
   pause(): void {

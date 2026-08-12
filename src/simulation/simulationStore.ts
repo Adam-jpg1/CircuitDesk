@@ -39,6 +39,14 @@ interface SimulationState {
   serialTarget: string | null;
   /** Per-target build outcomes, so a failure names the board that failed. */
   builds: BoardBuildSummary[];
+  /**
+   * One sentence per contended net, naming the boards and pins fighting.
+   *
+   * Kept as rendered sentences rather than raw driver records because the
+   * board names in them are a UI concern: the controller already holds the
+   * project and knows what each instance is called.
+   */
+  contention: string[];
   pinSnapshot: PinSnapshot | null;
   visuals: Record<string, ComponentVisualState>;
   /** Bumped on every published frame so canvas layers can subscribe cheaply. */
@@ -61,6 +69,7 @@ interface SimulationState {
   setSerialBoards(boards: { instanceId: string; label: string }[]): void;
   setSerialTarget(instanceId: string | null): void;
   setBuilds(builds: BoardBuildSummary[]): void;
+  setContention(messages: string[]): void;
   clearSerial(): void;
   pressButton(id: string, pressed: boolean): void;
   setToggle(id: string, on: boolean): void;
@@ -81,6 +90,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   serialBoards: [],
   serialTarget: null,
   builds: [],
+  contention: [],
   pinSnapshot: null,
   visuals: {},
   frame: 0,
@@ -118,6 +128,15 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   setSerialTarget: (instanceId) => set({ serialTarget: instanceId }),
 
   setBuilds: (builds) => set({ builds }),
+
+  setContention(messages) {
+    // Compared before setting: this runs every published frame and a contended
+    // net usually stays contended, so re-setting an equal array would rerender
+    // every subscriber 30 times a second for no change.
+    const current = get().contention;
+    const same = current.length === messages.length && current.every((m, i) => m === messages[i]);
+    if (!same) set({ contention: messages });
+  },
 
   clearSerial: () => set({ serialText: '', serialLineCount: 0 }),
 

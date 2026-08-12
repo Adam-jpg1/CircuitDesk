@@ -32,7 +32,9 @@
     "test:serial": "tsx tests/sim.serialAttribution.mts",
     "test:validation": "tsx tests/validation.busPins.mts",
     "test:production": "tsx tests/production.multiboard.mts",
-    "test:artwork": "tsx tests/artwork.displays.mts"
+    "test:artwork": "tsx tests/artwork.displays.mts",
+    "test:artwork:discrete": "tsx tests/artwork.discrete.mts",
+    "test:contention": "tsx tests/sim.contention.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

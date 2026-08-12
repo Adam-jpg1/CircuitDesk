@@ -638,7 +638,364 @@ function Lcd1602Art({ def, visual }: ArtProps) {
   );
 }
 
+// ===================================================== shared part primitives
+//
+// Seven separate drawings would be seven separate styles. These are the pieces
+// the hardware parts have in common — a lead, a metal can, a moulded body —
+// factored out so the library reads as one thing rather than as a collection.
+// Deliberately small: enough for a consistent language, not a framework.
+
+/** A tinned lead running from a body edge out to where the pin actually is. */
+function Lead({ x1, y1, x2, y2, width = 2.2 }: { x1: number; y1: number; x2: number; y2: number; width?: number }) {
+  return (
+    <>
+      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#6f7982" strokeWidth={width + 0.8} strokeLinecap="round" />
+      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#c3cbd3" strokeWidth={width} strokeLinecap="round" />
+    </>
+  );
+}
+
+/**
+ * A moulded plastic body: base colour, a lit upper half and a dark lower edge.
+ *
+ * The three-band treatment is what makes a rectangle read as an object with
+ * depth rather than as a filled shape, and it is the same treatment on every
+ * part here so they look related.
+ */
+function MouldedBody({
+  x, y, w, h, r = 3, fill, stroke,
+}: { x: number; y: number; w: number; h: number; r?: number; fill: string; stroke: string }) {
+  return (
+    <>
+      <rect x={x + 1} y={y + 1.5} width={w} height={h} rx={r} fill="rgba(0,0,0,0.32)" />
+      <rect x={x} y={y} width={w} height={h} rx={r} fill={fill} stroke={stroke} />
+      <rect x={x + 1} y={y + 1} width={w - 2} height={h * 0.38} rx={r * 0.7} fill="rgba(255,255,255,0.10)" />
+      <rect x={x} y={y + h * 0.82} width={w} height={h * 0.18} rx={r * 0.7} fill="rgba(0,0,0,0.18)" />
+    </>
+  );
+}
+
+/** A drawn-metal cylinder seen from the side, for motor cans and coils. */
+function MetalCan({
+  x, y, w, h, r = 3, base = '#8d959d',
+}: { x: number; y: number; w: number; h: number; r?: number; base?: string }) {
+  return (
+    <>
+      <rect x={x + 1} y={y + 1.5} width={w} height={h} rx={r} fill="rgba(0,0,0,0.32)" />
+      <rect x={x} y={y} width={w} height={h} rx={r} fill={base} stroke="#4d545b" />
+      <rect x={x} y={y + h * 0.06} width={w} height={h * 0.22} rx={r * 0.6} fill="rgba(255,255,255,0.34)" />
+      <rect x={x} y={y + h * 0.72} width={w} height={h * 0.2} rx={r * 0.6} fill="rgba(0,0,0,0.22)" />
+    </>
+  );
+}
+
+/** Small supporting marking. Never the thing that identifies the part. */
+function Marking({ x, y, text, size = 5, fill = 'rgba(255,255,255,0.78)' }: { x: number; y: number; text: string; size?: number; fill?: string }) {
+  return (
+    <text x={x} y={y} fontSize={size} fill={fill} textAnchor="middle" fontFamily="'DejaVu Sans', sans-serif">
+      {text}
+    </text>
+  );
+}
+
+// ------------------------------------------------------------------- diode
+//
+// An axial glass/epoxy body with a cathode band, leads running out to the two
+// pins. The band is on the cathode side and stays there: the definition puts
+// the anode at the left and the cathode at the right, and the artwork has to
+// agree with the electrical model rather than the other way round.
+function DiodeArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const cy = 1.8 * MM;
+  const body = { x: 2.4 * MM, w: W - 4.8 * MM };
+  const bandW = body.w * 0.16;
+  return (
+    <g>
+      <Lead x1={0.4 * MM} y1={cy} x2={body.x + 1} y2={cy} />
+      <Lead x1={body.x + body.w - 1} y1={cy} x2={W - 0.4 * MM} y2={cy} />
+      <rect x={body.x + 1} y={cy - H * 0.34 + 1.5} width={body.w} height={H * 0.68} rx={H * 0.2} fill="rgba(0,0,0,0.3)" />
+      <rect x={body.x} y={cy - H * 0.34} width={body.w} height={H * 0.68} rx={H * 0.2} fill="#2a2320" stroke="#141110" />
+      <rect x={body.x} y={cy - H * 0.34} width={body.w} height={H * 0.26} rx={H * 0.13} fill="rgba(255,255,255,0.16)" />
+      {/* The cathode band, at the cathode end, which is the right-hand pin. */}
+      <rect x={body.x + body.w - bandW - body.w * 0.1} y={cy - H * 0.34} width={bandW} height={H * 0.68} fill="#e6e9ec" />
+    </g>
+  );
+}
+
+// -------------------------------------------------------------- transistor
+//
+// A TO-92: a half-round moulded body with a flat face and three leads fanning
+// out to the pins the definition already places. E/B/C stay in the order the
+// definition gives them; the letters are small because the silhouette is what
+// is supposed to identify it.
+function TransistorArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const pins = [0.8, 3.0, 5.2].map((mm) => mm * MM);
+  const legY = 5.6 * MM;
+  const bodyBottom = H * 0.56;
+  const cx = W / 2;
+  const rx = W * 0.4;
+  return (
+    <g>
+      {pins.map((x, i) => (
+        <Lead key={i} x1={cx + (x - cx) * 0.55} y1={bodyBottom - 1} x2={x} y2={legY} width={1.8} />
+      ))}
+      {/* TO-92: round back, flat front. */}
+      <path
+        d={`M ${cx - rx} ${bodyBottom} A ${rx} ${rx} 0 0 1 ${cx + rx} ${bodyBottom} Z`}
+        fill="rgba(0,0,0,0.3)"
+        transform="translate(1 1.5)"
+      />
+      <path
+        d={`M ${cx - rx} ${bodyBottom} A ${rx} ${rx} 0 0 1 ${cx + rx} ${bodyBottom} Z`}
+        fill="#20242a"
+        stroke="#0c0f12"
+      />
+      <path
+        d={`M ${cx - rx * 0.8} ${bodyBottom * 0.55} A ${rx * 0.8} ${rx * 0.8} 0 0 1 ${cx + rx * 0.8} ${bodyBottom * 0.55} Z`}
+        fill="rgba(255,255,255,0.09)"
+      />
+      {/* The flat face, which is how a TO-92 is oriented by eye. */}
+      <line x1={cx - rx} y1={bodyBottom} x2={cx + rx} y2={bodyBottom} stroke="#454e57" strokeWidth="1.4" />
+      {/*
+        No E/B/C lettering here. The part is 6 mm across: a letter large enough
+        to read would sit on top of the lead it names, and the canvas already
+        draws "Emitter"/"Base"/"Collector" above each pin. The silhouette and
+        the flat face are what identify it.
+      */}
+    </g>
+  );
+}
+
+// ------------------------------------------------------------------ MOSFET
+//
+// A TO-220: a moulded body with a metal tab and a mounting hole above it, which
+// is the silhouette that distinguishes a power device from the little TO-92
+// next to it in the library. G/D/S keep the definition's order.
+function MosfetArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const pins = [1.7, 5.0, 8.3].map((mm) => mm * MM);
+  const legY = 8.6 * MM;
+  const tab = { x: W * 0.12, y: H * 0.06, w: W * 0.76, h: H * 0.26 };
+  const body = { x: W * 0.12, y: tab.y + tab.h, w: W * 0.76, h: H * 0.36 };
+  return (
+    <g>
+      {pins.map((x, i) => (
+        <Lead key={i} x1={x} y1={body.y + body.h - 1} x2={x} y2={legY} width={2} />
+      ))}
+      {/* Metal mounting tab with its hole. */}
+      <rect x={tab.x} y={tab.y} width={tab.w} height={tab.h} rx="1.5" fill="#9aa3ab" stroke="#5b636b" />
+      <rect x={tab.x} y={tab.y} width={tab.w} height={tab.h * 0.4} rx="1.5" fill="rgba(255,255,255,0.3)" />
+      <circle cx={W / 2} cy={tab.y + tab.h * 0.5} r={Math.min(tab.h, tab.w) * 0.28} fill="#3c434a" stroke="#20262d" />
+      <MouldedBody x={body.x} y={body.y} w={body.w} h={body.h} r={2} fill="#1b1f24" stroke="#0a0d10" />
+      {/*
+        G/D/S go on the body, not next to the leads: the canvas draws its own
+        pin labels there and two sets of names in the same place is worse than
+        one. On the body they read as package marking, which is where a real
+        TO-220 carries its printing.
+      */}
+      {['G', 'D', 'S'].map((label, i) => (
+        <Marking key={label} x={pins[i]} y={body.y + body.h * 0.78} text={label} size={6} fill="rgba(196,208,220,0.9)" />
+      ))}
+    </g>
+  );
+}
+
+// ----------------------------------------------------------------- speaker
+//
+// A cone driver seen face on: outer rim, surround, cone, dust cap, and two
+// terminals at the pins. No state — the speaker is a validation-level part and
+// nothing in the simulation reports whether it is sounding, so nothing here
+// pretends it does.
+function SpeakerArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const cx = W / 2;
+  const cy = H * 0.46;
+  const r = Math.min(W, H) * 0.44;
+  return (
+    <g>
+      <Lead x1={7 * MM} y1={cy + r * 0.7} x2={7 * MM} y2={19.6 * MM} width={1.8} />
+      <Lead x1={13 * MM} y1={cy + r * 0.7} x2={13 * MM} y2={19.6 * MM} width={1.8} />
+      <circle cx={cx + 1} cy={cy + 1.5} r={r} fill="rgba(0,0,0,0.32)" />
+      {/* Pressed-steel basket. */}
+      <circle cx={cx} cy={cy} r={r} fill="#2b3138" stroke="#12161a" />
+      <circle cx={cx} cy={cy} r={r} fill="rgba(255,255,255,0.07)" clipPath="inset(0 0 55% 0)" />
+      {/* Surround and cone. */}
+      <circle cx={cx} cy={cy} r={r * 0.82} fill="#3a424a" stroke="#1b2026" />
+      <circle cx={cx} cy={cy} r={r * 0.7} fill="#1d2228" stroke="#0e1215" />
+      <circle cx={cx} cy={cy} r={r * 0.44} fill="#262c33" />
+      {/* Dust cap, which is the thing that says "speaker" at a glance. */}
+      <circle cx={cx} cy={cy} r={r * 0.26} fill="#39414a" stroke="#191d22" />
+      <circle cx={cx - r * 0.1} cy={cy - r * 0.11} r={r * 0.11} fill="rgba(255,255,255,0.16)" />
+      <Marking x={7 * MM} y={cy + r * 0.98} text="+" size={5} fill="rgba(255,255,255,0.6)" />
+    </g>
+  );
+}
+
+// ------------------------------------------------------------------- relay
+//
+// A relay breakout: a PCB with the sealed relay can on it, the coil/contact
+// terminal block on the load side, and the three logic pins along the bottom
+// edge where the definition puts them.
+//
+// The one stateful thing here is real. `coilOn` comes from the voltage on the
+// IN net, which the circuit binding already computes, so the armature and the
+// COM→NO/NC path move because the input is genuinely driven — not on a timer.
+function RelayArt({ def, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const energised = Boolean(visual?.coilOn);
+  const can = { x: W * 0.14, y: H * 0.3, w: W * 0.72, h: H * 0.34 };
+  const block = { x: W * 0.1, y: H * 0.06, w: W * 0.8, h: H * 0.17 };
+  const comX = 6 * MM;
+  const noX = 13 * MM;
+  const ncX = 20 * MM;
+  const armFrom = energised ? noX : ncX;
+  return (
+    <g>
+      {/* PCB */}
+      <rect x="1" y="1.5" width={W} height={H} rx="4" fill="rgba(0,0,0,0.34)" />
+      <rect width={W} height={H} rx="4" fill="#123a2c" stroke="#0a241b" />
+      {/* Screw terminal block on the load side, above COM/NO/NC. */}
+      <rect x={block.x} y={block.y} width={block.w} height={block.h} rx="2" fill="#1a5fa8" stroke="#0d3766" />
+      <rect x={block.x} y={block.y} width={block.w} height={block.h * 0.34} rx="2" fill="rgba(255,255,255,0.16)" />
+      {[comX, noX, ncX].map((x) => (
+        <circle key={x} cx={x} cy={block.y + block.h * 0.55} r={block.h * 0.3} fill="#2b3138" stroke="#0d1114" />
+      ))}
+      {/* The switched path, drawn between the terminals it actually joins. */}
+      <line
+        x1={comX}
+        y1={block.y + block.h + 3}
+        x2={armFrom}
+        y2={block.y + block.h + 3}
+        stroke={energised ? '#ffb454' : '#5d6a76'}
+        strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+      {/* Sealed relay can. */}
+      <MouldedBody x={can.x} y={can.y} w={can.w} h={can.h} r={2} fill="#1e2a36" stroke="#0b1017" />
+      <Marking x={W / 2} y={can.y + can.h * 0.46} text="10A 250VAC" size={4.4} fill="rgba(255,255,255,0.62)" />
+      <Marking x={W / 2} y={can.y + can.h * 0.78} text={energised ? 'COM–NO' : 'COM–NC'} size={4.4} fill={energised ? '#ffb454' : 'rgba(255,255,255,0.45)'} />
+      {/* Coil state indicator. Abstract, and only ever driven by coilOn. */}
+      <circle cx={W * 0.82} cy={H * 0.74} r={2.1 * MM} fill={energised ? '#ff5f52' : '#3a2626'} stroke="#1a1414" />
+      {energised && <circle cx={W * 0.82} cy={H * 0.74} r={3.4 * MM} fill="#ff5f52" opacity="0.28" />}
+      <Marking x={W * 0.3} y={H * 0.78} text="IN" size={4.6} fill="rgba(255,255,255,0.5)" />
+    </g>
+  );
+}
+
+// ---------------------------------------------------------------- DC motor
+//
+// A brushed can motor seen from the side: steel can, moulded end bell, output
+// shaft, and the two terminals at the pins on the left edge.
+//
+// No state. Nothing in the simulation reports whether this motor is turning —
+// it is a validation-level part — so the shaft is drawn stationary rather than
+// given an invented spin.
+function DcMotorArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const can = { x: W * 0.16, y: H * 0.14, w: W * 0.6, h: H * 0.72 };
+  const cy = H / 2;
+  return (
+    <g>
+      <Lead x1={0.6 * MM} y1={8 * MM} x2={can.x + 2} y2={8 * MM} width={1.8} />
+      <Lead x1={0.6 * MM} y1={12 * MM} x2={can.x + 2} y2={12 * MM} width={1.8} />
+      {/* End bell, on the terminal side. */}
+      <MouldedBody x={can.x - W * 0.06} y={can.y} w={W * 0.1} h={can.h} r={2} fill="#20262d" stroke="#0c1014" />
+      <MetalCan x={can.x} y={can.y} w={can.w} h={can.h} r={4} />
+      {/* Crimp lines down the can, which is what a real one looks like. */}
+      {[0.3, 0.5, 0.7].map((f) => (
+        <line
+          key={f}
+          x1={can.x + can.w * f}
+          y1={can.y + 2}
+          x2={can.x + can.w * f}
+          y2={can.y + can.h - 2}
+          stroke="rgba(0,0,0,0.18)"
+          strokeWidth="1"
+        />
+      ))}
+      {/* Front bearing boss and output shaft. */}
+      <rect x={can.x + can.w} y={cy - H * 0.16} width={W * 0.07} height={H * 0.32} rx="2" fill="#6f7982" stroke="#454c53" />
+      <rect x={can.x + can.w + W * 0.07} y={cy - 1.6} width={W * 0.13} height="3.2" rx="1.6" fill="#c3cbd3" stroke="#7b848c" />
+      <circle cx={can.x + can.w + W * 0.035} cy={cy} r="2.4" fill="#3c434a" />
+    </g>
+  );
+}
+
+// ----------------------------------------------------------- stepper motor
+//
+// Deliberately unlike the DC motor next to it: a squat round stator with a
+// stamped, segmented body and a visible mounting flange, plus the four winding
+// leads coming out of one side as a ribbon rather than two terminals.
+//
+// No state. Step position is not simulated, so nothing here suggests one.
+function StepperArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const cx = W * 0.62;
+  const cy = H * 0.5;
+  const r = Math.min(W, H) * 0.32;
+  const leadYs = [9, 13, 17, 21].map((mm) => mm * MM);
+  return (
+    <g>
+      {/* Mounting flange behind the body. */}
+      <rect x={cx - r * 1.4} y={cy - r * 0.28} width={r * 2.8} height={r * 0.56} rx="2" fill="#79828b" stroke="#474e55" />
+      <circle cx={cx - r * 1.2} cy={cy} r="2.4" fill="#2b3138" />
+      <circle cx={cx + r * 1.2} cy={cy} r="2.4" fill="#2b3138" />
+      {/* Stator can. */}
+      <circle cx={cx + 1} cy={cy + 1.5} r={r} fill="rgba(0,0,0,0.32)" />
+      <circle cx={cx} cy={cy} r={r} fill="#8d959d" stroke="#4d545b" />
+      <circle cx={cx} cy={cy} r={r} fill="rgba(255,255,255,0.28)" clipPath="inset(0 0 62% 0)" />
+      {/* Stamped segments, which read as laminations rather than as decoration. */}
+      {Array.from({ length: 8 }, (_, i) => {
+        const a = (i / 8) * Math.PI * 2;
+        return (
+          <line
+            key={i}
+            x1={cx + Math.cos(a) * r * 0.55}
+            y1={cy + Math.sin(a) * r * 0.55}
+            x2={cx + Math.cos(a) * r * 0.95}
+            y2={cy + Math.sin(a) * r * 0.95}
+            stroke="rgba(0,0,0,0.22)"
+            strokeWidth="1.4"
+          />
+        );
+      })}
+      {/* Gearbox boss and shaft, on the front face. */}
+      <circle cx={cx} cy={cy} r={r * 0.46} fill="#6f7982" stroke="#454c53" />
+      <circle cx={cx} cy={cy} r={r * 0.2} fill="#c3cbd3" stroke="#7b848c" />
+      {/* The winding leads, as a ribbon out of one side. */}
+      <rect x={2.2 * MM} y={leadYs[0] - 2.4 * MM} width={W * 0.12} height={leadYs[3] - leadYs[0] + 4.8 * MM} rx="2" fill="#20262d" stroke="#0c1014" />
+      {leadYs.map((y, i) => (
+        <line
+          key={y}
+          x1={0.6 * MM}
+          y1={y}
+          x2={2.2 * MM + W * 0.12}
+          y2={y}
+          stroke={['#c04a4a', '#c9a227', '#d0812c', '#4a7fc0'][i]}
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      ))}
+    </g>
+  );
+}
+
 const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
+  diode: (p) => <DiodeArt {...p} />,
+  transistor: (p) => <TransistorArt {...p} />,
+  mosfet: (p) => <MosfetArt {...p} />,
+  speaker: (p) => <SpeakerArt {...p} />,
+  relay: (p) => <RelayArt {...p} />,
+  'dc-motor': (p) => <DcMotorArt {...p} />,
+  stepper: (p) => <StepperArt {...p} />,
   lcd1602: (p) => <Lcd1602Art {...p} />,
   oled: (p) => <OledArt {...p} />,
   led: (p) => <LedArt {...p} />,
