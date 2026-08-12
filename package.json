@@ -32,7 +32,10 @@
     "test:serial": "tsx tests/sim.serialAttribution.mts",
     "test:validation": "tsx tests/validation.busPins.mts",
     "test:production": "tsx tests/production.multiboard.mts",
-    "test:artwork": "tsx tests/artwork.displays.mts"
+    "test:artwork": "tsx tests/artwork.displays.mts",
+    "test:deployment": "tsx tests/compiler.deployment.mts",
+    "cores:verify": "node server/compiler/installCores.mjs --verify",
+    "cores:install": "node server/compiler/installCores.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

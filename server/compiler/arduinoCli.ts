@@ -28,6 +28,14 @@ export interface CliAvailability {
   version: string;
   /** Core ids reported installed by `arduino-cli core list` (e.g. "arduino:avr"). */
   installedCores: string[];
+  /**
+   * Installed version per core id.
+   *
+   * "The core is installed" and "the core is the version this service was built
+   * and validated against" are different claims, and a deployment that has
+   * drifted looks healthy under the first one.
+   */
+  coreVersions: Record<string, string>;
   avrCoreInstalled: boolean;
   reason?: string;
 }
@@ -40,12 +48,15 @@ export async function detectArduinoCli(): Promise<CliAvailability> {
     const { stdout } = await execFileAsync('arduino-cli', ['version'], { timeout: 10_000 });
     const version = stdout.trim();
     let installedCores: string[] = [];
+    const coreVersions: Record<string, string> = {};
     try {
       const cores = await execFileAsync('arduino-cli', ['core', 'list'], { timeout: 20_000 });
-      installedCores = cores.stdout
-        .split('\n')
-        .map((line) => /^([a-z0-9_]+:[a-z0-9_]+)\s/i.exec(line.trim())?.[1])
-        .filter((c): c is string => Boolean(c));
+      for (const line of cores.stdout.split('\n')) {
+        const match = /^([a-z0-9_]+:[a-z0-9_]+)\s+(\S+)\s/i.exec(line.trim());
+        if (!match) continue;
+        installedCores.push(match[1]);
+        coreVersions[match[1]] = match[2];
+      }
     } catch {
       installedCores = [];
     }
@@ -54,6 +65,7 @@ export async function detectArduinoCli(): Promise<CliAvailability> {
       available: true,
       version,
       installedCores,
+      coreVersions,
       avrCoreInstalled,
       reason: avrCoreInstalled
         ? undefined
@@ -64,6 +76,7 @@ export async function detectArduinoCli(): Promise<CliAvailability> {
       available: false,
       version: '',
       installedCores: [],
+      coreVersions: {},
       avrCoreInstalled: false,
       reason: 'arduino-cli is not installed or not on PATH.',
     };
