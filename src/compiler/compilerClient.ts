@@ -73,3 +73,66 @@ export async function compileProjectCode(
     };
   }
 }
+
+/**
+ * What the compiler service can actually build right now.
+ *
+ * Separate from the health check on purpose: "the service answered" and "the
+ * service can build for your board" are different facts, and treating them as
+ * one is how a deployment ran for weeks unable to compile for the ESP32-C6
+ * while reporting itself healthy. Everything here comes from the backend —
+ * nothing in the UI may claim a core is installed without asking.
+ */
+export interface CompilerCoreStatus {
+  id: string;
+  expectedVersion: string;
+  installedVersion: string | null;
+  installed: boolean;
+  matchesPin: boolean;
+  required: boolean;
+  fqbnFamilies: string[];
+  reason?: string;
+}
+
+export interface CompilerTargetStatus {
+  id: string;
+  name: string;
+  fqbn: string;
+  core: string;
+  coreVersion: string | null;
+  expectedCoreVersion: string | null;
+  installed: boolean;
+  toolchain: string;
+  reason?: string;
+}
+
+export interface CompilerCapabilities {
+  /** 'unreachable' is this client's own verdict; the rest come from the service. */
+  status: 'healthy' | 'degraded' | 'drifted' | 'error' | 'unreachable';
+  arduinoCli?: { available: boolean; version: string };
+  missingRequiredCores: string[];
+  driftedCores: string[];
+  cores: CompilerCoreStatus[];
+  targets: CompilerTargetStatus[];
+}
+
+export async function fetchCompilerCapabilities(): Promise<CompilerCapabilities> {
+  try {
+    const res = await fetch(compilerApiUrl('/api/compiler/capabilities'));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const raw = (await res.json()) as Partial<CompilerCapabilities>;
+    return {
+      status: raw.status ?? 'error',
+      arduinoCli: raw.arduinoCli,
+      missingRequiredCores: raw.missingRequiredCores ?? [],
+      driftedCores: raw.driftedCores ?? [],
+      cores: raw.cores ?? [],
+      targets: raw.targets ?? [],
+    };
+  } catch (err) {
+    console.error('[CircuitDesk] compiler capability check failed:', err);
+    // Unreachable is not the same as "missing a core", and the caller has to be
+    // able to tell them apart to say anything useful.
+    return { status: 'unreachable', missingRequiredCores: [], driftedCores: [], cores: [], targets: [] };
+  }
+}
