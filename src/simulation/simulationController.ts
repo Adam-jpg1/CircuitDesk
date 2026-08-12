@@ -189,7 +189,10 @@ class SimulationController {
    * board is called one thing everywhere in the app.
    */
   private publishBuilds(): void {
-    const labels = new Map(this.serialBoards().map((b) => [b.instanceId, b.label]));
+    // Project-wide labelling, not the running world's: a build report exists
+    // precisely when boards are not running yet, and three identical Picos
+    // sharing one broken sketch have to be named apart in "affected boards".
+    const labels = this.boardLabels();
     useSimulationStore.getState().setBuilds(
       this.builds.map((b) => ({
         boardName: b.boardName,
@@ -198,6 +201,25 @@ class SimulationController {
         usedBy: b.instanceIds.map((id) => labels.get(id) ?? this.boardLabel(id)),
         status: b.status,
         detail: b.detail,
+      })),
+    );
+  }
+
+  /**
+   * Display names for every board instance in the project, told apart.
+   *
+   * Built from the project rather than the running world so a board is called
+   * the same thing whether it is running, waiting or failed to build — and so
+   * a board that did not compile cannot renumber the ones that did.
+   */
+  private boardLabels(): Map<string, string> {
+    const project = this.project;
+    if (!project) return new Map();
+    return buildSerialLabels(
+      project.boardInstances.map((inst) => ({
+        instanceId: inst.id,
+        boardName: resolveDefinition(inst.definitionId, project)?.name ?? 'Board',
+        label: inst.label,
       })),
     );
   }
@@ -508,13 +530,8 @@ class SimulationController {
     const project = this.project;
     const world = this.world;
     if (!project || !world) return [];
-    const members = world.boards.map((m) => {
-      const inst = project.boardInstances.find((b) => b.id === m.instanceId);
-      const def = inst ? resolveDefinition(inst.definitionId, project) : undefined;
-      return { instanceId: m.instanceId, boardName: def?.name ?? 'Board', label: inst?.label };
-    });
-    const labels = buildSerialLabels(members);
-    return members.map((m) => ({ instanceId: m.instanceId, label: labels.get(m.instanceId) ?? m.instanceId }));
+    const labels = this.boardLabels();
+    return world.boards.map((m) => ({ instanceId: m.instanceId, label: labels.get(m.instanceId) ?? m.instanceId }));
   }
 
   private publishSerialTargets(): void {

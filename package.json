@@ -35,7 +35,10 @@
     "test:artwork": "tsx tests/artwork.displays.mts",
     "test:deployment": "tsx tests/compiler.deployment.mts",
     "cores:verify": "node server/compiler/installCores.mjs --verify",
-    "cores:install": "node server/compiler/installCores.mjs"
+    "cores:install": "node server/compiler/installCores.mjs",
+    "test:sketches": "tsx tests/sketches.model.mts",
+    "test:sketches:editor": "tsx tests/sketches.editor.mts",
+    "test:sketches:acceptance": "tsx tests/sketches.acceptance.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

@@ -304,22 +304,55 @@ export class CircuitBinding {
     this.indexNets();
     this.buildEdges();
     if (runner) this.setupUltrasonic(runner);
-    if (runner) this.rebindBuses(runner);
+    this.rebindBuses();
   }
 
-  /** Attaches device models to whichever pins the buses are currently on. */
-  private rebindBuses(runner: BoardRunner): void {
-    this.boundBusPins = this.busPinSignature(runner);
-    this.setupI2cDevices(runner);
-    this.setupSpiDevices(runner);
+  /**
+   * Attaches device models to whichever pins the buses are currently on.
+   *
+   * Every board with a bus, not only the first one. With several boards on a
+   * canvas the LCD may be wired to the second board's I2C pins, and binding
+   * only the primary's bus would leave a display that is correctly wired doing
+   * nothing at all. Each board attaches the devices wired to *its* pads.
+   */
+  private rebindBuses(): void {
+    this.boundBusPins = this.busPinSignature();
+    // Edge subscriptions and latch wiring belong to the whole binding, not to
+    // one board, so they are cleared once here rather than inside the per-board
+    // setup — otherwise the second board would drop the first board's listeners.
+    this.releaseListeners();
+    this.hc595.clear();
+    this.hc165.clear();
+    const i2c: I2cDevice[] = [];
+    const spi: SpiDevice[] = [];
+    for (const [instanceId, owner] of this.runners) {
+      i2c.push(...this.setupI2cDevices(owner, instanceId));
+      spi.push(...this.setupSpiDevices(owner, instanceId));
+    }
+    this.i2cDevices = i2c;
+    this.spiDevices = spi;
   }
 
-  /** Identifies the current bus pin assignment, for change detection. */
-  private busPinSignature(runner: BoardRunner): string {
-    if (!runner.activeI2cPins && !runner.activeSpiPins) return 'static';
-    const i2c = runner.activeI2cPins?.() ?? {};
-    const spi = runner.activeSpiPins?.() ?? {};
-    return `${i2c.sda ?? '-'}/${i2c.scl ?? '-'}|${spi.sck ?? '-'}/${spi.mosi ?? '-'}/${spi.miso ?? '-'}`;
+  /**
+   * Identifies the current bus pin assignment across every board, for change
+   * detection.
+   *
+   * All boards, because the sketch that opens a bus may not be the primary
+   * board's: with an ESP32 first on the canvas and an LCD on a Pico's GP4/GP5,
+   * watching only the primary would never notice the Pico's `Wire.begin()` and
+   * the display would stay unattached forever.
+   */
+  private busPinSignature(): string {
+    const parts: string[] = [];
+    for (const [instanceId, runner] of this.runners) {
+      if (!runner.activeI2cPins && !runner.activeSpiPins) continue;
+      const i2c = runner.activeI2cPins?.() ?? {};
+      const spi = runner.activeSpiPins?.() ?? {};
+      parts.push(
+        `${instanceId}=${i2c.sda ?? '-'}/${i2c.scl ?? '-'}|${spi.sck ?? '-'}/${spi.mosi ?? '-'}/${spi.miso ?? '-'}`,
+      );
+    }
+    return parts.length === 0 ? 'static' : parts.join(';');
   }
 
   /**
@@ -362,16 +395,16 @@ export class CircuitBinding {
    * attached at all, so firmware talking to it reads back an idle bus rather
    * than a fabricated reply.
    */
-  private setupSpiDevices(runner: BoardRunner): void {
-    const board = this.boardDef;
+  private setupSpiDevices(runner: BoardRunner, boardInstanceId: string): SpiDevice[] {
+    const board = this.boardDefinitionOf(boardInstanceId);
     // Engines whose hardware SPI controller is not yet bridged to the shared
     // device models expose no bus. Attaching nothing is the honest outcome:
     // firmware talking to SPI reads an idle bus rather than a fabricated reply.
     const spiBus = runner.spiBus;
-    if (!spiBus) return;
+    if (!spiBus) return [];
     if (!board) {
       spiBus.sync([]);
-      return;
+      return [];
     }
     // Where this board's SPI lines are. An AVR bonds SCK/MOSI/MISO to fixed
     // port pins, so they come from the MCU; an RP2040 can mux them onto several
@@ -384,12 +417,21 @@ export class CircuitBinding {
         : { sck: undefined, mosi: undefined, miso: undefined };
     const logicVolts = Number(board.metadata.logicVoltage ?? 5);
 
+    // This board's pad on that net, not any board's — see setupI2cDevices.
     const netHasPin = (netId: string | undefined, pin: number | undefined): boolean =>
-      netId !== undefined && pin !== undefined && (this.netBoardPins.get(netId) ?? []).includes(pin);
+      netId !== undefined &&
+      pin !== undefined &&
+      (this.netEndpoints.get(netId) ?? []).some((e) => e.instance === boardInstanceId && e.pin === pin);
 
-    /** First board pin on a net — used to resolve chip-select and latch lines. */
+    /**
+     * This board's first pad on a net — used to resolve chip-select and latch
+     * lines. A CS wired to another board's GPIO is not a CS this board can
+     * assert, so it must not be borrowed.
+     */
     const boardPinOn = (netId: string | undefined): number | null =>
-      netId === undefined ? null : (this.netBoardPins.get(netId) ?? [])[0] ?? null;
+      netId === undefined
+        ? null
+        : (this.netEndpoints.get(netId) ?? []).find((e) => e.instance === boardInstanceId)?.pin ?? null;
 
     const netFedBy = (netId: string | undefined, instanceId: string, types: string[]): boolean => {
       if (netId === undefined) return false;
@@ -404,9 +446,6 @@ export class CircuitBinding {
       }
       return false;
     };
-
-    this.releaseListeners();
-    this.hc595.clear();
 
     const wanted: { instanceId: string; csPin: number | null; create: () => SpiDevice }[] = [];
     for (const inst of this.graph.instances) {
@@ -449,7 +488,7 @@ export class CircuitBinding {
       });
     }
 
-    this.spiDevices = spiBus.sync(wanted);
+    const devices = spiBus.sync(wanted);
 
     // Chip select changes between transactions, when no byte is being clocked,
     // so it has to be watched as a pin edge. Polling once per frame would let a
@@ -465,7 +504,7 @@ export class CircuitBinding {
 
     // Shift registers latch on an RCLK edge, which is far too short to catch by
     // polling once per frame — subscribe to real pin edges instead.
-    for (const device of this.spiDevices) {
+    for (const device of devices) {
       if (!(device instanceof Sn74hc595Device)) continue;
       const instId = device.instanceId;
       const latchPin = boardPinOn(this.netOfInstancePin(instId, 'rclk'));
@@ -483,8 +522,7 @@ export class CircuitBinding {
       );
     }
 
-    this.hc165.clear();
-    for (const device of this.spiDevices) {
+    for (const device of devices) {
       if (!(device instanceof Sn74hc165Device)) continue;
       const instId = device.instanceId;
       const inputNets = HC165_INPUT_PINS.map((pinId) => this.netOfInstancePin(instId, pinId));
@@ -513,6 +551,8 @@ export class CircuitBinding {
         }),
       );
     }
+
+    return devices;
   }
 
   private indexNets(): void {
@@ -660,15 +700,15 @@ export class CircuitBinding {
    * power, is not attached at all — so firmware addressing it gets a NACK,
    * exactly as it would on a breadboard.
    */
-  private setupI2cDevices(runner: BoardRunner): void {
-    const board = this.boardDef;
+  private setupI2cDevices(runner: BoardRunner, boardInstanceId: string): I2cDevice[] {
+    const board = this.boardDefinitionOf(boardInstanceId);
     // See setupSpiDevices: an engine with no bridged I2C controller attaches
     // no devices rather than pretending they replied.
     const i2cBus = runner.i2cBus;
-    if (!i2cBus) return;
+    if (!i2cBus) return [];
     if (!board) {
       i2cBus.sync([]);
-      return;
+      return [];
     }
     // Board-side SDA/SCL as runner pin indices. An AVR's TWI lines are fixed
     // silicon, so they come from the board's own metadata (A4/A5 on Uno,
@@ -694,8 +734,12 @@ export class CircuitBinding {
       sclPin = i2cPinIds[1] ? runnerPinIndex(board, i2cPinIds[1]) : undefined;
     }
 
+    // This board's pad on that net, not any board's: two Picos both have a
+    // GP4, and a device on one of them is not on the other.
     const netHasPin = (netId: string | undefined, pin: number | undefined): boolean =>
-      netId !== undefined && pin !== undefined && (this.netBoardPins.get(netId) ?? []).includes(pin);
+      netId !== undefined &&
+      pin !== undefined &&
+      (this.netEndpoints.get(netId) ?? []).some((e) => e.instance === boardInstanceId && e.pin === pin);
 
     /**
      * True when some OTHER instance drives this net with a pin of one of the
@@ -758,7 +802,38 @@ export class CircuitBinding {
           }),
       });
     }
-    this.i2cDevices = i2cBus.sync(wanted);
+    return i2cBus.sync(wanted);
+  }
+
+  /**
+   * A device model by instance, from whichever board's bus holds it.
+   *
+   * Visuals must not be read off the primary board alone. An LCD wired to the
+   * second board's I2C pads is attached to *that* board's bus, and consulting
+   * only the first would draw a blank display for a display that is working.
+   * With one board this is the same single lookup it always was.
+   */
+  private i2cDeviceFor(instanceId: string): I2cDevice | undefined {
+    for (const runner of this.runners.values()) {
+      const device = runner.i2cBus?.deviceFor(instanceId);
+      if (device) return device;
+    }
+    return undefined;
+  }
+
+  /** As `i2cDeviceFor`, for parts on a board's SPI bus. */
+  private spiDeviceFor(instanceId: string): SpiDevice | undefined {
+    for (const runner of this.runners.values()) {
+      const device = runner.spiBus?.deviceFor(instanceId);
+      if (device) return device;
+    }
+    return undefined;
+  }
+
+  /** The definition of one board instance, whichever board it is. */
+  private boardDefinitionOf(instanceId: string): BoardDefinition | null {
+    const def = this.graph.definitions.get(instanceId);
+    return def?.isBoard ? def : null;
   }
 
   private controlsRef: SimControls | null = null;
@@ -774,7 +849,7 @@ export class CircuitBinding {
     // built, so the device attachment follows the pins rather than preceding
     // them. sync() keeps existing devices by instance id, so re-binding does
     // not wipe an SSD1306's display RAM or an EEPROM's contents.
-    if (runner && this.busPinSignature(runner) !== this.boundBusPins) this.rebindBuses(runner);
+    if (this.busPinSignature() !== this.boundBusPins) this.rebindBuses();
     const highVolts = Number(this.boardDef?.metadata.logicVoltage ?? 5);
     // A CMOS input switches around half the supply, so the threshold comes
     // from the board rather than being fixed at an AVR's 2.5 V.
@@ -1059,7 +1134,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.ssd1306': {
-          const device = runner?.i2cBus?.deviceFor(inst.id);
+          const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Ssd1306Device) {
             visuals.set(inst.id, {
               display: { pixels: device.ram, on: device.isOn, revision: device.revision },
@@ -1072,7 +1147,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.bmp280': {
-          const device = runner?.i2cBus?.deviceFor(inst.id);
+          const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Bmp280Device) {
             visuals.set(inst.id, {
               readout: device.isMeasuring
@@ -1086,7 +1161,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.mpu6050': {
-          const device = runner?.i2cBus?.deviceFor(inst.id);
+          const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Mpu6050Device) {
             const { accelG, gyroDps } = device.motion;
             visuals.set(inst.id, {
@@ -1103,7 +1178,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.hc595': {
-          const device = runner?.spiBus?.deviceFor(inst.id);
+          const device = this.spiDeviceFor(inst.id);
           if (device instanceof Sn74hc595Device) {
             const bits = device.outputs;
             visuals.set(inst.id, {
@@ -1118,7 +1193,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.sd-card': {
-          const device = runner?.spiBus?.deviceFor(inst.id);
+          const device = this.spiDeviceFor(inst.id);
           if (device instanceof SdCardDevice) {
             this.persistDevice(inst, device.writeCounter, () => {
               inst.simulationState.sdCard = device.saveState();
@@ -1132,7 +1207,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.spi-flash': {
-          const device = runner?.spiBus?.deviceFor(inst.id);
+          const device = this.spiDeviceFor(inst.id);
           if (device instanceof SpiFlashDevice) {
             this.persistDevice(inst, device.writeCounter, () => {
               inst.simulationState.spiFlash = device.saveState();
@@ -1146,7 +1221,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.lcd1602': {
-          const device = runner?.i2cBus?.deviceFor(inst.id);
+          const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Lcd1602Device) {
             visuals.set(inst.id, {
               readout: device.isFourBitMode ? device.lines : ['not initialised', ''],
@@ -1158,7 +1233,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.eeprom-24c': {
-          const device = runner?.i2cBus?.deviceFor(inst.id);
+          const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Eeprom24cDevice) {
             this.persistDevice(inst, device.writeCounter, () => {
               inst.simulationState.eeprom = device.saveState();
@@ -1172,7 +1247,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.ds3231': {
-          const device = runner?.i2cBus?.deviceFor(inst.id);
+          const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Ds3231Device) {
             const t = device.time;
             const pad = (n: number) => String(n).padStart(2, '0');
@@ -1185,7 +1260,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.mcp4725': {
-          const device = runner?.i2cBus?.deviceFor(inst.id);
+          const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Mcp4725Device) {
             visuals.set(inst.id, {
               readout:
@@ -1200,7 +1275,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.hc165': {
-          const device = runner?.spiBus?.deviceFor(inst.id);
+          const device = this.spiDeviceFor(inst.id);
           if (device instanceof Sn74hc165Device) {
             visuals.set(inst.id, {
               readout: [
