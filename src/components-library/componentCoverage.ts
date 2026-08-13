@@ -367,9 +367,9 @@ const COMMUNICATION: CoverageEntry[] = [
 
 // ------------------------------------------------------- Port expanders / IO
 const EXPANDERS: CoverageEntry[] = [
-  entry('comp.pcf8574', 'PCF8574 I2C port expander', 'ICs', '-', 'i2c-register', 'missing', ['i2c', 'gpio'], ['i2c-register-device', 'device-driven-pins'], 'none', NONE),
-  entry('comp.pcf8575', 'PCF8575 16-bit expander', 'ICs', '-', 'i2c-register', 'missing', ['i2c', 'gpio'], ['i2c-register-device', 'device-driven-pins'], 'none', NONE),
-  entry('comp.mcp23017', 'MCP23017 16-bit expander', 'ICs', '-', 'i2c-register', 'missing', ['i2c', 'gpio'], ['i2c-register-device', 'device-driven-pins'], 'none', NONE),
+  entry('comp.pcf8574', 'PCF8574 I2C port expander', 'ICs', '-', 'i2c-register', 'simulated', ['i2c', 'gpio'], ['i2c-register-device', 'device-driven-pins'], 'hardware', ['tests/expanders.batch6.mts']),
+  entry('comp.pcf8575', 'PCF8575 16-bit expander', 'ICs', '-', 'i2c-register', 'simulated', ['i2c', 'gpio'], ['i2c-register-device', 'device-driven-pins'], 'hardware', ['tests/expanders.batch6.mts']),
+  entry('comp.mcp23017', 'MCP23017 16-bit expander', 'ICs', '-', 'i2c-register', 'simulated', ['i2c', 'gpio'], ['i2c-register-device', 'device-driven-pins'], 'hardware', ['tests/expanders.batch6.mts']),
 ];
 
 // ---------------------------------------------------------- Memory & Storage

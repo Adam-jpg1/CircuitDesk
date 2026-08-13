@@ -39,12 +39,24 @@ import { Mcp4725Device, MCP4725_ADDRESSES } from './devices/mcp4725';
 import { Sn74hc165Device, HC165_INPUT_PINS } from './devices/sn74hc165';
 import { Bme280Device, BME280_ADDRESSES } from './devices/bme280';
 import { Max7219Device } from './devices/max7219';
+import {
+  Mcp23017Device,
+  Pcf857xDevice,
+  MCP23017_ADDRESSES,
+  PCF8574_ADDRESSES,
+  type ExpanderDevice,
+} from './devices/portExpanders';
 import { Sht31Device, SHT31_ADDRESSES } from './devices/sht31';
 import { ANALOG_SENSORS, GPIO_SENSORS } from './devices/analogSensors';
 import { contactsOf } from './devices/contactRegistry';
 import { LOGIC_PARTS } from './devices/logicParts';
 import { LogicIcDevice, levelOf as levelOfVolts, type Logic } from './devices/logicIc';
 import { isContactClosed, contactStateKey } from './devices/contacts';
+
+/** True for the port-expander family, which drives pins as well as answering. */
+function isExpander(device: unknown): device is ExpanderDevice {
+  return device instanceof Pcf857xDevice || device instanceof Mcp23017Device;
+}
 
 export interface NetLevel {
   volts: number | null;
@@ -164,6 +176,18 @@ const I2C_DEVICE_MODELS: Record<string, I2cDeviceModel> = {
   'comp.mcp4725': {
     defaultAddress: MCP4725_ADDRESSES[0],
     create: (ctx) => new Mcp4725Device(ctx.instanceId, ctx.address, ctx.logicVolts),
+  },
+  'comp.pcf8574': {
+    defaultAddress: PCF8574_ADDRESSES[0],
+    create: (ctx) => new Pcf857xDevice(ctx.instanceId, ctx.address, 8),
+  },
+  'comp.pcf8575': {
+    defaultAddress: PCF8574_ADDRESSES[0],
+    create: (ctx) => new Pcf857xDevice(ctx.instanceId, ctx.address, 16),
+  },
+  'comp.mcp23017': {
+    defaultAddress: MCP23017_ADDRESSES[0],
+    create: (ctx) => new Mcp23017Device(ctx.instanceId, ctx.address),
   },
   'comp.lcd2004': {
     defaultAddress: LCD1602_ADDRESSES[0],
@@ -1346,6 +1370,45 @@ export class CircuitBinding {
     for (const device of this.i2cDevices) {
       if (device instanceof Mcp4725Device) driveOutputs(device, ['vout']);
     }
+    // Port expanders: eight or sixteen more GPIOs, on real wires.
+    //
+    // Read first — an expander input has to see what the circuit put on the
+    // pin — then drive, because a pin configured as an output is a source like
+    // any other. A quasi-bidirectional pin released to its pull-up drives
+    // nothing firmly, which is exactly what lets a button pull it low.
+    for (const device of this.i2cDevices) {
+      if (!isExpander(device)) continue;
+      for (let i = 0; i < device.pinCount; i++) {
+        const netId = this.netOfInstancePin(device.instanceId, `p${i}`);
+        if (!netId) {
+          device.setInputLevel(i, null);
+          continue;
+        }
+        const volts = levels.get(netId)?.volts ?? null;
+        device.setInputLevel(i, volts === null ? null : volts >= highVolts / 2);
+      }
+    }
+    for (const device of this.i2cDevices) {
+      if (!isExpander(device)) continue;
+      for (let i = 0; i < device.pinCount; i++) {
+        const netId = this.netOfInstancePin(device.instanceId, `p${i}`);
+        if (!netId) continue;
+        const state = device.pinState(i);
+        if (state === 'drive-low') {
+          setLevel(netId, 0, null, 0);
+          drivenNets.add(netId);
+        } else if (state === 'drive-high') {
+          setLevel(netId, highVolts, null, 0);
+          drivenNets.add(netId);
+        } else if (state === 'weak-high' && levels.get(netId)?.volts == null) {
+          // A pull-up, not a driver: it only wins where nothing else is
+          // holding the wire, which is how these parts read their inputs.
+          setLevel(netId, highVolts, null, 47_000);
+          drivenNets.add(netId);
+        }
+      }
+    }
+
     // Logic ICs, settled to a fixed point.
     //
     // A gate's output is another gate's input, so one pass is not enough: a
@@ -1560,6 +1623,23 @@ export class CircuitBinding {
             const asserted = spec.activeLow ? !held : held;
             setLevel(outNet, asserted ? supply : 0, null, 0);
             drivenNets.add(outNet);
+          }
+          break;
+        }
+        case 'sim.expander': {
+          const device = this.i2cDeviceFor(inst.id);
+          if (isExpander(device)) {
+            const states: string[] = [];
+            for (let i = 0; i < device.pinCount; i++) {
+              const state = device.pinState(i);
+              states.push(state === 'drive-high' || state === 'weak-high' ? '1' : state === 'drive-low' ? '0' : '-');
+            }
+            visuals.set(inst.id, {
+              readout: [states.slice(0, 8).join(''), states.slice(8).join('')].filter((l) => l.length > 0),
+              value: device.interruptAsserted ? 1 : 0,
+            });
+          } else {
+            visuals.set(inst.id, {});
           }
           break;
         }

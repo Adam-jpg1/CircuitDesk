@@ -256,3 +256,61 @@ export const MAX7219_MATRIX: ComponentDefinition = {
 };
 
 export const DISPLAY_DEFS: ComponentDefinition[] = [LCD2004, MAX7219_MATRIX];
+
+// ------------------------------------------------------- Batch 6: expanders
+
+/** An I2C port expander: bus pins, power, and N general-purpose IO pins. */
+function expander(
+  id: string,
+  name: string,
+  pinCount: number,
+  description: string,
+): ComponentDefinition {
+  const perSide = Math.ceil(pinCount / 2);
+  const widthMm = 7.62 + 2.2;
+  const heightMm = Math.max(perSide, 6) * 2.54 + 8;
+  const pins: PinDefinition[] = [];
+  for (let i = 0; i < pinCount; i++) {
+    const left = i < perSide;
+    const row = left ? i : i - perSide;
+    pins.push(
+      pinAt(
+        { id: `p${i}`, label: `P${i}`, type: 'digital', caps: ['digital-in', 'digital-out'] },
+        left ? 1.1 : widthMm - 1.1,
+        3 + row * 2.54,
+      ),
+    );
+  }
+  // Bus, power and the interrupt line along the bottom edge.
+  const footY = heightMm - 0.6;
+  pins.push(power('vcc', 'VCC', widthMm * 0.15, footY));
+  pins.push(ground('gnd', 'GND', widthMm * 0.35, footY));
+  pins.push(pinAt({ id: 'sda', label: 'SDA', type: 'digital', caps: ['i2c-sda'] }, widthMm * 0.55, footY));
+  pins.push(pinAt({ id: 'scl', label: 'SCL', type: 'digital', caps: ['i2c-scl'] }, widthMm * 0.75, footY));
+  pins.push(pinAt({ id: 'int', label: 'INT', type: 'digital', caps: ['digital-out'] }, widthMm * 0.95, footY));
+
+  return {
+    id,
+    name,
+    category: 'ICs',
+    widthMm,
+    heightMm,
+    artwork: { kind: 'builtin', builtinId: 'dip-ic' },
+    pins,
+    properties: [{ key: 'i2cAddress', label: 'I²C address', kind: 'text', default: '' }],
+    validationRules: [],
+    simulationAdapterId: 'sim.expander',
+    supportLevel: 'simulated',
+    description,
+    isBoard: false,
+  };
+}
+
+export const EXPANDER_DEFS: ComponentDefinition[] = [
+  expander('comp.pcf8574', 'PCF8574 (8-bit I²C expander)', 8,
+    'Eight extra GPIOs over I²C. There is no direction register: writing a 1 releases the pin to a weak pull-up rather than driving it high, which is why you write 1 to a pin before reading it as an input — and why a button can then pull that pin low. Writing a 0 pulls firmly low, and such a pin reads low whatever is outside it.'),
+  expander('comp.pcf8575', 'PCF8575 (16-bit I²C expander)', 16,
+    'Sixteen extra GPIOs over I²C. The PCF8574 with a second byte: the same quasi-bidirectional pins and the same write-1-to-read rule, written and read low byte first.'),
+  expander('comp.mcp23017', 'MCP23017 (16-bit I²C expander)', 16,
+    'Sixteen GPIOs with real direction control, configurable pull-ups, polarity inversion and interrupt-on-change. Unlike a PCF8574 an output here drives both ways and an input is genuinely high impedance. Writing GPIOA/B writes the output latch, and reading INTCAP clears the interrupt. BANK=1 addressing and interrupt-on-compare are not modelled.'),
+];
