@@ -38,6 +38,8 @@ import { Ds3231Device, DS3231_ADDRESS } from './devices/ds3231';
 import { Mcp4725Device, MCP4725_ADDRESSES } from './devices/mcp4725';
 import { Sn74hc165Device, HC165_INPUT_PINS } from './devices/sn74hc165';
 import { contactsOf } from './devices/contactRegistry';
+import { LOGIC_PARTS } from './devices/logicParts';
+import { LogicIcDevice, levelOf as levelOfVolts, type Logic } from './devices/logicIc';
 import { isContactClosed, contactStateKey } from './devices/contacts';
 
 export interface NetLevel {
@@ -312,6 +314,7 @@ export class CircuitBinding {
 
     this.indexNets();
     this.buildEdges();
+    this.setupLogicDevices();
     if (runner) this.setupUltrasonic(runner);
     this.rebindBuses();
   }
@@ -996,6 +999,163 @@ export class CircuitBinding {
     return vccNet ? this.supplyNets.get(vccNet) ?? 0 : 0;
   }
 
+  /** Running logic parts, by component instance id. */
+  private logicDevices = new Map<string, LogicIcDevice>();
+
+  /** Last resolved level of each logic clock net, for edge detection. */
+  private logicClockLevels = new Map<string, Logic>();
+
+  /** Nets a logic part reports as oscillating, so the UI can say so. */
+  readonly unstableNets = new Set<string>();
+
+  /** Creates a device per logic-part instance on the canvas. */
+  private setupLogicDevices(): void {
+    this.logicDevices.clear();
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      const spec = def ? LOGIC_PARTS[def.id] : undefined;
+      if (!spec) continue;
+      // Supply comes from the part's own Vcc net so a 3.3V-powered gate uses
+      // 3.3V thresholds. Unpowered parts are skipped entirely below.
+      const vccNet = this.netOfInstancePin(inst.id, 'vcc');
+      const supply = (vccNet ? this.supplyNets.get(vccNet) : undefined) ?? 5;
+      this.logicDevices.set(inst.id, new LogicIcDevice(inst.id, spec, supply));
+      // Inputs and clocks are switched nets: firmware driving a clock must be
+      // seen at once rather than at the next slice boundary.
+      for (const pin of spec.pins) {
+        if (pin.direction !== 'in') continue;
+        const netId = this.netOfInstancePin(inst.id, pin.id);
+        if (netId) this.switchedNets.add(netId);
+      }
+    }
+  }
+
+  /**
+   * Whether a logic part has power on both rails.
+   *
+   * An unpowered 74HC does not output logic levels — it does nothing at all.
+   * Modelling that honestly is what makes "I forgot to wire Vcc" a discoverable
+   * mistake rather than a circuit that mysteriously works.
+   */
+  private logicPowered(instanceId: string, levels: Map<string, NetLevel>): boolean {
+    const vccNet = this.netOfInstancePin(instanceId, 'vcc');
+    const gndNet = this.netOfInstancePin(instanceId, 'gnd');
+    if (!vccNet || !gndNet) return false;
+    // Both rails must be fed from outside the part. Its own Vcc and GND pins
+    // are typed as power pins so wiring rules can check them, but a chip does
+    // not power itself — and without this an IC dropped on the canvas with
+    // nothing connected would appear to work.
+    if (!this.netFedByOther(vccNet, instanceId, POWER_PIN_TYPES)) return false;
+    if (!this.netFedByOther(gndNet, instanceId, ['ground'])) return false;
+    const vcc = levels.get(vccNet)?.volts ?? this.supplyNets.get(vccNet) ?? null;
+    return vcc !== null && vcc > 1;
+  }
+
+  /**
+   * True when some OTHER instance drives this net with a pin of the given
+   * types.
+   *
+   * The exclusion is the whole point: a module's own VCC or GND pin sitting on
+   * a net does not mean the net is powered or grounded, it means the module
+   * would like it to be.
+   */
+  private netFedByOther(netId: string | undefined, instanceId: string, types: string[]): boolean {
+    if (netId === undefined) return false;
+    const net = this.graph.nets.find((n) => n.id === netId);
+    if (!net) return false;
+    for (const node of net.nodes) {
+      const [otherId, pinId] = splitNode(node);
+      if (otherId === instanceId) continue;
+      const otherDef = this.graph.definitions.get(otherId);
+      const pin = otherDef?.pins.find((p) => p.id === pinId);
+      if (pin && types.includes(pin.type)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Runs every logic part to a fixed point and drives its outputs onto nets.
+   *
+   * Clock edges are taken once per settle, from the level a clock net had at
+   * the end of the previous settle — so a pulse is one edge however many
+   * rounds the combinational logic then needs to stabilise.
+   */
+  private settleLogic(
+    levels: Map<string, NetLevel>,
+    setLevel: (netId: string, volts: number, sourcePin: number | null, seriesOhms: number) => void,
+    propagate: () => void,
+    drivenNets: Set<string>,
+  ): void {
+    this.unstableNets.clear();
+
+    const levelAt = (instanceId: string, pinId: string): Logic => {
+      const netId = this.netOfInstancePin(instanceId, pinId);
+      if (!netId) return 'x';
+      const device = this.logicDevices.get(instanceId);
+      return levelOfVolts(levels.get(netId)?.volts ?? null, device?.supply ?? 5);
+    };
+    const voltsAt = (instanceId: string, pinId: string): number | null => {
+      const netId = this.netOfInstancePin(instanceId, pinId);
+      return netId ? levels.get(netId)?.volts ?? null : null;
+    };
+
+    // Edges first, using the previous settle's levels — one pulse, one edge.
+    for (const [instanceId, device] of this.logicDevices) {
+      if (!this.logicPowered(instanceId, levels)) continue;
+      for (const { pin, edge } of device.clockPins) {
+        const netId = this.netOfInstancePin(instanceId, pin);
+        if (!netId) continue;
+        const key = `${instanceId}:${pin}`;
+        const now = levelOfVolts(levels.get(netId)?.volts ?? null, device.supply);
+        const before = this.logicClockLevels.get(key) ?? 'x';
+        this.logicClockLevels.set(key, now);
+        const rose = before === 0 && now === 1;
+        const fell = before === 1 && now === 0;
+        if ((edge === 'rising' && rose) || (edge === 'falling' && fell)) {
+          device.clockEdge(pin, edge, (p) => levelAt(instanceId, p), (p) => voltsAt(instanceId, p));
+        }
+      }
+    }
+
+    // Then combinational settling.
+    const MAX_ROUNDS = 10;
+    let previous = '';
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      let signature = '';
+      for (const [instanceId, device] of this.logicDevices) {
+        if (!this.logicPowered(instanceId, levels)) continue;
+        const outputs = device.evaluate(
+          (p) => levelAt(instanceId, p),
+          (p) => voltsAt(instanceId, p),
+        );
+        for (const [pinId, value] of Object.entries(outputs)) {
+          signature += `${instanceId}:${pinId}=${value};`;
+          // High-Z and unknown drive nothing at all. That is the difference
+          // between a released bus and a bus held low, and collapsing them
+          // would make every tri-state part pointless.
+          if (value === 'z' || value === 'x') continue;
+          const netId = this.netOfInstancePin(instanceId, pinId);
+          if (!netId) continue;
+          setLevel(netId, value === 1 ? device.supply : 0, null, 0);
+          drivenNets.add(netId);
+        }
+      }
+      propagate();
+      if (signature === previous) return;
+      previous = signature;
+    }
+
+    // Still moving after the round limit: the circuit oscillates. Reported,
+    // not silently frozen at whatever the last round happened to produce.
+    for (const [instanceId, device] of this.logicDevices) {
+      for (const pin of device.spec.pins) {
+        if (pin.direction !== 'out') continue;
+        const netId = this.netOfInstancePin(instanceId, pin.id);
+        if (netId) this.unstableNets.add(netId);
+      }
+    }
+  }
+
   /** The definition of one board instance, whichever board it is. */
   private boardDefinitionOf(instanceId: string): BoardDefinition | null {
     const def = this.graph.definitions.get(instanceId);
@@ -1128,6 +1288,18 @@ export class CircuitBinding {
     for (const device of this.i2cDevices) {
       if (device instanceof Mcp4725Device) driveOutputs(device, ['vout']);
     }
+    // Logic ICs, settled to a fixed point.
+    //
+    // A gate's output is another gate's input, so one pass is not enough: a
+    // counter feeding a decoder feeding a display needs the chain to settle
+    // before anything reads it. Each round re-evaluates every part from the
+    // current net levels and drives the results back on, until nothing moves
+    // or the round limit is hit — which is what an oscillating circuit (a ring
+    // of inverters) genuinely does, and is reported rather than looped on.
+    if (this.logicDevices.size > 0) {
+      this.settleLogic(levels, setLevel, propagate, drivenNets);
+    }
+
     if (drivenNets.size > 0) {
       propagate();
       // A device output landing on an analog-capable pin has to reach the

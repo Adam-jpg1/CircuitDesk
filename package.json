@@ -45,7 +45,9 @@
     "test:keypad": "tsx tests/inputs.keypad.mts",
     "test:contacts": "tsx tests/inputs.contacts.mts",
     "test:analoginputs": "tsx tests/inputs.analog.mts",
-    "test:artwork:inputs": "tsx tests/artwork.inputs.mts"
+    "test:artwork:inputs": "tsx tests/artwork.inputs.mts",
+    "test:logic": "tsx tests/logic.gates.mts",
+    "test:logic:seq": "tsx tests/logic.sequential.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

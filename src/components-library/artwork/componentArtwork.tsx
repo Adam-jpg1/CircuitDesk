@@ -875,7 +875,169 @@ function KeyMatrixArt({ def, instance, visual }: ArtProps) {
   );
 }
 
+// ---------- Batch 2: logic ----------
+
+/**
+ * A DIP package, drawn from the part's own pin list.
+ *
+ * One renderer for every 74xx and CD4xxx: they really are the same black
+ * plastic body with a notch at one end and a part number silkscreened on it,
+ * and drawing them individually would be work with no payoff. Pin 1 is marked
+ * with the notch and a dot, because that is how you orient a real one.
+ */
+function DipIcArt({ def, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const legs = def.pins.filter((p) => p.id !== 'vcc' || true);
+  // The part number, without the descriptive tail in brackets.
+  const marking = def.name.replace(/\s*\(.*\)\s*$/, '');
+  const outputs = visual?.contacts ?? {};
+  const anyDriven = Object.values(outputs).some(Boolean);
+  return (
+    <g>
+      {legs.map((p) => {
+        const left = p.x < W / 2;
+        return (
+          <rect
+            key={p.id}
+            x={left ? 0 : W - 1.1 * MM}
+            y={p.y - 0.5 * MM}
+            width={1.1 * MM}
+            height={1.0 * MM}
+            fill="#c3c9cf"
+            stroke="#8b9199"
+            strokeWidth="0.4"
+          />
+        );
+      })}
+      <rect x={1.1 * MM} y={0.4 * MM} width={W - 2.2 * MM} height={H - 0.8 * MM} rx={0.8 * MM} fill="#23272c" stroke="#0d1117" />
+      <rect x={1.1 * MM} y={0.4 * MM} width={W - 2.2 * MM} height={(H - 0.8 * MM) * 0.32} rx={0.8 * MM} fill="rgba(255,255,255,0.05)" />
+      {/* Pin-1 notch at the top, and the dot beside pin 1 itself. */}
+      <path
+        d={`M ${W / 2 - 1.6 * MM} ${0.4 * MM} a ${1.6 * MM} ${1.6 * MM} 0 0 0 ${3.2 * MM} 0 z`}
+        fill="#12161a"
+      />
+      <circle cx={2.6 * MM} cy={2.0 * MM} r={0.55 * MM} fill="#3b434c" />
+      {/* Part number, running along the package as the silkscreen does. */}
+      <text
+        x={W / 2}
+        y={H / 2}
+        textAnchor="middle"
+        fontSize={Math.min(2.6 * MM, (H - 4 * MM) / Math.max(1, marking.length) * 1.6)}
+        fill="#c9d2db"
+        fontFamily="sans-serif"
+        transform={`rotate(90 ${W / 2} ${H / 2})`}
+      >
+        {marking}
+      </text>
+      {anyDriven && <circle cx={W - 2.6 * MM} cy={H - 2.0 * MM} r={0.6 * MM} fill="#3fb950" />}
+    </g>
+  );
+}
+
+/** Schematic gate bodies, by shape. Drawn as symbols, not packages. */
+function GateArt({ def, shape }: ArtProps & { shape: string }) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const bodyX = 3.2 * MM;
+  const bodyW = W - 7.4 * MM;
+  const cy = H / 2;
+  const inverted = shape === 'not' || shape === 'nand' || shape === 'nor' || shape === 'xnor' || shape === 'schmitt';
+  const curved = shape === 'or' || shape === 'nor' || shape === 'xor' || shape === 'xnor';
+  const pointed = shape === 'not' || shape === 'schmitt' || shape === 'tristate';
+
+  const body = pointed
+    ? `M ${bodyX} ${1.2 * MM} L ${bodyX + bodyW} ${cy} L ${bodyX} ${H - 1.2 * MM} Z`
+    : curved
+      ? `M ${bodyX} ${1.2 * MM} Q ${bodyX + bodyW * 0.55} ${1.2 * MM} ${bodyX + bodyW} ${cy}
+         Q ${bodyX + bodyW * 0.55} ${H - 1.2 * MM} ${bodyX} ${H - 1.2 * MM}
+         Q ${bodyX + bodyW * 0.3} ${cy} ${bodyX} ${1.2 * MM} Z`
+      : `M ${bodyX} ${1.2 * MM} H ${bodyX + bodyW * 0.45}
+         A ${bodyW * 0.55} ${(H - 2.4 * MM) / 2} 0 0 1 ${bodyX + bodyW * 0.45} ${H - 1.2 * MM}
+         H ${bodyX} Z`;
+
+  return (
+    <g>
+      {def.pins
+        .filter((p) => p.id !== 'vcc' && p.id !== 'gnd')
+        .map((p) => (
+          <line
+            key={p.id}
+            x1={p.x}
+            y1={p.y}
+            x2={p.id === 'y' ? bodyX + bodyW + (inverted ? 1.6 * MM : 0) : p.id === 'oe' ? p.x : bodyX}
+            y2={p.id === 'oe' ? cy : p.y}
+            stroke="#9aa4ad"
+            strokeWidth="1.8"
+          />
+        ))}
+      <path d={body} fill="#2b333c" stroke="#cfd6dd" strokeWidth="1.6" strokeLinejoin="round" />
+      {/* The XOR family's extra leading arc. */}
+      {(shape === 'xor' || shape === 'xnor') && (
+        <path
+          d={`M ${bodyX - 1.2 * MM} ${1.2 * MM} Q ${bodyX + bodyW * 0.18} ${cy} ${bodyX - 1.2 * MM} ${H - 1.2 * MM}`}
+          fill="none"
+          stroke="#cfd6dd"
+          strokeWidth="1.6"
+        />
+      )}
+      {inverted && (
+        <circle cx={bodyX + bodyW + 0.8 * MM} cy={cy} r={0.8 * MM} fill="#2b333c" stroke="#cfd6dd" strokeWidth="1.4" />
+      )}
+      {/* The Schmitt trigger's hysteresis glyph, as it is printed on schematics. */}
+      {shape === 'schmitt' && (
+        <path
+          d={`M ${bodyX + bodyW * 0.18} ${cy + 1.4 * MM} h ${bodyW * 0.18} v ${-2.8 * MM} h ${bodyW * 0.18}
+              M ${bodyX + bodyW * 0.2} ${cy - 1.4 * MM} h ${bodyW * 0.18} v ${2.8 * MM} h ${bodyW * 0.18}`}
+          fill="none"
+          stroke="#8fd6a0"
+          strokeWidth="1.1"
+        />
+      )}
+      {shape === 'tristate' && (
+        <text x={bodyX + bodyW * 0.3} y={cy + 0.9 * MM} fontSize={2.2 * MM} fill="#8fd6a0" fontFamily="sans-serif">Z</text>
+      )}
+    </g>
+  );
+}
+
+/** A plain labelled block for latches and flip-flops, drawn as a schematic box. */
+function LogicBlockArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  return (
+    <g>
+      {def.pins.map((p) => (
+        <line
+          key={p.id}
+          x1={p.x}
+          y1={p.y}
+          x2={p.x < 1.5 * MM ? 2.4 * MM : p.x > W - 1.5 * MM ? W - 2.4 * MM : p.x}
+          y2={p.y < 1.5 * MM ? 2.4 * MM : p.y > H - 1.5 * MM ? H - 2.4 * MM : p.y}
+          stroke="#9aa4ad"
+          strokeWidth="1.8"
+        />
+      ))}
+      <rect x={2.4 * MM} y={2.4 * MM} width={W - 4.8 * MM} height={H - 4.8 * MM} rx={0.6 * MM} fill="#2b333c" stroke="#cfd6dd" strokeWidth="1.6" />
+      <text x={W / 2} y={H / 2 + 1 * MM} textAnchor="middle" fontSize={2.6 * MM} fill="#cfd6dd" fontFamily="sans-serif">
+        {def.name.split(' ')[0]}
+      </text>
+    </g>
+  );
+}
+
 const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
+  'dip-ic': (p) => <DipIcArt {...p} />,
+  'logic-block': (p) => <LogicBlockArt {...p} />,
+  'gate-and': (p) => <GateArt {...p} shape="and" />,
+  'gate-or': (p) => <GateArt {...p} shape="or" />,
+  'gate-not': (p) => <GateArt {...p} shape="not" />,
+  'gate-nand': (p) => <GateArt {...p} shape="nand" />,
+  'gate-nor': (p) => <GateArt {...p} shape="nor" />,
+  'gate-xor': (p) => <GateArt {...p} shape="xor" />,
+  'gate-xnor': (p) => <GateArt {...p} shape="xnor" />,
+  'gate-tristate': (p) => <GateArt {...p} shape="tristate" />,
+  'gate-schmitt': (p) => <GateArt {...p} shape="schmitt" />,
   'push-button-6mm': (p) => <PushButton6mmArt {...p} />,
   'slide-switch': (p) => <SlideSwitchArt {...p} />,
   'limit-switch': (p) => <LimitSwitchArt {...p} />,
