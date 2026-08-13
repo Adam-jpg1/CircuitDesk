@@ -48,7 +48,8 @@
     "test:artwork:inputs": "tsx tests/artwork.inputs.mts",
     "test:logic": "tsx tests/logic.gates.mts",
     "test:logic:seq": "tsx tests/logic.sequential.mts",
-    "test:sensors": "tsx tests/sensors.batch3.mts"
+    "test:sensors": "tsx tests/sensors.batch3.mts",
+    "test:displays": "tsx tests/displays.batch4.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

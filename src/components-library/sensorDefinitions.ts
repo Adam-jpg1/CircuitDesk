@@ -204,3 +204,55 @@ export const ALL_SENSOR_DEFS: ComponentDefinition[] = [
   ...GPIO_SENSOR_DEFS,
   ...I2C_SENSOR_DEFS,
 ];
+
+// -------------------------------------------------------------- Batch 4: displays
+
+/** The LCD2004: the same HD44780 controller as the 1602, on bigger glass. */
+export const LCD2004: ComponentDefinition = {
+  id: 'comp.lcd2004',
+  name: 'LCD 2004 (20×4, I²C)',
+  category: 'Displays',
+  widthMm: 98,
+  heightMm: 60,
+  artwork: { kind: 'builtin', builtinId: 'lcd2004' },
+  pins: [
+    ground('gnd', 'GND', 8, 59.6),
+    power('vcc', 'VCC', 13, 59.6),
+    pinAt({ id: 'sda', label: 'SDA', type: 'digital', caps: ['i2c-sda'] }, 18, 59.6),
+    pinAt({ id: 'scl', label: 'SCL', type: 'digital', caps: ['i2c-scl'] }, 23, 59.6),
+  ],
+  properties: [{ key: 'i2cAddress', label: 'I²C address', kind: 'text', default: '' }],
+  validationRules: [],
+  simulationAdapterId: 'sim.lcd2004',
+  supportLevel: 'simulated',
+  description:
+    'Twenty-column, four-row character LCD on a PCF8574 I²C backpack. The same HD44780 controller as the 1602, so the same libraries drive it — including the quirk that row three continues row one in DDRAM, which is why text written past column 20 reappears on line three.',
+  isBoard: false,
+};
+
+/** MAX7219 8×8 matrix module. */
+export const MAX7219_MATRIX: ComponentDefinition = {
+  id: 'comp.max7219',
+  name: 'LED Matrix 8×8 (MAX7219)',
+  category: 'Displays',
+  widthMm: 32,
+  heightMm: 32,
+  artwork: { kind: 'builtin', builtinId: 'max7219' },
+  pins: [
+    ground('gnd', 'GND', 5, 31.6),
+    power('vcc', 'VCC', 10, 31.6),
+    pinAt({ id: 'din', label: 'DIN', type: 'digital', caps: ['spi-mosi'] }, 15, 31.6),
+    pinAt({ id: 'cs', label: 'CS', type: 'digital', caps: ['digital-in'] }, 20, 31.6),
+    pinAt({ id: 'clk', label: 'CLK', type: 'digital', caps: ['spi-sck'] }, 25, 31.6),
+    pinAt({ id: 'dout', label: 'DOUT', type: 'digital', caps: ['digital-out'] }, 30, 31.6),
+  ],
+  properties: [],
+  validationRules: [],
+  simulationAdapterId: 'sim.max7219',
+  supportLevel: 'simulated',
+  description:
+    'Eight-by-eight LED matrix driven by a MAX7219 over SPI. Its digit registers are the rows, so what lights up is exactly what firmware clocked in. Shutdown blanks the panel without losing the pattern and display-test lights everything. Intensity and scan limit are stored and reported but do not change brightness or multiplex duty.',
+  isBoard: false,
+};
+
+export const DISPLAY_DEFS: ComponentDefinition[] = [LCD2004, MAX7219_MATRIX];

@@ -235,7 +235,7 @@ const SENSORS: CoverageEntry[] = [
 const DISPLAYS: CoverageEntry[] = [
   entry('comp.lcd1602', 'LCD 1602 (I2C)', 'Displays', 'wt', 'display-controller', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/artwork.displays.mts', 'tests/components.i2c.mts']),
   entry('comp.lcd1602-parallel', 'LCD 1602 (parallel)', 'Displays', 'wt', 'display-controller', 'missing', ['gpio'], ['hd44780-parallel'], 'none', NONE),
-  entry('comp.lcd2004', 'LCD 2004 (I2C)', 'Displays', 'wt', 'display-controller', 'missing', ['i2c'], ['i2c-register-device'], 'none', NONE),
+  entry('comp.lcd2004', 'LCD 2004 (I2C)', 'Displays', 'wt', 'display-controller', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/displays.batch4.mts']),
   entry('comp.oled', 'OLED 128×64 (SSD1306)', 'Displays', 'wt', 'display-controller', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/artwork.displays.mts', 'tests/components.i2c.mts']),
   entry('comp.sh1107', 'OLED 128×128 (SH1107)', 'Displays', 'w', 'display-controller', 'missing', ['i2c'], ['i2c-register-device'], 'none', NONE),
   entry('comp.nokia5110', 'Nokia 5110 (PCD8544)', 'Displays', 'w', 'display-controller', 'missing', ['spi'], ['spi-register-device'], 'none', NONE),
@@ -250,8 +250,7 @@ const DISPLAYS: CoverageEntry[] = [
   entry('comp.seven-segment-2', 'Seven-segment (2 digit)', 'Displays', 't', 'gpio-device', 'missing', ['gpio'], NONE, 'none', NONE),
   entry('comp.seven-segment-4', 'Seven-segment (4 digit)', 'Displays', 'wt', 'gpio-device', 'missing', ['gpio'], NONE, 'none', NONE),
   entry('comp.tm1637', 'TM1637 4-digit display', 'Displays', 'w', 'gpio-device', 'missing', ['gpio'], ['tm1637-protocol'], 'none', NONE),
-  entry('comp.max7219', 'MAX7219 8×8 matrix', 'Displays', 'w', 'spi-register', 'missing', ['spi'], ['spi-register-device'], 'none', NONE),
-  entry('comp.max7219-chain', 'MAX7219 chained matrices', 'Displays', 'w', 'spi-register', 'missing', ['spi'], ['spi-register-device', 'device-chaining'], 'none', NONE),
+  entry('comp.max7219', 'MAX7219 8x8 matrix (chainable)', 'Displays', 'w', 'spi-register', 'simulated', ['spi'], ['spi-register-device', 'device-chaining'], 'hardware', ['tests/displays.batch4.mts']),
   entry('comp.led-matrix', 'LED matrix 8×8', 'Displays', 'w', 'gpio-device', 'missing', ['gpio'], NONE, 'none', NONE),
 ];
 
