@@ -130,6 +130,15 @@ export interface LogicIcSpec {
 export interface LogicEvalContext {
   /** Current level of an input pin. */
   input(pinId: string): Logic;
+  /**
+   * The actual voltage on an input pin, or null when nothing holds it.
+   *
+   * Only Schmitt-input parts need this. Everything else works from resolved
+   * logic levels, because a NAND gate genuinely does not care whether its
+   * input is 4.9V or 5.0V — and pretending otherwise would invite models that
+   * depend on numbers the digital solver does not promise.
+   */
+  inputVolts(pinId: string): number | null;
   /** Retained state, e.g. a counter's value or a flip-flop's Q. */
   state: Record<string, number>;
   /** Supply voltage, for threshold-dependent parts. */
@@ -158,28 +167,43 @@ export class LogicIcDevice {
   }
 
   /** Recomputes outputs from the current inputs. */
-  evaluate(input: (pinId: string) => Logic): Record<string, Logic> {
-    const ctx: LogicEvalContext = {
-      input,
-      state: this.state,
-      supply: this.supply,
-      previousOutput: (pinId) => this.outputs[pinId] ?? 'x',
-    };
-    this.outputs = this.spec.evaluate(ctx);
+  evaluate(
+    input: (pinId: string) => Logic,
+    inputVolts: (pinId: string) => number | null = () => null,
+  ): Record<string, Logic> {
+    this.outputs = this.spec.evaluate(this.context(input, inputVolts));
     return this.outputs;
   }
 
   /** Advances state on a declared clock edge, before the next evaluation. */
-  clockEdge(pinId: string, edge: 'rising' | 'falling', input: (pinId: string) => Logic): boolean {
+  clockEdge(
+    pinId: string,
+    edge: 'rising' | 'falling',
+    input: (pinId: string) => Logic,
+    inputVolts: (pinId: string) => number | null = () => null,
+  ): boolean {
     const clock = this.spec.clocks?.find((c) => c.pin === pinId && c.edge === edge);
     if (!clock) return false;
-    clock.advance({
+    clock.advance(this.context(input, inputVolts));
+    return true;
+  }
+
+  /** Pins whose edges this part reacts to, with the edge each one wants. */
+  get clockPins(): { pin: string; edge: 'rising' | 'falling' }[] {
+    return (this.spec.clocks ?? []).map((c) => ({ pin: c.pin, edge: c.edge }));
+  }
+
+  private context(
+    input: (pinId: string) => Logic,
+    inputVolts: (pinId: string) => number | null,
+  ): LogicEvalContext {
+    return {
       input,
+      inputVolts,
       state: this.state,
       supply: this.supply,
-      previousOutput: (id) => this.outputs[id] ?? 'x',
-    });
-    return true;
+      previousOutput: (pinId) => this.outputs[pinId] ?? 'x',
+    };
   }
 
   outputOf(pinId: string): Logic {

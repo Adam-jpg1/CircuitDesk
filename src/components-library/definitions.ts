@@ -865,6 +865,8 @@ export const MINI_KEYBOARD = def(
   },
 );
 
+import { ALL_LOGIC_DEFS } from './logicDefinitions';
+
 export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   BREADBOARD_HALF, BREADBOARD_MINI,
   LED, RGB_LED, RESISTOR, CAPACITOR, DIODE, TRANSISTOR_NPN, MOSFET,
@@ -881,6 +883,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   DIP_SWITCH_4, DIP_SWITCH_6, DIP_SWITCH_8,
   ROTARY_ENCODER, JOYSTICK,
   KEYPAD_3X4, KEYPAD_4X4, KEYPAD_MATRIX, MINI_KEYBOARD,
+  ...ALL_LOGIC_DEFS,
 ];
 
 export { MM };
