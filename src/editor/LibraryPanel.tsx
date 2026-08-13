@@ -6,11 +6,44 @@ import { COMPONENT_DEFINITIONS } from '../components-library/definitions';
 import { SupportBadge } from '../ui/primitives';
 import { describeSupport } from '../project/support';
 import { loadSetting, saveSetting } from '../persistence/settings';
+import { PART_SUMMARY, matchRank, partMatches } from '../components-library/partSearch';
 import type { PartDefinition } from '../types';
 
+/**
+ * Shelf order.
+ *
+ * Roughly the order a project gets built in — board, the basics, the thing the
+ * user is actually adding — rather than alphabetical, which would put Boards
+ * halfway down. Categories with nothing in them are not rendered, so this list
+ * can name shelves that are still being filled.
+ */
 const CATEGORY_ORDER = [
-  'Boards', 'Breadboards', 'Basic', 'Input', 'Output', 'Displays', 'Sensors', 'Motors',
-  'Modules', 'Power', 'ICs', 'Connectors', 'Custom boards', 'Imported parts', 'Favorites',
+  'Favorites',
+  'Boards',
+  'Basic',
+  'Inputs',
+  'Keyboards & Keypads',
+  'Sensors',
+  'Displays',
+  'LEDs',
+  'Output',
+  'Motors & Actuators',
+  'Motors',
+  'Communication',
+  'Logic',
+  'ICs',
+  'Memory & Storage',
+  'Memory',
+  'Modules',
+  'Power',
+  'Instruments',
+  'Prototyping',
+  'Breadboards',
+  'Connectors',
+  'Input',
+  'CircuitDesk Extras',
+  'Custom boards',
+  'Imported parts',
 ];
 
 export function LibraryPanel() {
@@ -35,18 +68,24 @@ export function LibraryPanel() {
     const favs = favorites.map((id) => allById.get(id)).filter((d): d is PartDefinition => Boolean(d));
     if (favs.length > 0) map.set('Favorites', favs);
 
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     const result: [string, PartDefinition[]][] = [];
     for (const cat of CATEGORY_ORDER) {
       const arr = map.get(cat);
       if (!arr || arr.length === 0) continue;
-      const filtered = q
-        ? arr.filter((d) => d.name.toLowerCase().includes(q) || ('family' in d && d.family.toLowerCase().includes(q)))
-        : arr;
-      if (filtered.length > 0) result.push([cat, filtered]);
+      // Matched on aliases as well as names, so "accelerometer" finds the
+      // MPU6050 and "shift register" finds both 74HC parts.
+      const filtered = q ? arr.filter((d) => partMatches(d, q)) : arr;
+      if (filtered.length === 0) continue;
+      // Best matches first within a shelf: an exact part number should not sit
+      // below something that merely mentions it.
+      if (q) filtered.sort((a, b) => matchRank(a, q) - matchRank(b, q));
+      result.push([cat, filtered]);
     }
     return result;
   }, [query, customParts, projectCustoms, favorites]);
+
+  const totalShown = groups.reduce((n, [, defs]) => n + defs.length, 0);
 
   const toggleFav = (id: string) => {
     setFavorites((prev) => {
@@ -64,7 +103,7 @@ export function LibraryPanel() {
       <div className="library-search">
         <input
           type="search"
-          placeholder="Search parts…"
+          placeholder="Search parts — name, part number or what it does…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -97,14 +136,21 @@ export function LibraryPanel() {
                 <span className="li-thumb">
                   <MiniPartIcon def={def} />
                 </span>
-                <span className="li-name">{def.name}</span>
+                {/* Name plus one scannable line: what it is and how it talks.
+                    The full description stays on the tooltip. */}
+                <span className="li-text">
+                  <span className="li-name">{def.name}</span>
+                  {PART_SUMMARY[def.id] && <span className="li-summary">{PART_SUMMARY[def.id]}</span>}
+                </span>
                 <SupportBadge level={def.supportLevel} title={describeSupport(def)} />
               </div>
             ))}
           </div>
         ))}
         <div style={{ padding: '10px 12px', color: 'var(--text-2)', fontSize: 11 }}>
-          Drag a part onto the canvas. Right-click a part to pin it to Favorites. Badges show honest support levels.
+          {query.trim()
+            ? `${totalShown} part${totalShown === 1 ? '' : 's'} match “${query.trim()}”. Search by what a part does — “accelerometer”, “shift register”, “distance” — as well as by part number.`
+            : 'Drag a part onto the canvas. Right-click a part to pin it to Favorites. Badges show honest support levels.'}
         </div>
       </div>
     </>

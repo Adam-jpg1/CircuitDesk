@@ -336,7 +336,13 @@ input[type='checkbox'] { accent-color: var(--accent); }
   border-left: 2px solid transparent;
 }
 .library-item:hover { background: var(--bg-hover); border-left-color: var(--accent); }
-.library-item .li-name { flex: 1; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-item .li-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.library-item .li-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* One scannable line: what the part is and how it talks. */
+.library-item .li-summary {
+  font-size: 10.5px; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .library-item .li-thumb { width: 30px; height: 24px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 .library-item .li-thumb svg { max-width: 30px; max-height: 24px; }
 

@@ -697,6 +697,174 @@ export const HC165 = def(
   },
 );
 
+// ---------- Inputs: contacts ----------
+//
+// Everything below is built on the shared contact model, so what makes them
+// different from each other is pin geometry and how many poles they have —
+// not a separate simulation each.
+
+export const PUSH_BUTTON_6MM = def(
+  'comp.push-button-6mm', 'Push Button (6mm)', 'Inputs', 6.5, 6.5, 'push-button-6mm',
+  [
+    pin('1a', '1a', 0.6, 0.6), pin('1b', '1b', 0.6, 5.9),
+    pin('2a', '2a', 5.9, 0.6), pin('2b', '2b', 5.9, 5.9),
+  ],
+  'simulated',
+  {
+    internalGroups: { '1a': 'side1', '1b': 'side1', '2a': 'side2', '2b': 'side2' },
+    validationRules: ['button-floating-input'],
+    simulationAdapterId: 'sim.push-button',
+    description: 'Compact 6mm tactile switch. Legs 1a/1b are internally joined, as are 2a/2b; pressing bridges the two sides.',
+  },
+);
+
+export const SLIDE_SWITCH = def(
+  'comp.slide-switch', 'Slide Switch (SPDT)', 'Inputs', 11, 7, 'slide-switch',
+  [pin('no', 'NO', 2.5, 6.6), pin('com', 'COM', 5.5, 6.6), pin('nc', 'NC', 8.5, 6.6)],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.slide-switch',
+    description: 'SPDT slide switch. COM is bridged to NO in one position and to NC in the other — break before make, so NO and NC are never joined.',
+  },
+);
+
+export const LIMIT_SWITCH = def(
+  'comp.limit-switch', 'Limit Switch (SPDT)', 'Inputs', 20, 11, 'limit-switch',
+  [pin('com', 'COM', 3.0, 10.6), pin('no', 'NO', 8.0, 10.6), pin('nc', 'NC', 13.0, 10.6)],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.limit-switch',
+    description: 'Lever-actuated microswitch used as an end stop. COM-NC conducts at rest and COM-NO conducts while the lever is held, which is why an unpressed end stop reads as a closed circuit.',
+  },
+);
+
+/** A DIP bank: N poles at 2.54mm pitch, pins a1/b1 … aN/bN. */
+function makeDipSwitch(id: string, name: string, ways: number): ComponentDefinition {
+  const pitch = 2.54;
+  const widthMm = ways * pitch + 2.6;
+  const heightMm = 9.5;
+  const pins: PinDefinition[] = [];
+  for (let i = 1; i <= ways; i++) {
+    const x = 1.3 + (i - 0.5) * pitch;
+    pins.push(pin(`a${i}`, `${i}`, x, 0.6));
+    pins.push(pin(`b${i}`, `${i}'`, x, heightMm - 0.6));
+  }
+  return def(id, name, 'Inputs', widthMm, heightMm, 'dip-switch', pins, 'simulated', {
+    simulationAdapterId: 'sim.dip-switch',
+    description: `${ways}-way DIP switch. Each numbered pole is an independent contact between its top and bottom pin — set them individually while the simulation runs.`,
+  });
+}
+
+export const DIP_SWITCH_4 = makeDipSwitch('comp.dip-switch-4', 'DIP Switch (4-way)', 4);
+export const DIP_SWITCH_6 = makeDipSwitch('comp.dip-switch-6', 'DIP Switch (6-way)', 6);
+export const DIP_SWITCH_8 = makeDipSwitch('comp.dip-switch-8', 'DIP Switch (8-way)', 8);
+
+export const ROTARY_ENCODER = def(
+  'comp.rotary-encoder', 'Rotary Encoder (KY-040)', 'Inputs', 20, 26, 'rotary-encoder',
+  [
+    pin('gnd', 'GND', 3.0, 25.6, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', '+', 7.5, 25.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('sw', 'SW', 12.0, 25.6),
+    pin('dt', 'DT', 16.5, 25.6),
+    pin('clk', 'CLK', 16.5, 0.4),
+  ],
+  'simulated',
+  {
+    properties: [prop('detents', 'Detents per turn', 'number', 20)],
+    simulationAdapterId: 'sim.rotary-encoder',
+    description:
+      'Incremental rotary encoder. CLK and DT are two contacts to ground, offset by half a detent, so turning produces a real quadrature sequence and the direction has to be decoded from which line moved first. The shaft also pushes in as a momentary switch on SW.',
+  },
+);
+
+export const JOYSTICK = def(
+  'comp.joystick', 'Analog Joystick', 'Inputs', 34, 30, 'joystick',
+  [
+    pin('gnd', 'GND', 6.0, 29.6, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', '+5V', 11.0, 29.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('vrx', 'VRx', 16.0, 29.6, { type: 'analog', caps: ['analog-in'] }),
+    pin('vry', 'VRy', 21.0, 29.6, { type: 'analog', caps: ['analog-in'] }),
+    pin('sw', 'SW', 26.0, 29.6),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.joystick',
+    description:
+      'Two-axis thumb joystick: VRx and VRy are potentiometer wipers between GND and +5V, so a centred stick reads about half scale on a real ADC channel. Pressing the stick in closes SW to ground.',
+  },
+);
+
+// ---------- Keyboards & Keypads ----------
+//
+// A membrane keypad has no electronics in it. Pressing a key shorts one row
+// line to one column line and that is all it does, so that is all these model:
+// the firmware does its own scanning, exactly as it must on the bench.
+
+function makeKeypad(
+  id: string,
+  name: string,
+  rows: number,
+  cols: number,
+  artworkId: string,
+  description: string,
+  properties: PropertyDefinition[] = [],
+): ComponentDefinition {
+  const pitch = 2.54;
+  const keyPitch = 9.0;
+  const widthMm = Math.max(cols * keyPitch + 8, (rows + cols) * pitch + 6);
+  const heightMm = rows * keyPitch + 16;
+  const pins: PinDefinition[] = [];
+  const originX = (widthMm - (rows + cols - 1) * pitch) / 2;
+  for (let r = 0; r < rows; r++) {
+    pins.push(pin(`row${r + 1}`, `R${r + 1}`, originX + r * pitch, heightMm - 0.6));
+  }
+  for (let c = 0; c < cols; c++) {
+    pins.push(pin(`col${c + 1}`, `C${c + 1}`, originX + (rows + c) * pitch, heightMm - 0.6));
+  }
+  return def(id, name, 'Keyboards & Keypads', widthMm, heightMm, artworkId, pins, 'simulated', {
+    properties,
+    simulationAdapterId: 'sim.keypad',
+    description,
+  });
+}
+
+export const KEYPAD_3X4 = makeKeypad(
+  'comp.keypad-3x4', 'Membrane Keypad 3×4', 4, 3, 'keypad',
+  'Standard 12-key membrane keypad, four rows by three columns. Each key is a plain contact between its row and column line — there is no controller and no character output, so firmware scans it exactly as it would real hardware. Several keys can be held at once.',
+);
+
+export const KEYPAD_4X4 = makeKeypad(
+  'comp.keypad-4x4', 'Membrane Keypad 4×4', 4, 4, 'keypad',
+  'Standard 16-key membrane keypad, four rows by four columns. Each key shorts one row to one column; with no diodes fitted, holding three keys in an L can produce a phantom fourth exactly as it does on the bench.',
+);
+
+export const KEYPAD_MATRIX = makeKeypad(
+  'comp.keypad-matrix', 'Matrix Keypad (configurable)', 4, 4, 'keypad',
+  'Matrix keypad with a configurable number of rows and columns, for layouts that are not 3×4 or 4×4. Electrically identical to the fixed keypads: one contact per crossing, scanned by firmware.',
+  [
+    prop('rows', 'Rows', 'number', 4),
+    prop('cols', 'Columns', 'number', 4),
+  ],
+);
+
+export const MINI_KEYBOARD = def(
+  'comp.mini-keyboard', 'Mini Matrix Keyboard (50-key)', 'Keyboards & Keypads', 118, 54, 'mini-keyboard',
+  (() => {
+    const pins: PinDefinition[] = [];
+    const pitch = 2.54;
+    const originX = (118 - 14 * pitch) / 2;
+    for (let r = 0; r < 5; r++) pins.push(pin(`row${r + 1}`, `R${r + 1}`, originX + r * pitch, 53.4));
+    for (let c = 0; c < 10; c++) pins.push(pin(`col${c + 1}`, `C${c + 1}`, originX + (5 + c) * pitch, 53.4));
+    return pins;
+  })(),
+  'simulated',
+  {
+    simulationAdapterId: 'sim.keypad',
+    description:
+      'A 50-key keyboard wired as a plain 5×10 matrix with five row pins and ten column pins. No controller, no USB and no protocol: pressing a key shorts one row to one column, and the sketch decides what that means. Enough keys for a terminal, a calculator or a small computer, and it works with any board that has fifteen spare GPIOs.',
+  },
+);
+
 export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   BREADBOARD_HALF, BREADBOARD_MINI,
   LED, RGB_LED, RESISTOR, CAPACITOR, DIODE, TRANSISTOR_NPN, MOSFET,
@@ -709,6 +877,10 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
   HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,
   GENERIC_IC, HEADER_CONNECTOR,
+  PUSH_BUTTON_6MM, SLIDE_SWITCH, LIMIT_SWITCH,
+  DIP_SWITCH_4, DIP_SWITCH_6, DIP_SWITCH_8,
+  ROTARY_ENCODER, JOYSTICK,
+  KEYPAD_3X4, KEYPAD_4X4, KEYPAD_MATRIX, MINI_KEYBOARD,
 ];
 
 export { MM };

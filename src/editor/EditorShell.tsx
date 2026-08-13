@@ -23,11 +23,13 @@ export function EditorShell({ projectId }: { projectId: string }) {
     void useEditorStore.getState().load(projectId);
   }, [projectId]);
 
-  // stop the simulation when leaving the editor entirely
+  // Tear the simulation down when leaving this project — including when the
+  // route moves to a *different* project, which remounts this component. A new
+  // project must not open showing the previous one's serial log, build report
+  // or input state.
   useEffect(() => {
     return () => {
-      simulationController.stop();
-      useSimulationStore.getState().resetInputs();
+      simulationController.closeProject();
     };
   }, []);
 

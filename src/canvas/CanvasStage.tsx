@@ -10,7 +10,10 @@ import { UnoArtwork } from '../boards/artwork/UnoArtwork';
 import { GenericModuleArtwork } from '../boards/artwork/GenericModuleArtwork';
 import { MegaArtwork } from '../boards/artwork/MegaArtwork';
 import { LeonardoArtwork } from '../boards/artwork/LeonardoArtwork';
-import type { CircuitProject, ComponentInstance, PartDefinition, PinDefinition } from '../types';
+import { hotspotAt, type Hotspot } from '../components-library/artwork/interactiveGeometry';
+import { contactStateKey } from '../simulation/devices/contacts';
+import { MM } from '../boards/pinHelpers';
+import type { CircuitProject, ComponentDefinition, ComponentInstance, PartDefinition, PinDefinition } from '../types';
 
 const WIRE_COLORS = ['#e03131', '#212529', '#2f9e44', '#1971c2', '#e8590c', '#7048e8', '#f08c00', '#c2255c'];
 
@@ -201,6 +204,32 @@ export function CanvasStage() {
     [toWorld, tool, spaceHeld, view, store],
   );
 
+  /**
+   * The control under the pointer, in the part's own unrotated coordinates.
+   *
+   * The part is drawn translated to its position and rotated about its centre,
+   * so finding what was clicked means undoing exactly that — a keypad turned
+   * 90° must still respond on the key you can see, not the one that would have
+   * been there before you rotated it.
+   */
+  const hotspotUnderPointer = useCallback(
+    (def: PartDefinition, inst: ComponentInstance, e: React.PointerEvent): Hotspot | null => {
+      if (def.isBoard) return null;
+      const world = toWorld(e.clientX, e.clientY);
+      const w = def.widthMm * MM;
+      const h = def.heightMm * MM;
+      const cx = inst.x + w / 2;
+      const cy = inst.y + h / 2;
+      const theta = (-inst.rotation * Math.PI) / 180;
+      const dx = world.x - cx;
+      const dy = world.y - cy;
+      const localX = dx * Math.cos(theta) - dy * Math.sin(theta) + w / 2;
+      const localY = dx * Math.sin(theta) + dy * Math.cos(theta) + h / 2;
+      return hotspotAt(def as ComponentDefinition, inst, localX, localY);
+    },
+    [toWorld],
+  );
+
   const onPartPointerDown = useCallback(
     (inst: ComponentInstance, e: React.PointerEvent) => {
       e.stopPropagation();
@@ -222,6 +251,26 @@ export function CanvasStage() {
         if (def.simulationAdapterId === 'sim.toggle-switch') {
           const cur = useSimulationStore.getState().toggleStates[inst.id] === true;
           useSimulationStore.getState().setToggle(inst.id, !cur);
+          return;
+        }
+        // Parts with more than one thing to press: work out which control the
+        // pointer is actually over, and close that contact and no other. Two
+        // keys held at once are two independent contacts, so nothing here
+        // releases anything except the key its own pointer opened.
+        const spot = hotspotUnderPointer(def, inst, e);
+        if (spot) {
+          const stateKey = contactStateKey(inst.id, spot.key);
+          const sim = useSimulationStore.getState();
+          if (spot.kind === 'latching') {
+            sim.pressButton(stateKey, !sim.pressedButtons.includes(stateKey));
+          } else {
+            sim.pressButton(stateKey, true);
+            const release = () => {
+              useSimulationStore.getState().pressButton(stateKey, false);
+              window.removeEventListener('pointerup', release);
+            };
+            window.addEventListener('pointerup', release);
+          }
           return;
         }
       }

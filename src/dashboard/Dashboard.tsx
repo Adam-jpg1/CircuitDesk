@@ -78,7 +78,10 @@ export function Dashboard() {
         </button>
         <button className="btn" onClick={() => navigate('#/licenses')}>Licenses</button>
         <button className="btn" onClick={() => navigate('#/about')}>About</button>
-        <button className="btn primary" onClick={() => void createProject(() => buildBlinkProject('New Project'))}>
+        {/* A new project is blank. Starting the user inside a wired Blink
+            means their first act is deleting someone else's circuit; the
+            templates below are where a worked example belongs. */}
+        <button className="btn primary" onClick={() => void createProject(() => emptyProject('Untitled Project'))}>
           <PlusIcon style={{ width: 14, height: 14 }} /> New project
         </button>
       </header>

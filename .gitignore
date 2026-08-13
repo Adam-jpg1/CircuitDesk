@@ -4,3 +4,4 @@ dist-server/
 .server-cache/
 *.log
 .DS_Store
+artwork-review/

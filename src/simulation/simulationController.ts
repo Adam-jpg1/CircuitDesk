@@ -750,6 +750,36 @@ class SimulationController {
     });
   }
 
+  /**
+   * Tears the controller down for a different project entirely.
+   *
+   * `stop()` ends a run but deliberately keeps the build report on screen, so
+   * a compile error is still readable after pressing Stop. Leaving a project
+   * is different: everything on screen belonged to a project the user is no
+   * longer in, and a fresh blank project showing the last one's serial output
+   * or "3 boards built" is showing them somebody else's work.
+   *
+   * Distinct from `reset()`, which power-cycles the boards inside the project
+   * the user is still working on.
+   */
+  closeProject(): void {
+    this.stop();
+    this.project = null;
+    this.builds = [];
+    this.artifacts.clear();
+    this.transcript.clear();
+    this.transcriptVersion = 0;
+    this.publishedTranscriptVersion = -1;
+    this.controlsNow = emptyControls();
+    const store = useSimulationStore.getState();
+    store.setStatus('stopped', null);
+    store.clearSerial();
+    store.setSerialBoards([]);
+    store.setSerialTarget(null);
+    store.setBuilds([]);
+    store.resetInputs();
+  }
+
   private stopLoop(): void {
     if (this.timer) {
       clearInterval(this.timer);

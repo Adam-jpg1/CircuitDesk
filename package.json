@@ -39,7 +39,13 @@
     "test:sketches": "tsx tests/sketches.model.mts",
     "test:sketches:editor": "tsx tests/sketches.editor.mts",
     "test:sketches:acceptance": "tsx tests/sketches.acceptance.mts",
-    "test:sketches:audit": "tsx tests/sketches.audit.mts"
+    "test:sketches:audit": "tsx tests/sketches.audit.mts",
+    "test:coverage": "tsx tests/coverage.report.mts",
+    "test:newproject": "tsx tests/project.newBlank.mts",
+    "test:keypad": "tsx tests/inputs.keypad.mts",
+    "test:contacts": "tsx tests/inputs.contacts.mts",
+    "test:analoginputs": "tsx tests/inputs.analog.mts",
+    "test:artwork:inputs": "tsx tests/artwork.inputs.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
