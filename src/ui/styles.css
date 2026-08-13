@@ -517,6 +517,13 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .code-tab.active { background: var(--bg-0); color: var(--text-0); }
 .code-tab .close { opacity: 0.5; font-size: 13px; }
 .code-tab .close:hover { opacity: 1; }
+/* A .h/.cpp belongs to the workspace, not to the board on screen. */
+.code-tab .tab-note {
+  margin-left: 6px; padding: 1px 5px;
+  font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase;
+  font-family: var(--font-ui); color: var(--text-2);
+  border: 1px solid var(--border); border-radius: 3px;
+}
 
 /* import wizard */
 .wizard-steps { display: flex; gap: 4px; padding: 14px 18px 0; }

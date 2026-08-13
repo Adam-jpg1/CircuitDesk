@@ -113,6 +113,19 @@ function textOf(id: string): string | undefined {
     store.getState().setActiveBoard(a.id);
   }
   check(textOf('sa') === A_TEXT && textOf('sb') === B_TEXT, 'repeated switching loses nothing');
+
+  // And none of that required a save. The edits are still pending — the
+  // autosave has not run — yet both documents hold their text, so switching
+  // views is not something the user has to remember to commit first.
+  check(store.getState().saveState === 'unsaved', 'the edits are still unsaved at this point');
+  check(textOf('sa') === A_TEXT && textOf('sb') === B_TEXT, 'so no explicit save was needed to switch between them');
+
+  // Switching on its own is not an edit, so it must not dirty the project.
+  store.setState({ saveState: 'saved' });
+  store.getState().setActiveBoard(b.id);
+  store.getState().setActiveBoard(a.id);
+  store.getState().setActiveFile('sb');
+  check(store.getState().saveState === 'saved', 'and merely looking at another board never marks the project dirty');
 }
 
 // ========================= 3. shared sketches show the same document ========

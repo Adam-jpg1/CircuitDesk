@@ -124,11 +124,17 @@ const SENDER = [
   '}',
   'void loop() {',
   '  digitalWrite(2, HIGH);',
-  '  delay(60);',
+  '  delay(250);',
   '  digitalWrite(2, LOW);',
-  '  delay(60);',
+  '  delay(250);',
   '}',
 ].join('\n');
+
+// Exactly what the HD44780 must be holding in each state. 16 characters per
+// row, because that is what the receiver writes and what DDRAM holds — an
+// assertion on a prefix would pass on a half-drawn screen.
+const HIGH_ROWS = ['TEST CIRCUITDESK', 'TRY IT TODAY    '] as const;
+const LOW_ROWS = ['ESP32 -> PICO   ', 'WAITING...      '] as const;
 
 const RECEIVER = [
   '// Receiver. Runs on the Pico. Knows nothing about senders.',
@@ -167,16 +173,19 @@ const RECEIVER = [
   '  pulse(0x20); delay(5);',
   '  command(0x28); command(0x08); command(0x01); delay(3);',
   '  command(0x06); command(0x0C);',
-  '  command(0x80); print("TEST CIRCUITDESK");',
   '}',
   '',
+  '// Both rows are rewritten on every change, so the display is never a mix',
+  '// of one state top and another state bottom.',
   'int last = -1;',
   'void loop() {',
   '  int v = digitalRead(16);',
   '  if (v != last) {',
   '    last = v;',
+  '    command(0x80);',
+  '    print(v ? "TEST CIRCUITDESK" : "ESP32 -> PICO   ");',
   '    command(0xC0);',
-  '    print(v ? "TRY IT TODAY   " : "WAITING...     ");',
+  '    print(v ? "TRY IT TODAY    " : "WAITING...      ");',
   '  }',
   '}',
 ].join('\n');
@@ -232,32 +241,62 @@ const lcd = uid('c');
     const receiver = simulationController.runnerFor(pico)!;
     check(sender.engine === 'esp32c6' && receiver.engine === 'rp2040js', `each on its own engine (${sender.engine}, ${receiver.engine})`);
 
-    // Let both boot and settle, then watch the LCD.
+    // Let both boot and settle, then watch the LCD against the sender's pin.
+    //
+    // Correlated, not merely collected: the display is only attributed to a
+    // level the sender has been holding steadily for SETTLE ms, so a frame
+    // caught mid-redraw — or a reading that happens to coincide with an edge —
+    // can never be what makes this pass.
+    const SETTLE = 60;
+    const history: ('high' | 'low' | 'floating' | undefined)[] = [];
+    const whileHigh = new Set<string>();
+    const whileLow = new Set<string>();
     const seen = new Set<string>();
     let c6High = 0;
     let c6Low = 0;
-    for (let i = 0; i < 1400; i++) {
+    for (let i = 0; i < 2400; i++) {
       simulationController.advance(1);
-      if (i % 20 === 0) simulationController.publishNow();
+      simulationController.publishNow();
       const level = sender.digitalPinLevel(2);
+      history.push(level);
       if (level === 'high') c6High++;
       if (level === 'low') c6Low++;
       const visuals = useSimulationStore.getState().visuals as Record<string, { readout?: string[] }>;
       const rows = visuals[lcd]?.readout;
-      if (rows) seen.add(rows.map((r) => r.trimEnd()).join(' | '));
+      if (!rows) continue;
+      const frame = JSON.stringify(rows);
+      seen.add(frame);
+      const window = history.slice(-SETTLE);
+      if (window.length < SETTLE) continue;
+      if (window.every((l) => l === 'high')) whileHigh.add(frame);
+      if (window.every((l) => l === 'low')) whileLow.add(frame);
     }
-    simulationController.publishNow();
 
-    check(c6High > 50 && c6Low > 50, `the C6's sender drives IO2 both ways (${c6High} high / ${c6Low} low)`);
-    check(receiver.timeMs > 500, `the Pico's receiver ran (${receiver.timeMs.toFixed(0)} ms)`);
+    check(c6High > 400 && c6Low > 400, `the C6's sender drives IO2 both ways (${c6High} high / ${c6Low} low)`);
+    check(receiver.timeMs > 1500, `the Pico's receiver ran (${receiver.timeMs.toFixed(0)} ms)`);
 
-    const final = (useSimulationStore.getState().visuals as Record<string, { readout?: string[] }>)[lcd]?.readout ?? [];
-    console.log('   LCD:', JSON.stringify(final));
-    check(final[0]?.startsWith('TEST CIRCUITDESK'), `the LCD shows the receiver's first line (${JSON.stringify(final[0])})`);
-    const states = [...seen].join('\n');
-    check(/TRY IT TODAY/.test(states), "and the second line shows what the sender's edge caused");
-    check(/WAITING/.test(states), 'having also shown the idle state, so it is following the wire');
-    check(seen.size > 1, `the display changed as the signal changed (${seen.size} distinct states)`);
+    const HIGH = JSON.stringify(HIGH_ROWS);
+    const LOW = JSON.stringify(LOW_ROWS);
+    console.log('   LCD while sender HIGH:', [...whileHigh].join('  '));
+    console.log('   LCD while sender  LOW:', [...whileLow].join('  '));
+    check(whileHigh.has(HIGH), `the LCD holds exactly ${HIGH} while the sender is high`);
+    check(whileLow.has(LOW), `and exactly ${LOW} while the sender is low`);
+    check(!whileHigh.has(LOW), 'the low-state text is never settled on screen while the sender is high');
+    check(!whileLow.has(HIGH), 'and the high-state text is never settled on screen while the sender is low');
+    check(seen.size > 1, `the display changed as the signal changed (${seen.size} distinct frames)`);
+
+    // Every character came from the receiver's own writes. Before the firmware
+    // completes the 4-bit init the model reports that it is not initialised
+    // rather than inventing a screen, so that frame is the honest exception.
+    const drawn = [...seen].filter((f) => !/not initialised/.test(f));
+    check(
+      drawn.length > 0 && drawn.every((f) => (JSON.parse(f) as string[]).every((r) => r.length === 16)),
+      `every drawn frame is a full 16-column DDRAM row (${drawn.length} drawn)`,
+    );
+    check(
+      [...seen].some((f) => /not initialised/.test(f)),
+      'and the display reported itself uninitialised before the firmware set it up',
+    );
   }
 }
 

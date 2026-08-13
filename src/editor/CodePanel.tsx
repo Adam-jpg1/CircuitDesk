@@ -4,7 +4,8 @@ import * as MonacoNS from 'monaco-editor';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import { useEditorStore } from '../app/editorStore';
 import { resolveDefinition } from '../project/partsRegistry';
-import { boardsUsingSketch, sketchDocuments, sketchIdFor } from '../project/sketches';
+import { boardsUsingSketch, isSketchFile, sketchDocuments, sketchIdFor } from '../project/sketches';
+import { buildSerialLabels } from '../simulation/serialLog';
 
 // Bundle Monaco locally (no CDN) so CircuitDesk works fully offline.
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
@@ -99,8 +100,20 @@ export function CodePanel() {
       <SketchAssignmentBar />
       <div className="code-tabs">
         {project.codeFiles.map((f) => (
-          <div key={f.id} className={`code-tab ${f.id === file.id ? 'active' : ''}`}>
-            <button onClick={() => s.setActiveFile(f.id)}>{f.name}</button>
+          <div
+            key={f.id}
+            className={`code-tab ${f.id === file.id ? 'active' : ''} ${isSketchFile(f) ? '' : 'support'}`}
+          >
+            {/* A .h/.cpp is not one board's file. With a board selected the tab
+                row still lists them, so each one says whose it is rather than
+                looking like part of the sketch currently on screen. */}
+            <button
+              onClick={() => s.setActiveFile(f.id)}
+              title={isSketchFile(f) ? undefined : 'Shared by every board — this file goes into all builds'}
+            >
+              {f.name}
+              {!isSketchFile(f) && <span className="tab-note">shared</span>}
+            </button>
             {project.codeFiles.length > 1 && f.name !== 'sketch.ino' && (
               <button
                 className="close"
@@ -183,15 +196,17 @@ function SketchAssignmentBar() {
   if (boards.length <= 1 && sketches.length <= 1) return null;
 
   const s = useEditorStore.getState();
-  const boardName = (id: string) => {
-    const inst = boards.find((b) => b.id === id);
-    if (!inst) return id;
-    if (inst.label) return inst.label;
-    const def = resolveDefinition(inst.definitionId, project);
-    const sameType = boards.filter((b) => b.definitionId === inst.definitionId);
-    const n = sameType.findIndex((b) => b.id === id) + 1;
-    return sameType.length > 1 ? `${def?.name ?? 'Board'} #${n}` : def?.name ?? 'Board';
-  };
+  // The same labelling the serial monitor and the build report use, so a board
+  // is called one thing everywhere in the app. Rolling a second scheme here
+  // would let "Raspberry Pi Pico #2" mean different boards in two panels.
+  const labels = buildSerialLabels(
+    boards.map((inst) => ({
+      instanceId: inst.id,
+      boardName: resolveDefinition(inst.definitionId, project)?.name ?? 'Board',
+      label: inst.label,
+    })),
+  );
+  const boardName = (id: string) => labels.get(id) ?? id;
 
   const currentSketchId = activeBoardId ? sketchIdFor(project, activeBoardId) : activeFileId;
   const sketch = project.codeFiles.find((f) => f.id === currentSketchId);
