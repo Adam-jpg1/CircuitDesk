@@ -18,6 +18,39 @@ export async function fetchCompilerHealth(): Promise<CompilerHealth> {
   }
 }
 
+/**
+ * POSTs a compile request, retrying a dropped connection.
+ *
+ * A pooled keep-alive connection can be closed by the server (or anything in
+ * between) between one request and the next, and the fetch that reuses it
+ * fails at the transport layer before the compiler ever sees it. The failure
+ * looks identical to "the compiler service is down", which is a bad thing to
+ * tell someone whose service is running perfectly — so a transport-level
+ * failure is retried on a fresh connection rather than reported.
+ *
+ * Only transport failures are retried. An HTTP response of any status is an
+ * answer from the server and is returned untouched: a compile error must not
+ * be attempted twice, and a rate limit must not be hammered.
+ */
+async function postWithRetry(url: string, body: string, attempts = 3): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+    } catch (err) {
+      lastError = err;
+      // Back off a little so a genuinely unreachable service is not hammered
+      // three times in a row before the user is told.
+      if (attempt < attempts - 1) await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 export async function compileProjectCode(
   project: CircuitProject,
   target: { boardId: string; fqbn: string; files?: { name: string; content: string }[] },
@@ -35,11 +68,10 @@ export async function compileProjectCode(
     files: (target.files ?? project.codeFiles).map((f) => ({ name: f.name, content: f.content })),
   };
   try {
-    const res = await fetch(compilerApiUrl(syntaxOnly ? '/api/compiler/validate' : '/api/compiler/compile'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const res = await postWithRetry(
+      compilerApiUrl(syntaxOnly ? '/api/compiler/validate' : '/api/compiler/compile'),
+      JSON.stringify(body),
+    );
     // Normalize so error responses (rate limits, proxies) can never produce a
     // result with missing fields that would break the UI.
     const raw = (await res.json()) as Partial<CompileResult>;
