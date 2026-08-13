@@ -2,6 +2,7 @@ import { memo } from 'react';
 import type { ComponentDefinition, ComponentInstance } from '../../types';
 import type { ComponentVisualState } from '../../simulation/circuitSim';
 import { MM } from '../../boards/pinHelpers';
+import { dipActuatorRect, interactiveHotspots } from './interactiveGeometry';
 
 export interface ArtProps {
   def: ComponentDefinition;
@@ -638,7 +639,251 @@ function Lcd1602Art({ def, visual }: ArtProps) {
   );
 }
 
+// ---------- Batch 1: contact inputs ----------
+//
+// These all read `visual.contacts`, which is a map from contact key to whether
+// it is engaged — so a keypad with four keys down draws four keys down, rather
+// than the single "pressed" boolean a one-contact part gets away with.
+
+const engagedIn = (visual: ComponentVisualState | undefined, key: string): boolean =>
+  Boolean(visual?.contacts?.[key]);
+
+function PushButton6mmArt({ def, visual }: ArtProps) {
+  const pressed = Boolean(visual?.contacts?.[''] ?? visual?.pressed);
+  const W = def.widthMm * MM;
+  return (
+    <g>
+      {[[0.6, 0.6], [5.9, 0.6], [0.6, 5.9], [5.9, 5.9]].map(([x, y], i) => (
+        <circle key={i} cx={x * MM} cy={y * MM} r={0.55 * MM} fill="#9aa4ad" stroke="#6b747d" strokeWidth="0.5" />
+      ))}
+      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={W - 1 * MM} rx="2.5" fill="#20262d" stroke="#0d1117" />
+      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={(W - 1 * MM) / 2} rx="2.5" fill="rgba(255,255,255,0.06)" />
+      <circle cx={W / 2} cy={W / 2} r={(pressed ? 1.5 : 1.8) * MM} fill={pressed ? '#141a1f' : '#2c333b'} stroke="#0d1117" strokeWidth="0.8" />
+      <circle cx={W / 2 - 0.45 * MM} cy={W / 2 - 0.45 * MM} r={0.5 * MM} fill="rgba(255,255,255,0.12)" />
+    </g>
+  );
+}
+
+function SlideSwitchArt({ def, visual }: ArtProps) {
+  // The actuator sits over NO when the changeover contact is engaged.
+  const toNo = engagedIn(visual, '');
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  return (
+    <g>
+      <rect x={0.4 * MM} y={0.8 * MM} width={W - 0.8 * MM} height={H - 2.4 * MM} rx="2" fill="#c9ccd1" stroke="#8b9199" />
+      <rect x={1.6 * MM} y={1.8 * MM} width={W - 3.2 * MM} height={H - 4.4 * MM} rx="1" fill="#2a3037" />
+      <rect
+        x={(toNo ? 1.9 : W / MM - 4.3) * MM}
+        y={2.1 * MM}
+        width={2.4 * MM}
+        height={H - 5 * MM}
+        rx="0.8"
+        fill="#e8e9ea"
+        stroke="#9aa1a8"
+        strokeWidth="0.6"
+      />
+      {[2.5, 5.5, 8.5].map((x, i) => (
+        <line key={i} x1={x * MM} y1={H - 1.6 * MM} x2={x * MM} y2={H} stroke="#9aa4ad" strokeWidth="2" />
+      ))}
+    </g>
+  );
+}
+
+function LimitSwitchArt({ def, visual }: ArtProps) {
+  const pressed = engagedIn(visual, '');
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  return (
+    <g>
+      <rect x={0.4 * MM} y={2.4 * MM} width={W - 0.8 * MM} height={H - 4 * MM} rx="1.5" fill="#1d232a" stroke="#0d1117" />
+      <rect x={1.2 * MM} y={3.2 * MM} width={W - 2.4 * MM} height={2 * MM} rx="0.8" fill="rgba(255,255,255,0.06)" />
+      {/* The lever: hinged at the left, deflected onto the body when actuated. */}
+      <path
+        d={`M ${1.6 * MM} ${3.0 * MM} L ${(W - 2 * MM)} ${(pressed ? 2.9 : 0.9) * MM}`}
+        stroke="#d3d7db"
+        strokeWidth={0.9 * MM}
+        strokeLinecap="round"
+        fill="none"
+      />
+      <circle cx={1.6 * MM} cy={3.0 * MM} r={0.7 * MM} fill="#9aa4ad" />
+      <circle cx={W - 2 * MM} cy={(pressed ? 2.9 : 0.9) * MM} r={0.9 * MM} fill="#8b9199" />
+      <text x={W / 2} y={H - 3.2 * MM} textAnchor="middle" fontSize={2.1 * MM} fill="#7c858e" fontFamily="sans-serif">
+        {pressed ? 'NO' : 'NC'}
+      </text>
+      {[3.0, 8.0, 13.0].map((x, i) => (
+        <line key={i} x1={x * MM} y1={H - 1.6 * MM} x2={x * MM} y2={H} stroke="#9aa4ad" strokeWidth="2" />
+      ))}
+    </g>
+  );
+}
+
+function DipSwitchArt({ def, instance, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  // Poles come from the same hotspots the canvas hit-tests, so the actuator is
+  // always centred in the slot the pointer is aimed at.
+  const poles = interactiveHotspots(def, instance);
+  return (
+    <g>
+      <rect x={0.6 * MM} y={1.0 * MM} width={W - 1.2 * MM} height={H - 2 * MM} rx="1.2" fill="#2f6ba8" stroke="#1d4670" />
+      <rect x={1.1 * MM} y={1.9 * MM} width={W - 2.2 * MM} height={H - 3.8 * MM} rx="0.8" fill="#1e2833" />
+      {poles.map((spot) => {
+        const on = engagedIn(visual, spot.key);
+        const nub = dipActuatorRect(spot, on);
+        return (
+          <g key={spot.key}>
+            <rect
+              x={nub.x}
+              y={nub.y}
+              width={nub.w}
+              height={nub.h}
+              rx="0.4"
+              fill={on ? '#f2f4f6' : '#b3bac1'}
+              stroke="#7d858d"
+              strokeWidth="0.5"
+            />
+            <text
+              x={spot.x + spot.w / 2}
+              y={H - 0.9 * MM}
+              textAnchor="middle"
+              fontSize={1.7 * MM}
+              fill="#cfd6dd"
+              fontFamily="sans-serif"
+            >
+              {spot.cap}
+            </text>
+          </g>
+        );
+      })}
+      <text x={2.0 * MM} y={1.75 * MM} fontSize={1.5 * MM} fill="rgba(255,255,255,0.75)" fontFamily="sans-serif">ON</text>
+    </g>
+  );
+}
+
+function RotaryEncoderArt({ def, visual }: ArtProps) {
+  const clicked = engagedIn(visual, 'sw');
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const cx = W / 2;
+  const cy = 11 * MM;
+  return (
+    <g>
+      <rect x={0.6 * MM} y={0.6 * MM} width={W - 1.2 * MM} height={H - 3 * MM} rx="1.5" fill="#1c5aa8" stroke="#123f78" />
+      <rect x={2.4 * MM} y={4.5 * MM} width={W - 4.8 * MM} height={13 * MM} rx="1" fill="#c9ccd1" stroke="#8b9199" />
+      <circle cx={cx} cy={cy} r={5.2 * MM} fill="#2a3037" stroke="#12171c" strokeWidth="1" />
+      {/* Pressed reads as the shaft sinking: a smaller, darker cap with a
+          highlight ring around it, which is legible at 1:1 in a way that a
+          two-tenths-of-a-millimetre radius change is not. */}
+      {clicked && <circle cx={cx} cy={cy} r={5.2 * MM} fill="none" stroke="#7fb2e8" strokeWidth="1.6" />}
+      <circle cx={cx} cy={cy} r={(clicked ? 3.0 : 3.9) * MM} fill={clicked ? '#12171c' : '#3a434d'} />
+      {/* Knurling, so it reads as a shaft rather than a dot. */}
+      {Array.from({ length: 12 }, (_, i) => {
+        const angle = (i / 12) * Math.PI * 2;
+        return (
+          <line
+            key={i}
+            x1={cx + Math.cos(angle) * 3.9 * MM}
+            y1={cy + Math.sin(angle) * 3.9 * MM}
+            x2={cx + Math.cos(angle) * 5.0 * MM}
+            y2={cy + Math.sin(angle) * 5.0 * MM}
+            stroke="rgba(255,255,255,0.22)"
+            strokeWidth="0.9"
+          />
+        );
+      })}
+      <text x={cx} y={H - 3.6 * MM} textAnchor="middle" fontSize={2.2 * MM} fill="#cfe0f4" fontFamily="sans-serif">KY-040</text>
+      {[3.0, 7.5, 12.0, 16.5].map((x, i) => (
+        <line key={i} x1={x * MM} y1={H - 2 * MM} x2={x * MM} y2={H} stroke="#9aa4ad" strokeWidth="2" />
+      ))}
+    </g>
+  );
+}
+
+function JoystickArt({ def, visual }: ArtProps) {
+  const clicked = engagedIn(visual, 'sw');
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const cx = W / 2;
+  const cy = 13 * MM;
+  return (
+    <g>
+      <rect x={0.6 * MM} y={0.6 * MM} width={W - 1.2 * MM} height={H - 3 * MM} rx="1.5" fill="#1c5aa8" stroke="#123f78" />
+      {/* Gimbal housing */}
+      <rect x={4 * MM} y={2.5 * MM} width={W - 8 * MM} height={21 * MM} rx="2" fill="#2a3037" stroke="#12171c" />
+      <circle cx={cx} cy={cy} r={9.5 * MM} fill="#20262d" stroke="#12171c" strokeWidth="1.2" />
+      {/* Clicked reads as the cap pushed in: smaller, darker, ringed. */}
+      {clicked && <circle cx={cx} cy={cy} r={9.5 * MM} fill="none" stroke="#7fb2e8" strokeWidth="1.8" />}
+      <circle cx={cx} cy={cy} r={(clicked ? 5.4 : 6.8) * MM} fill={clicked ? '#0b0f13' : '#171d23'} stroke="#0b0f13" />
+      <ellipse cx={cx} cy={cy - 1.5 * MM} rx={(clicked ? 3.4 : 4.6) * MM} ry={(clicked ? 2.2 : 3.2) * MM} fill="rgba(255,255,255,0.09)" />
+      <text x={cx} y={H - 3.4 * MM} textAnchor="middle" fontSize={2.2 * MM} fill="#cfe0f4" fontFamily="sans-serif">JOYSTICK</text>
+      {[6, 11, 16, 21, 26].map((x, i) => (
+        <line key={i} x1={x * MM} y1={H - 2 * MM} x2={x * MM} y2={H} stroke="#9aa4ad" strokeWidth="2" />
+      ))}
+    </g>
+  );
+}
+
+/**
+ * Keypads and the mini keyboard, drawn from the same key grid the contacts
+ * come from — so a key that lights up is exactly the contact that closed.
+ */
+function KeyMatrixArt({ def, instance, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  // The same rects the canvas hit-tests against, so the key that lights up is
+  // always the key the pointer was actually over.
+  const keys = interactiveHotspots(def, instance);
+  if (keys.length === 0) return <GenericBoxArt def={def} instance={instance} visual={visual} />;
+
+  return (
+    <g>
+      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={H - 1 * MM} rx="3" fill="#20262d" stroke="#0d1117" />
+      <rect x={1.6 * MM} y={1.6 * MM} width={W - 3.2 * MM} height={H - 3.2 * MM} rx="2" fill="#2b323a" />
+      {keys.map((k) => {
+        const down = engagedIn(visual, k.key);
+        return (
+          <g key={k.key}>
+            <rect
+              x={k.x}
+              y={k.y}
+              width={k.w}
+              height={k.h}
+              rx={k.radius}
+              fill={down ? '#4d5a68' : '#39424c'}
+              stroke={down ? '#7fb2e8' : '#1a1f25'}
+              strokeWidth={down ? 1.4 : 0.8}
+            />
+            <rect x={k.x} y={k.y} width={k.w} height={k.h * 0.42} rx={k.radius} fill="rgba(255,255,255,0.07)" />
+            <text
+              x={k.x + k.w / 2}
+              y={k.y + k.h * 0.66}
+              textAnchor="middle"
+              fontSize={k.h * 0.46}
+              fill={down ? '#eaf3ff' : '#c3ccd5'}
+              fontFamily="sans-serif"
+            >
+              {k.cap.trim()}
+            </text>
+          </g>
+        );
+      })}
+      {def.pins.map((p) => (
+        <line key={p.id} x1={p.x} y1={H - 3.5 * MM} x2={p.x} y2={H} stroke="#9aa4ad" strokeWidth="2" />
+      ))}
+    </g>
+  );
+}
+
 const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
+  'push-button-6mm': (p) => <PushButton6mmArt {...p} />,
+  'slide-switch': (p) => <SlideSwitchArt {...p} />,
+  'limit-switch': (p) => <LimitSwitchArt {...p} />,
+  'dip-switch': (p) => <DipSwitchArt {...p} />,
+  'rotary-encoder': (p) => <RotaryEncoderArt {...p} />,
+  joystick: (p) => <JoystickArt {...p} />,
+  keypad: (p) => <KeyMatrixArt {...p} />,
+  'mini-keyboard': (p) => <KeyMatrixArt {...p} />,
   lcd1602: (p) => <Lcd1602Art {...p} />,
   oled: (p) => <OledArt {...p} />,
   led: (p) => <LedArt {...p} />,

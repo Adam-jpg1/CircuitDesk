@@ -37,6 +37,8 @@ import { Eeprom24cDevice, EEPROM_ADDRESSES, type Eeprom24cSnapshotData } from '.
 import { Ds3231Device, DS3231_ADDRESS } from './devices/ds3231';
 import { Mcp4725Device, MCP4725_ADDRESSES } from './devices/mcp4725';
 import { Sn74hc165Device, HC165_INPUT_PINS } from './devices/sn74hc165';
+import { contactsOf } from './devices/contactRegistry';
+import { isContactClosed, contactStateKey } from './devices/contacts';
 
 export interface NetLevel {
   volts: number | null;
@@ -69,6 +71,13 @@ export interface ComponentVisualState {
   potPosition?: number;
   value?: number;
   coilOn?: boolean;
+  /**
+   * Which of a multi-contact part's contacts are engaged, by contact key.
+   *
+   * A keypad needs this because "pressed" is not one boolean: four keys can be
+   * down at once and the artwork has to show which four.
+   */
+  contacts?: Record<string, boolean>;
 }
 
 export interface SimControls {
@@ -331,6 +340,73 @@ export class CircuitBinding {
     }
     this.i2cDevices = i2c;
     this.spiDevices = spi;
+    // releaseListeners() above dropped the switched-net subscriptions along
+    // with the bus ones, so they are re-established here rather than only in
+    // the constructor — a re-bind must not leave a keypad unwatched.
+    this.watchSwitchedNets();
+  }
+
+  /**
+   * Nets that a mechanical contact can bridge.
+   *
+   * Kept because these are the nets whose resolution cannot wait for the next
+   * slice boundary — see `watchSwitchedNets`.
+   */
+  private switchedNets = new Set<string>();
+
+  /** Edge subscriptions held for switched-net resolution. */
+  private switchedPinListeners: (() => void)[] = [];
+
+  /** Guards against a solve triggering another solve through its own writes. */
+  private resolving = false;
+
+  /**
+   * Re-solves the moment firmware drives a pin that a contact can bridge.
+   *
+   * Nets are normally settled once per world slice, which is a millisecond —
+   * fine for a wire whose level changes slowly relative to that. It is not
+   * fine for matrix scanning, where firmware drives a row low, reads a column
+   * and drives the row high again inside a few microseconds. Settling once per
+   * slice would show the column whichever row happened to be low at the last
+   * boundary, so one pressed key would be decoded on several rows: a phantom
+   * key produced by the simulator rather than by the circuit.
+   *
+   * So pins on switched nets get a real edge subscription, exactly as the SPI
+   * chip-select and 74HC595 latch lines do. The cost is bounded because it is
+   * only the pins a contact can actually reach: a project with no switches
+   * subscribes to nothing, and one with a 4×4 keypad subscribes to eight pins.
+   */
+  private watchSwitchedNets(): void {
+    for (const off of this.switchedPinListeners) off();
+    this.switchedPinListeners = [];
+    if (this.switchedNets.size === 0) return;
+
+    // Which of each board's pins sit on a switched net.
+    const byInstance = new Map<string, Set<number>>();
+    for (const netId of this.switchedNets) {
+      for (const endpoint of this.netEndpoints.get(netId) ?? []) {
+        const set = byInstance.get(endpoint.instance) ?? new Set<number>();
+        set.add(endpoint.pin);
+        byInstance.set(endpoint.instance, set);
+      }
+    }
+
+    for (const [instanceId, pins] of byInstance) {
+      const runner = this.runners.get(instanceId);
+      if (!runner || pins.size === 0) continue;
+      this.switchedPinListeners.push(
+        runner.addPinListener((pin) => {
+          if (!pins.has(pin)) return;
+          if (this.resolving || !this.controlsRef) return;
+          this.resolving = true;
+          try {
+            this.update(this.controlsRef);
+          } finally {
+            this.resolving = false;
+          }
+        }),
+      );
+    }
   }
 
   /**
@@ -387,6 +463,10 @@ export class CircuitBinding {
   releaseListeners(): void {
     this.unsubscribeLatches.forEach((off) => off());
     this.unsubscribeLatches = [];
+    // Switched-net subscriptions go too: this binding is being replaced, and a
+    // listener that outlived it would re-solve a circuit that no longer exists.
+    this.switchedPinListeners.forEach((off) => off());
+    this.switchedPinListeners = [];
   }
 
   /**
@@ -556,6 +636,10 @@ export class CircuitBinding {
   }
 
   private indexNets(): void {
+    // Rails a module *claims* but does not source. Applied only where nothing
+    // real is feeding the net, so a part wired to nothing still shows the
+    // voltage it expects rather than reading as dead.
+    const declaredByModules = new Map<string, number>();
     for (const net of this.graph.nets) {
       for (const node of net.nodes) {
         const [instId, pinId] = splitNode(node);
@@ -589,14 +673,32 @@ export class CircuitBinding {
           }
         }
         if (pin.type === 'ground') this.groundNets.add(net.id);
-        if (pin.type === 'power-5v') this.supplyNets.set(net.id, 5);
-        if (pin.type === 'power-3v3' && !this.supplyNets.has(net.id)) this.supplyNets.set(net.id, 3.3);
+        // What a rail is at is decided by whatever actually sources it.
+        //
+        // A board's 5V or 3V3 pin is a real supply. A module's VCC pin is an
+        // *input* — it is typed as a supply pin so wiring rules can check that
+        // it is fed, but the module does not generate anything. Letting a
+        // module's pin set the rail meant a 5V-labelled part wired to a Pico's
+        // 3V3 made the whole net read 5V, and everything downstream of it —
+        // ADC readings, logic thresholds — was then wrong by a third.
+        const sources = def?.isBoard === true;
+        if (pin.type === 'power-5v') {
+          if (sources) this.supplyNets.set(net.id, 5);
+          else declaredByModules.set(net.id, Math.max(declaredByModules.get(net.id) ?? 0, 5));
+        }
+        if (pin.type === 'power-3v3') {
+          if (sources) this.supplyNets.set(net.id, 3.3);
+          else declaredByModules.set(net.id, Math.max(declaredByModules.get(net.id) ?? 0, 3.3));
+        }
         if (pin.type === 'power-vin' && !this.supplyNets.has(net.id)) {
           const inst = this.graph.instances.find((i) => i.id === instId);
           const v = typeof inst?.properties.voltage === 'number' ? (inst.properties.voltage as number) : 9;
           if (def && !def.isBoard && def.simulationAdapterId === 'sim.supply') this.supplyNets.set(net.id, v);
         }
       }
+    }
+    for (const [netId, volts] of declaredByModules) {
+      if (!this.supplyNets.has(netId)) this.supplyNets.set(netId, volts);
     }
   }
 
@@ -605,6 +707,28 @@ export class CircuitBinding {
       const def = this.graph.definitions.get(inst.id);
       if (!def || def.isBoard) continue;
       const net = (pinId: string) => this.netOfInstancePin(inst.id, pinId);
+
+      // Mechanical contacts first, from one shared description. A button, a
+      // DIP bank and every key on a keypad are the same thing electrically, so
+      // they become switch edges here rather than each getting a case below.
+      // A part with contacts may still add other edges of its own.
+      for (const contact of contactsOf(def.id, inst)) {
+        const [a, b] = [net(contact.a), net(contact.b)];
+        if (!a || !b) continue;
+        this.edges.push({
+          a,
+          b,
+          ohms: contact.ohms ?? 0,
+          kind: 'switch',
+          enabled: (c) => isContactClosed(c.pressedButtons, inst.id, contact),
+        });
+        // Both ends are switched nets: a level driven onto one of them can
+        // reach the other within a single instruction, so they cannot wait for
+        // the next slice boundary to be resolved. See `watchSwitchedNets`.
+        this.switchedNets.add(a);
+        this.switchedNets.add(b);
+      }
+
       switch (def.id) {
         case 'comp.resistor': {
           const [a, b] = [net('p1'), net('p2')];
@@ -617,16 +741,10 @@ export class CircuitBinding {
           if (a && b) this.edges.push({ a, b, ohms: 10_000, kind: 'resistor', enabled: () => true });
           break;
         }
-        case 'comp.push-button': {
-          const [a, b] = [net('1a'), net('2a')];
-          if (a && b)
-            this.edges.push({
-              a, b, ohms: 0, kind: 'switch',
-              enabled: (c) => c.pressedButtons.has(inst.id),
-            });
-          break;
-        }
         case 'comp.toggle-switch': {
+          // Kept on its own control because a toggle is a latched state rather
+          // than a held one: `toggleStates` is what the UI and saved projects
+          // already use for it.
           const [com, no, nc] = [net('com'), net('no'), net('nc')];
           if (com && no)
             this.edges.push({ a: com, b: no, ohms: 0, kind: 'switch', enabled: (c) => c.toggleStates.get(inst.id) === true });
@@ -828,6 +946,54 @@ export class CircuitBinding {
       if (device) return device;
     }
     return undefined;
+  }
+
+  /**
+   * Feeds a joystick's two wipers to the ADC channels they are wired to.
+   *
+   * The axes really are two potentiometers across the module's supply, so this
+   * imposes a wiper voltage the same way the potentiometer part does rather
+   * than handing the firmware an axis number. A stick whose VRx is wired to a
+   * pin with no ADC drives nothing, which is the correct outcome.
+   */
+  private driveJoystickAxes(
+    instanceId: string,
+    controls: SimControls,
+    runner: BoardRunner | null,
+    levelOf: (netId: string | undefined) => NetLevel | undefined,
+  ): void {
+    if (!runner) return;
+    const supply = this.joystickSupply(instanceId, levelOf);
+    // Unpowered: the wipers impose nothing at all, so the pin reads whatever
+    // else is holding it rather than a value the hardware could not produce.
+    if (supply <= 0) return;
+    for (const [pinId, axis] of [['vrx', 'x'], ['vry', 'y']] as const) {
+      const netId = this.netOfInstancePin(instanceId, pinId);
+      const channel = netId ? this.netAdcChannels.get(netId)?.[0] : undefined;
+      if (channel === undefined) continue;
+      // Centred is half scale, which is what a real stick at rest reads.
+      const position = controls.potPositions.get(`${instanceId}#${axis}`) ?? 0.5;
+      runner.setAnalogVolts(channel, supply * position);
+    }
+  }
+
+  /**
+   * The voltage actually reaching a joystick's VCC pin.
+   *
+   * Read from the solved net rather than from the supply index, because a
+   * module's own VCC pin is an input: it is typed as a supply pin so wiring
+   * rules can check it, but what the potentiometers are actually across is
+   * whatever the board put on that wire. A stick on a 3.3V rail must not read
+   * as though it were on 5V.
+   */
+  private joystickSupply(
+    instanceId: string,
+    levelOf: (netId: string | undefined) => NetLevel | undefined,
+  ): number {
+    const vccNet = this.netOfInstancePin(instanceId, 'vcc');
+    const solved = levelOf(vccNet)?.volts;
+    if (solved != null && solved > 0) return solved;
+    return vccNet ? this.supplyNets.get(vccNet) ?? 0 : 0;
   }
 
   /** The definition of one board instance, whichever board it is. */
@@ -1050,6 +1216,26 @@ export class CircuitBinding {
         case 'sim.push-button':
           visuals.set(inst.id, { pressed: controls.pressedButtons.has(inst.id) });
           break;
+        // Multi-contact parts report every contact, because "is it pressed" is
+        // not a single boolean once a part has more than one thing to press.
+        case 'sim.slide-switch':
+        case 'sim.limit-switch':
+        case 'sim.dip-switch':
+        case 'sim.keypad':
+        case 'sim.rotary-encoder':
+        case 'sim.joystick': {
+          const engaged: Record<string, boolean> = {};
+          for (const contact of contactsOf(def.id, inst)) {
+            engaged[contact.key] = controls.pressedButtons.has(contactStateKey(inst.id, contact.key));
+          }
+          const state: ComponentVisualState = { contacts: engaged };
+          if (def.simulationAdapterId === 'sim.joystick') {
+            state.value = controls.potPositions.get(`${inst.id}#x`) ?? 0.5;
+            this.driveJoystickAxes(inst.id, controls, runner, levelOf);
+          }
+          visuals.set(inst.id, state);
+          break;
+        }
         case 'sim.toggle-switch':
           visuals.set(inst.id, { toggledOn: controls.toggleStates.get(inst.id) === true });
           break;
