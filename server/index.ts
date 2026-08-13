@@ -148,7 +148,21 @@ app.get('/api/compiler/capabilities', async (_req, res) => {
 
 // ---- compile endpoints (rate-limited; one build at a time) ----
 
-const compileLimiter = rateLimit({ windowMs: 5 * 60_000, max: 60, name: 'compile' });
+/**
+ * Compile budget per client.
+ *
+ * Sixty builds in five minutes is a generous ceiling for a person and a low
+ * one for a full regression run, which compiles dozens of sketches back to
+ * back from one address. The limit is what ships; the override exists so a
+ * developer running the whole suite locally is not throttled by a rule aimed
+ * at public traffic. Deployments leave it unset.
+ */
+const COMPILE_RATE_MAX = Number(process.env.COMPILE_RATE_MAX ?? 60);
+const compileLimiter = rateLimit({
+  windowMs: 5 * 60_000,
+  max: Number.isFinite(COMPILE_RATE_MAX) && COMPILE_RATE_MAX > 0 ? COMPILE_RATE_MAX : 60,
+  name: 'compile',
+});
 
 /** One compile at a time, with a short queue; see server/compileGate.ts. */
 const compileGate = new CompileGate();
