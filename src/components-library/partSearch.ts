@@ -56,6 +56,22 @@ export const PART_ALIASES: Record<string, string[]> = {
   'comp.ultrasonic': ['distance', 'range', 'proximity', 'sonar', 'hc-sr04', 'hcsr04'],
   'comp.pulse-sensor': ['heart rate', 'heartbeat', 'bpm', 'pulse'],
 
+  // Batch 3 sensors.
+  'comp.bme280': ['temperature', 'humidity', 'pressure', 'weather', 'environmental', 'barometer', 'bosch'],
+  'comp.sht31': ['temperature', 'humidity', 'sensirion', 'rh'],
+  'comp.lm35': ['temperature', 'thermometer', 'analog temperature', 'to-92'],
+  'comp.ntc-thermistor': ['temperature', 'thermistor', 'ntc', 'thermometer'],
+  'comp.pir': ['motion', 'movement', 'presence', 'infrared', 'hc-sr501', 'occupancy'],
+  'comp.tilt-switch': ['tilt', 'orientation', 'ball switch', 'motion'],
+  'comp.vibration-sensor': ['vibration', 'shock', 'knock', 'sw-420', 'tap'],
+  'comp.hall-sensor': ['hall', 'magnet', 'magnetic', 'proximity', 'rpm'],
+  'comp.photodiode': ['light', 'optical', 'photo', 'brightness'],
+  'comp.flex-sensor': ['bend', 'flex', 'glove', 'strain'],
+  'comp.fsr': ['force', 'pressure', 'weight', 'touch', 'fsr'],
+  'comp.soil-moisture': ['soil', 'moisture', 'water', 'plant', 'garden', 'humidity'],
+  'comp.mq2': ['gas', 'smoke', 'lpg', 'methane', 'air quality', 'mq2'],
+  'comp.rain-sensor': ['rain', 'water', 'wet', 'weather', 'leak'],
+
   // Displays.
   'comp.lcd1602': ['lcd', 'character display', '16x2', 'hd44780', 'text display'],
   'comp.oled': ['ssd1306', 'oled', 'graphic display', '128x64', 'screen'],
@@ -147,6 +163,20 @@ export const PART_ALIASES: Record<string, string[]> = {
  * scanning, so anything longer than a glance defeats it.
  */
 export const PART_SUMMARY: Record<string, string> = {
+  'comp.bme280': 'Temperature • Humidity • Pressure · I²C',
+  'comp.sht31': 'Temperature • Humidity · I²C · CRC-checked',
+  'comp.lm35': 'Temperature · analog · 10 mV/°C',
+  'comp.ntc-thermistor': 'Temperature · analog · beta model',
+  'comp.pir': 'Motion · digital · holds after trigger',
+  'comp.tilt-switch': 'Tilt · digital',
+  'comp.vibration-sensor': 'Shock · digital · pulsed',
+  'comp.hall-sensor': 'Magnetic field · digital · active low',
+  'comp.photodiode': 'Illuminance · analog',
+  'comp.flex-sensor': 'Bend · analog',
+  'comp.fsr': 'Force · analog',
+  'comp.soil-moisture': 'Soil water · analog · falls when wet',
+  'comp.mq2': 'Combustible gas • smoke · analog',
+  'comp.rain-sensor': 'Surface wetness · analog',
   'comp.gate-and': 'AND · logic symbol',
   'comp.gate-or': 'OR · logic symbol',
   'comp.gate-not': 'Inverter · logic symbol',

@@ -866,6 +866,7 @@ export const MINI_KEYBOARD = def(
 );
 
 import { ALL_LOGIC_DEFS } from './logicDefinitions';
+import { ALL_SENSOR_DEFS } from './sensorDefinitions';
 
 export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   BREADBOARD_HALF, BREADBOARD_MINI,
@@ -884,6 +885,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   ROTARY_ENCODER, JOYSTICK,
   KEYPAD_3X4, KEYPAD_4X4, KEYPAD_MATRIX, MINI_KEYBOARD,
   ...ALL_LOGIC_DEFS,
+  ...ALL_SENSOR_DEFS,
 ];
 
 export { MM };

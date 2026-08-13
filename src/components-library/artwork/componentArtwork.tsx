@@ -1026,7 +1026,135 @@ function LogicBlockArt({ def }: ArtProps) {
   );
 }
 
+// ---------- Batch 3: sensor modules ----------
+//
+// Baseline hardware art: a recognisable board or package with the part's
+// distinguishing feature on it, plus the live value it is reporting. The full
+// visual pass comes later; these have to be identifiable and usable now.
+
+/** A breakout board with a labelled sensing element and a live readout. */
+function SensorModuleArt({ def, visual, tint, element }: ArtProps & { tint: string; element: JSX.Element }) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const value = visual?.value;
+  const readout = visual?.readout;
+  return (
+    <g>
+      <rect x={0.4 * MM} y={0.4 * MM} width={W - 0.8 * MM} height={H - 2.4 * MM} rx={1.2 * MM} fill={tint} stroke="rgba(0,0,0,0.45)" />
+      <rect x={1.2 * MM} y={1.2 * MM} width={W - 2.4 * MM} height={H - 4 * MM} rx={0.8 * MM} fill="rgba(255,255,255,0.05)" />
+      {element}
+      {readout && (
+        <text x={W / 2} y={H - 4.2 * MM} textAnchor="middle" fontSize={1.9 * MM} fill="#dfe8f2" fontFamily="sans-serif">
+          {readout[0]}
+        </text>
+      )}
+      {readout === undefined && value !== undefined && (
+        <text x={W / 2} y={H - 4.2 * MM} textAnchor="middle" fontSize={1.9 * MM} fill="#dfe8f2" fontFamily="sans-serif">
+          {typeof value === 'number' ? (Number.isInteger(value) ? value : value.toFixed(1)) : String(value)}
+        </text>
+      )}
+      {def.pins.map((p) => (
+        <line key={p.id} x1={p.x} y1={H - 2.4 * MM} x2={p.x} y2={H} stroke="#9aa4ad" strokeWidth="2" />
+      ))}
+    </g>
+  );
+}
+
+const sensorArt = (tint: string, element: (W: number, H: number) => JSX.Element) => (p: ArtProps) =>
+  <SensorModuleArt {...p} tint={tint} element={element(p.def.widthMm * MM, p.def.heightMm * MM)} />;
+
 const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
+  // A TO-92 package: the flat-faced black blob every analog sensor comes in.
+  'to92-sensor': sensorArt('#1d232a', (W, H) => (
+    <g>
+      <path d={`M ${W * 0.2} ${H * 0.55} A ${W * 0.3} ${H * 0.3} 0 1 1 ${W * 0.8} ${H * 0.55} Z`} fill="#15191e" />
+      <rect x={W * 0.2} y={H * 0.5} width={W * 0.6} height={H * 0.12} fill="#0f1216" />
+    </g>
+  )),
+  thermistor: sensorArt('#1d232a', (W, H) => (
+    <g>
+      <ellipse cx={W / 2} cy={H * 0.4} rx={W * 0.28} ry={H * 0.24} fill="#2b1e14" stroke="#54402c" />
+      <text x={W / 2} y={H * 0.46} textAnchor="middle" fontSize={H * 0.16} fill="#c9a06a" fontFamily="sans-serif">t°</text>
+    </g>
+  )),
+  'flex-sensor': sensorArt('#2a2118', (W, H) => (
+    <g>
+      <rect x={W * 0.25} y={H * 0.1} width={W * 0.5} height={H * 0.62} rx={W * 0.1} fill="#3d3120" stroke="#5c4a2e" />
+      <path d={`M ${W * 0.35} ${H * 0.16} L ${W * 0.35} ${H * 0.66} M ${W * 0.65} ${H * 0.16} L ${W * 0.65} ${H * 0.66}`} stroke="#8a6f3f" strokeWidth="1.2" />
+    </g>
+  )),
+  fsr: sensorArt('#1b1f24', (W, H) => (
+    <g>
+      <circle cx={W / 2} cy={H * 0.38} r={Math.min(W, H) * 0.26} fill="#2a3038" stroke="#4b555f" strokeWidth="1.2" />
+      <circle cx={W / 2} cy={H * 0.38} r={Math.min(W, H) * 0.14} fill="#39424c" />
+    </g>
+  )),
+  'soil-moisture': sensorArt('#123020', (W, H) => (
+    <g>
+      <rect x={W * 0.3} y={H * 0.1} width={W * 0.16} height={H * 0.68} fill="#c9a227" />
+      <rect x={W * 0.56} y={H * 0.1} width={W * 0.16} height={H * 0.68} fill="#c9a227" />
+    </g>
+  )),
+  'gas-sensor': sensorArt('#1a2029', (W, H) => (
+    <g>
+      <circle cx={W / 2} cy={H * 0.38} r={Math.min(W, H) * 0.3} fill="#5a5f66" stroke="#3a3f46" strokeWidth="1.4" />
+      {[0, 1, 2, 3, 4].map((i) => (
+        <line key={i} x1={W * 0.28} y1={H * (0.26 + i * 0.06)} x2={W * 0.72} y2={H * (0.26 + i * 0.06)} stroke="#3a3f46" strokeWidth="1" />
+      ))}
+    </g>
+  )),
+  'rain-sensor': sensorArt('#14212e', (W, H) => (
+    <g>
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <rect key={i} x={W * 0.16} y={H * (0.12 + i * 0.09)} width={W * 0.68} height={H * 0.04} fill="#b08d3a" />
+      ))}
+    </g>
+  )),
+  photodiode: sensorArt('#1d232a', (W, H) => (
+    <g>
+      <circle cx={W / 2} cy={H * 0.36} r={Math.min(W, H) * 0.3} fill="#2b3a4a" stroke="#4a6076" />
+      <circle cx={W * 0.42} cy={H * 0.28} r={Math.min(W, H) * 0.09} fill="rgba(255,255,255,0.35)" />
+    </g>
+  )),
+  pir: sensorArt('#20303f', (W, H) => (
+    <g>
+      <circle cx={W / 2} cy={H * 0.36} r={Math.min(W, H) * 0.32} fill="#e8ebee" stroke="#9aa4ad" strokeWidth="1.2" />
+      {[0.2, 0.36, 0.52].map((r, i) => (
+        <circle key={i} cx={W / 2} cy={H * 0.36} r={Math.min(W, H) * 0.32 * r * 1.6} fill="none" stroke="#b8c0c8" strokeWidth="0.8" />
+      ))}
+    </g>
+  )),
+  'tilt-switch': sensorArt('#1d232a', (W, H) => (
+    <g>
+      <rect x={W * 0.3} y={H * 0.14} width={W * 0.4} height={H * 0.5} rx={W * 0.18} fill="#3a434d" stroke="#20262d" />
+      <circle cx={W / 2} cy={H * 0.5} r={W * 0.13} fill="#c9ccd1" />
+    </g>
+  )),
+  vibration: sensorArt('#20303f', (W, H) => (
+    <g>
+      <rect x={W * 0.22} y={H * 0.2} width={W * 0.56} height={H * 0.34} rx={W * 0.08} fill="#2a3038" stroke="#4b555f" />
+      <path d={`M ${W * 0.28} ${H * 0.37} l ${W * 0.1} ${-H * 0.1} l ${W * 0.12} ${H * 0.2} l ${W * 0.12} ${-H * 0.16} l ${W * 0.1} ${H * 0.06}`} fill="none" stroke="#7fb2e8" strokeWidth="1.3" />
+    </g>
+  )),
+  hall: sensorArt('#1d232a', (W, H) => (
+    <g>
+      <path d={`M ${W * 0.24} ${H * 0.52} A ${W * 0.26} ${H * 0.26} 0 1 1 ${W * 0.76} ${H * 0.52} Z`} fill="#15191e" />
+      <text x={W / 2} y={H * 0.44} textAnchor="middle" fontSize={H * 0.16} fill="#8fd6a0" fontFamily="sans-serif">H</text>
+    </g>
+  )),
+  bme280: sensorArt('#2b3b52', (W, H) => (
+    <g>
+      <rect x={W * 0.36} y={H * 0.2} width={W * 0.28} height={H * 0.34} rx={W * 0.04} fill="#c3c9cf" stroke="#8b9199" />
+      <circle cx={W * 0.5} cy={H * 0.37} r={W * 0.05} fill="#4a5560" />
+    </g>
+  )),
+  sht31: sensorArt('#2b3b52', (W, H) => (
+    <g>
+      <rect x={W * 0.38} y={H * 0.22} width={W * 0.24} height={H * 0.3} rx={W * 0.03} fill="#d5d9dd" stroke="#8b9199" />
+      <line x1={W * 0.42} y1={H * 0.3} x2={W * 0.58} y2={H * 0.3} stroke="#7c858e" strokeWidth="0.9" />
+      <line x1={W * 0.42} y1={H * 0.4} x2={W * 0.58} y2={H * 0.4} stroke="#7c858e" strokeWidth="0.9" />
+    </g>
+  )),
   'dip-ic': (p) => <DipIcArt {...p} />,
   'logic-block': (p) => <LogicBlockArt {...p} />,
   'gate-and': (p) => <GateArt {...p} shape="and" />,
