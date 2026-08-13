@@ -73,6 +73,8 @@ export const PART_ALIASES: Record<string, string[]> = {
   'comp.rain-sensor': ['rain', 'water', 'wet', 'weather', 'leak'],
 
   // Displays.
+  'comp.lcd2004': ['lcd', 'character display', '20x4', 'hd44780', 'text display', '4 line'],
+  'comp.max7219': ['matrix', 'led matrix', '8x8', 'max7219', 'dot matrix', 'display', 'scrolling text'],
   'comp.lcd1602': ['lcd', 'character display', '16x2', 'hd44780', 'text display'],
   'comp.oled': ['ssd1306', 'oled', 'graphic display', '128x64', 'screen'],
   'comp.seven-segment': ['7 segment', 'seven segment', 'digit', 'numeric display'],
@@ -163,6 +165,8 @@ export const PART_ALIASES: Record<string, string[]> = {
  * scanning, so anything longer than a glance defeats it.
  */
 export const PART_SUMMARY: Record<string, string> = {
+  'comp.lcd2004': 'Character display 20×4 · I²C',
+  'comp.max7219': 'LED matrix 8×8 · SPI · chainable',
   'comp.bme280': 'Temperature • Humidity • Pressure · I²C',
   'comp.sht31': 'Temperature • Humidity · I²C · CRC-checked',
   'comp.lm35': 'Temperature · analog · 10 mV/°C',

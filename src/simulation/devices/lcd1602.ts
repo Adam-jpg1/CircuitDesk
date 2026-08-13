@@ -32,7 +32,15 @@ const BIT_EN = 0x04;
 const BIT_BACKLIGHT = 0x08;
 
 /** DDRAM address where each display line starts (HD44780 datasheet). */
-const ROW_BASE = [0x00, 0x40];
+/**
+ * DDRAM address of each row.
+ *
+ * An HD44780 has two row buffers whatever the panel is; a four-line module
+ * gets its third and fourth rows by continuing rows one and two at +20, which
+ * is why text written past column 20 on a 2004 appears on line three.
+ */
+const ROW_BASE_2 = [0x00, 0x40];
+const ROW_BASE_4 = [0x00, 0x40, 0x14, 0x54];
 const DDRAM_SIZE = 0x80;
 
 export class Lcd1602Device implements I2cDevice {
@@ -59,7 +67,19 @@ export class Lcd1602Device implements I2cDevice {
   private unknownCommands: number[] = [];
   private log: string[] = [];
 
-  constructor(instanceId: string, address: number = LCD1602_ADDRESSES[0]) {
+  /** Panel geometry. A 1602 and a 2004 are the same controller, different glass. */
+  readonly columns: number;
+  readonly rows: number;
+  private readonly rowBase: number[];
+
+  constructor(
+    instanceId: string,
+    address: number = LCD1602_ADDRESSES[0],
+    geometry: { columns?: number; rows?: number } = {},
+  ) {
+    this.columns = geometry.columns ?? LCD_COLUMNS;
+    this.rows = geometry.rows ?? LCD_ROWS;
+    this.rowBase = this.rows > 2 ? ROW_BASE_4 : ROW_BASE_2;
     this.instanceId = instanceId;
     this.address = address;
   }
@@ -188,17 +208,17 @@ export class Lcd1602Device implements I2cDevice {
 
   /** The 16 characters visible on one row, as the panel would show them. */
   row(index: number): string {
-    if (index < 0 || index >= LCD_ROWS) return '';
-    if (!this.displayOn) return ' '.repeat(LCD_COLUMNS);
-    const base = ROW_BASE[index];
+    if (index < 0 || index >= this.rows) return '';
+    if (!this.displayOn) return ' '.repeat(this.columns);
+    const base = this.rowBase[index];
     let out = '';
-    for (let i = 0; i < LCD_COLUMNS; i++) out += String.fromCharCode(this.ddram[base + i]);
+    for (let i = 0; i < this.columns; i++) out += String.fromCharCode(this.ddram[(base + i) % DDRAM_SIZE]);
     return out;
   }
 
-  /** Both rows, for tests and the canvas. */
+  /** Every row, for tests and the canvas. */
   get lines(): string[] {
-    return [this.row(0), this.row(1)];
+    return Array.from({ length: this.rows }, (_, i) => this.row(i));
   }
 
   private note(text: string): void {
@@ -226,7 +246,7 @@ export class Lcd1602Device implements I2cDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `LCD 16x2 @0x${this.address.toString(16)} — ${this.displayOn ? 'on' : 'off'}` +
+        `LCD ${this.columns}x${this.rows} @0x${this.address.toString(16)} — ${this.displayOn ? 'on' : 'off'}` +
         `${this.backlight ? ', backlit' : ''}${this.fourBitMode ? '' : ', not initialised'}` +
         (this.cursorOn ? ', cursor' : '') +
         (this.blinkOn ? ', blink' : ''),

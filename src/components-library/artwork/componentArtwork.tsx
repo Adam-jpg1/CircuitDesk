@@ -1026,6 +1026,89 @@ function LogicBlockArt({ def }: ArtProps) {
   );
 }
 
+// ---------- Batch 4: displays ----------
+
+/**
+ * A character LCD of any geometry.
+ *
+ * The glass, the bezel and a character cell per column — the text comes from
+ * the controller's DDRAM, so what is drawn is what firmware wrote.
+ */
+function CharacterLcdArt({ def, visual, columns, rows }: ArtProps & { columns: number; rows: number }) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const lines = visual?.readout ?? [];
+  const glassX = 5 * MM;
+  const glassY = 6 * MM;
+  const glassW = W - 10 * MM;
+  const glassH = H - 18 * MM;
+  const cellW = glassW / columns;
+  const cellH = glassH / rows;
+  const lit = lines.length > 0 && !/not initialised/.test(lines[0] ?? '');
+  return (
+    <g>
+      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={H - 3 * MM} rx={1.5 * MM} fill="#14532d" stroke="#0b3319" />
+      <rect x={glassX - 1.4 * MM} y={glassY - 1.4 * MM} width={glassW + 2.8 * MM} height={glassH + 2.8 * MM} rx={0.8 * MM} fill="#0d1a10" />
+      <rect x={glassX} y={glassY} width={glassW} height={glassH} fill={lit ? '#2f7d4f' : '#1c3d29'} />
+      {lines.slice(0, rows).map((line, r) =>
+        [...line.padEnd(columns, ' ')].slice(0, columns).map((ch, c) =>
+          ch === ' ' ? null : (
+            <text
+              key={`${r}-${c}`}
+              x={glassX + (c + 0.5) * cellW}
+              y={glassY + (r + 0.72) * cellH}
+              textAnchor="middle"
+              fontSize={cellH * 0.72}
+              fill="#d9f5e2"
+              fontFamily="monospace"
+            >
+              {ch}
+            </text>
+          ),
+        ),
+      )}
+      {def.pins.map((p) => (
+        <line key={p.id} x1={p.x} y1={H - 3 * MM} x2={p.x} y2={H} stroke="#9aa4ad" strokeWidth="2" />
+      ))}
+    </g>
+  );
+}
+
+/** An 8×8 LED matrix panel, lit from the driver's own row registers. */
+function LedMatrixArt({ def, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const pixels = visual?.display?.pixels ?? null;
+  const on = visual?.display?.on ?? false;
+  const pad = 3 * MM;
+  const size = Math.min(W, H - 4 * MM) - pad * 2;
+  const cell = size / 8;
+  return (
+    <g>
+      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={H - 3 * MM} rx={1 * MM} fill="#1a1e23" stroke="#0d1117" />
+      <rect x={pad - 0.6 * MM} y={pad - 0.6 * MM} width={size + 1.2 * MM} height={size + 1.2 * MM} fill="#0f1216" />
+      {Array.from({ length: 8 }, (_, row) =>
+        Array.from({ length: 8 }, (_, col) => {
+          const litPixel = on && pixels ? ((pixels[row] >> (7 - col)) & 1) === 1 : false;
+          return (
+            <circle
+              key={`${row}-${col}`}
+              cx={pad + (col + 0.5) * cell}
+              cy={pad + (row + 0.5) * cell}
+              r={cell * 0.34}
+              fill={litPixel ? '#ff4d3d' : '#2a1a18'}
+              opacity={litPixel ? 1 : 0.9}
+            />
+          );
+        }),
+      )}
+      {def.pins.map((p) => (
+        <line key={p.id} x1={p.x} y1={H - 3 * MM} x2={p.x} y2={H} stroke="#9aa4ad" strokeWidth="2" />
+      ))}
+    </g>
+  );
+}
+
 // ---------- Batch 3: sensor modules ----------
 //
 // Baseline hardware art: a recognisable board or package with the part's
@@ -1155,6 +1238,8 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
       <line x1={W * 0.42} y1={H * 0.4} x2={W * 0.58} y2={H * 0.4} stroke="#7c858e" strokeWidth="0.9" />
     </g>
   )),
+  lcd2004: (p) => <CharacterLcdArt {...p} columns={20} rows={4} />,
+  max7219: (p) => <LedMatrixArt {...p} />,
   'dip-ic': (p) => <DipIcArt {...p} />,
   'logic-block': (p) => <LogicBlockArt {...p} />,
   'gate-and': (p) => <GateArt {...p} shape="and" />,

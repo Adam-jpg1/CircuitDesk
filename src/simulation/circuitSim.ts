@@ -38,6 +38,7 @@ import { Ds3231Device, DS3231_ADDRESS } from './devices/ds3231';
 import { Mcp4725Device, MCP4725_ADDRESSES } from './devices/mcp4725';
 import { Sn74hc165Device, HC165_INPUT_PINS } from './devices/sn74hc165';
 import { Bme280Device, BME280_ADDRESSES } from './devices/bme280';
+import { Max7219Device } from './devices/max7219';
 import { Sht31Device, SHT31_ADDRESSES } from './devices/sht31';
 import { ANALOG_SENSORS, GPIO_SENSORS } from './devices/analogSensors';
 import { contactsOf } from './devices/contactRegistry';
@@ -164,6 +165,10 @@ const I2C_DEVICE_MODELS: Record<string, I2cDeviceModel> = {
     defaultAddress: MCP4725_ADDRESSES[0],
     create: (ctx) => new Mcp4725Device(ctx.instanceId, ctx.address, ctx.logicVolts),
   },
+  'comp.lcd2004': {
+    defaultAddress: LCD1602_ADDRESSES[0],
+    create: (ctx) => new Lcd1602Device(ctx.instanceId, ctx.address, { columns: 20, rows: 4 }),
+  },
   'comp.bme280': {
     defaultAddress: BME280_ADDRESSES[0],
     create: (ctx) => new Bme280Device(ctx.instanceId, ctx.address),
@@ -208,6 +213,12 @@ const SPI_DEVICE_MODELS: Record<string, SpiDeviceModel> = {
     // Parallel-in / serial-out: it drives MISO and reads nothing from MOSI.
     busPins: { sck: 'cp', mosi: null as unknown as string, miso: 'qh', cs: null },
     create: (ctx) => new Sn74hc165Device(ctx.instanceId),
+  },
+  'comp.max7219': {
+    // DIN is the data line; the part never drives MISO on its own — DOUT is
+    // the chain output, which the next device's DIN listens to.
+    busPins: { sck: 'clk', mosi: 'din', miso: null, cs: 'cs' },
+    create: (ctx) => new Max7219Device(ctx.instanceId, ctx.csPinId),
   },
   'comp.spi-flash': {
     busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'cs' },
@@ -1549,6 +1560,27 @@ export class CircuitBinding {
             const asserted = spec.activeLow ? !held : held;
             setLevel(outNet, asserted ? supply : 0, null, 0);
             drivenNets.add(outNet);
+          }
+          break;
+        }
+        case 'sim.lcd2004': {
+          const device = this.i2cDeviceFor(inst.id);
+          if (device instanceof Lcd1602Device) {
+            visuals.set(inst.id, { readout: device.isFourBitMode ? device.lines : ['not initialised', '', '', ''] });
+          } else {
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.max7219': {
+          const device = this.spiDeviceFor(inst.id);
+          if (device instanceof Max7219Device) {
+            visuals.set(inst.id, {
+              display: { pixels: device.pixels, on: device.isAwake, revision: device.writeCounter },
+              value: device.litCount,
+            });
+          } else {
+            visuals.set(inst.id, { display: { pixels: null, on: false, revision: 0 } });
           }
           break;
         }
