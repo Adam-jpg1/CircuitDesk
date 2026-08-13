@@ -121,6 +121,11 @@ export const PART_ALIASES: Record<string, string[]> = {
   'comp.cd4511': ['bcd', 'seven segment', '7 segment', 'decoder', 'driver', '4511'],
   'comp.74hc164': ['shift register', 'serial to parallel', '164'],
 
+  // Port expanders.
+  'comp.pcf8574': ['expander', 'port expander', 'gpio expander', 'more pins', 'i2c gpio', '8574'],
+  'comp.pcf8575': ['expander', 'port expander', 'gpio expander', 'more pins', 'i2c gpio', '8575', '16 bit'],
+  'comp.mcp23017': ['expander', 'port expander', 'gpio expander', 'more pins', 'i2c gpio', '23017', 'interrupt'],
+
   // Logic and ICs.
   'comp.hc595': ['shift register', '595', 'serial to parallel', 'expand outputs'],
   'comp.hc165': ['shift register', '165', 'parallel to serial', 'expand inputs'],
@@ -165,6 +170,9 @@ export const PART_ALIASES: Record<string, string[]> = {
  * scanning, so anything longer than a glance defeats it.
  */
 export const PART_SUMMARY: Record<string, string> = {
+  'comp.pcf8574': '8 GPIOs · I²C · quasi-bidirectional',
+  'comp.pcf8575': '16 GPIOs · I²C · quasi-bidirectional',
+  'comp.mcp23017': '16 GPIOs · I²C · direction + interrupts',
   'comp.lcd2004': 'Character display 20×4 · I²C',
   'comp.max7219': 'LED matrix 8×8 · SPI · chainable',
   'comp.bme280': 'Temperature • Humidity • Pressure · I²C',
