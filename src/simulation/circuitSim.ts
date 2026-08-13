@@ -37,6 +37,9 @@ import { Eeprom24cDevice, EEPROM_ADDRESSES, type Eeprom24cSnapshotData } from '.
 import { Ds3231Device, DS3231_ADDRESS } from './devices/ds3231';
 import { Mcp4725Device, MCP4725_ADDRESSES } from './devices/mcp4725';
 import { Sn74hc165Device, HC165_INPUT_PINS } from './devices/sn74hc165';
+import { Bme280Device, BME280_ADDRESSES } from './devices/bme280';
+import { Sht31Device, SHT31_ADDRESSES } from './devices/sht31';
+import { ANALOG_SENSORS, GPIO_SENSORS } from './devices/analogSensors';
 import { contactsOf } from './devices/contactRegistry';
 import { LOGIC_PARTS } from './devices/logicParts';
 import { LogicIcDevice, levelOf as levelOfVolts, type Logic } from './devices/logicIc';
@@ -160,6 +163,14 @@ const I2C_DEVICE_MODELS: Record<string, I2cDeviceModel> = {
   'comp.mcp4725': {
     defaultAddress: MCP4725_ADDRESSES[0],
     create: (ctx) => new Mcp4725Device(ctx.instanceId, ctx.address, ctx.logicVolts),
+  },
+  'comp.bme280': {
+    defaultAddress: BME280_ADDRESSES[0],
+    create: (ctx) => new Bme280Device(ctx.instanceId, ctx.address),
+  },
+  'comp.sht31': {
+    defaultAddress: SHT31_ADDRESSES[0],
+    create: (ctx) => new Sht31Device(ctx.instanceId, ctx.address),
   },
 };
 
@@ -1156,6 +1167,42 @@ export class CircuitBinding {
     }
   }
 
+  /**
+   * The voltage actually reaching a module's VCC pin, or zero if nothing is.
+   *
+   * A module's own VCC pin is an input. It is typed as a power pin so wiring
+   * rules can check that it is fed, but the module does not power itself — so
+   * a sensor dropped on the canvas with nothing connected imposes nothing,
+   * which is what a real one on a bench does.
+   */
+  private moduleSupply(instanceId: string, levels: Map<string, NetLevel>): number {
+    const vccNet = this.netOfInstancePin(instanceId, 'vcc');
+    if (!vccNet) return 0;
+    if (!this.netFedByOther(vccNet, instanceId, POWER_PIN_TYPES)) return 0;
+    return levels.get(vccNet)?.volts ?? this.supplyNets.get(vccNet) ?? 0;
+  }
+
+  /** When each holding sensor last saw its trigger, in world milliseconds. */
+  private gpioSensorTriggeredAt = new Map<string, number>();
+
+  /**
+   * Whether a digital sensor's output is asserted right now.
+   *
+   * A PIR does not follow the motion — it latches high and holds for its
+   * retrigger period, which is why firmware written for one has to debounce
+   * differently from a button. Sensors with no hold follow directly.
+   */
+  private gpioSensorHold(instanceId: string, raw: boolean, holdMs: number, controls: SimControls): boolean {
+    if (holdMs <= 0) return raw;
+    const now = this.runner?.timeMs ?? 0;
+    if (raw) {
+      this.gpioSensorTriggeredAt.set(instanceId, now);
+      return true;
+    }
+    const since = this.gpioSensorTriggeredAt.get(instanceId);
+    return since !== undefined && now - since < holdMs;
+  }
+
   /** The definition of one board instance, whichever board it is. */
   private boardDefinitionOf(instanceId: string): BoardDefinition | null {
     const def = this.graph.definitions.get(instanceId);
@@ -1467,6 +1514,70 @@ export class CircuitBinding {
             const outNet = net('vout');
             const channel = outNet ? this.netAdcChannels.get(outNet)?.[0] : undefined;
             if (channel !== undefined) runner.setAnalogVolts(channel, 0.5 + temp * 0.01);
+          }
+          break;
+        }
+        // Analog sensors: impose the voltage a real part would produce, on
+        // whatever ADC channel the output pin actually reaches. Unwired or
+        // unpowered, they impose nothing at all.
+        case 'sim.analog-sensor': {
+          const spec = ANALOG_SENSORS[def.id];
+          if (!spec) break;
+          const value = controls.sensorValues.get(inst.id) ?? Number(inst.properties[spec.quantity.key] ?? spec.quantity.default);
+          visuals.set(inst.id, { value });
+          const supply = this.moduleSupply(inst.id, levels);
+          if (runner && supply > 0) {
+            const outNet = net(spec.outputPin);
+            const channel = outNet ? this.netAdcChannels.get(outNet)?.[0] : undefined;
+            if (channel !== undefined) {
+              runner.setAnalogVolts(channel, Math.min(supply, Math.max(0, spec.volts(value, supply))));
+            }
+          }
+          break;
+        }
+        // Digital sensors: drive their one output line onto the net. A PIR
+        // holds after triggering; a tilt switch follows directly.
+        case 'sim.gpio-sensor': {
+          const spec = GPIO_SENSORS[def.id];
+          if (!spec) break;
+          const raw = (controls.sensorValues.get(inst.id) ?? 0) > 0.5 || inst.properties.triggered === true;
+          const held = this.gpioSensorHold(inst.id, raw, spec.holdMs, controls);
+          visuals.set(inst.id, { value: held ? 1 : 0, ledOn: held });
+          const supply = this.moduleSupply(inst.id, levels);
+          const outNet = net(spec.outputPin);
+          if (outNet && supply > 0) {
+            const asserted = spec.activeLow ? !held : held;
+            setLevel(outNet, asserted ? supply : 0, null, 0);
+            drivenNets.add(outNet);
+          }
+          break;
+        }
+        case 'sim.bme280': {
+          const device = this.i2cDeviceFor(inst.id);
+          if (device instanceof Bme280Device) {
+            device.temperatureC = controls.sensorValues.get(`${inst.id}#temperature`) ?? Number(inst.properties.temperature ?? 22);
+            device.pressureHpa = controls.sensorValues.get(`${inst.id}#pressure`) ?? Number(inst.properties.pressure ?? 1013);
+            device.humidityPct = controls.sensorValues.get(`${inst.id}#humidity`) ?? Number(inst.properties.humidity ?? 45);
+            visuals.set(inst.id, {
+              readout: device.isMeasuring
+                ? [`${device.temperatureC.toFixed(1)} C  ${device.humidityPct.toFixed(0)}%`, `${device.pressureHpa.toFixed(0)} hPa`]
+                : ['sleep'],
+            });
+          } else {
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.sht31': {
+          const device = this.i2cDeviceFor(inst.id);
+          if (device instanceof Sht31Device) {
+            device.temperatureC = controls.sensorValues.get(`${inst.id}#temperature`) ?? Number(inst.properties.temperature ?? 22);
+            device.humidityPct = controls.sensorValues.get(`${inst.id}#humidity`) ?? Number(inst.properties.humidity ?? 45);
+            visuals.set(inst.id, {
+              readout: [`${device.temperatureC.toFixed(1)} C`, `${device.humidityPct.toFixed(0)} %RH`],
+            });
+          } else {
+            visuals.set(inst.id, {});
           }
           break;
         }
