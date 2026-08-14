@@ -551,6 +551,107 @@ export const SH1107_OLED = def(
   },
 );
 
+/**
+ * A multiplexed seven-segment module.
+ *
+ * Segment lines are shared across every digit and each digit's common is
+ * enabled in turn — which is why these have twelve pins rather than twenty-eight
+ * and why firmware has to scan them. Nothing here sets a number: the digits
+ * come from which segment lines are asserted while which common is enabled,
+ * averaged over the last few milliseconds the way an eye averages them.
+ */
+function multiDigitSevenSegment(
+  id: string,
+  name: string,
+  digits: number,
+  widthMm: number,
+): ComponentDefinition {
+  const segs = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp'];
+  const pins: PinDefinition[] = [];
+  const pitch = 2.54;
+  const total = segs.length + digits;
+  const originX = (widthMm - (total - 1) * pitch) / 2;
+  segs.forEach((seg, i) => {
+    pins.push(pin(seg, seg.toUpperCase(), originX + i * pitch, 21.4, { type: 'anode', caps: ['digital-in'] }));
+  });
+  for (let d = 0; d < digits; d++) {
+    pins.push(
+      pin(`d${d + 1}`, `D${d + 1}`, originX + (segs.length + d) * pitch, 21.4, {
+        type: 'cathode',
+        caps: ['digital-in'],
+      }),
+    );
+  }
+  return def(
+    id, name, 'Displays', widthMm, 22, 'seven-segment-multi', pins, 'simulated',
+    {
+      simulationAdapterId: 'sim.multiplexed',
+      validationRules: ['led-needs-resistor'],
+      description:
+        `${digits}-digit common-cathode display. The segment lines are shared and each digit's common is ` +
+        `enabled separately, so firmware must scan it — drive one common low, set the segments, move on. ` +
+        `There is no value property: what is shown is derived from which segment lines are asserted while ` +
+        `which common is low. Because only one digit is electrically lit at a time, the canvas shows the ` +
+        `brightness an eye would average over the last few milliseconds; a digit that is never scanned stays ` +
+        `dark, and a scan that stops fades out. Segment current and per-digit brightness matching are not modelled.`,
+    },
+  );
+}
+
+export const SEVEN_SEGMENT_2 = multiDigitSevenSegment('comp.seven-segment-2', '7-Segment Display (2 digit)', 2, 30);
+export const SEVEN_SEGMENT_4 = multiDigitSevenSegment('comp.seven-segment-4', '7-Segment Display (4 digit)', 4, 40);
+
+/** Common-anode single digit — the same glass, the opposite polarity. */
+export const SEVEN_SEGMENT_CA = def(
+  'comp.seven-segment-ca', '7-Segment Display (CA)', 'Displays', 14, 20, 'seven-segment',
+  [
+    pin('a', 'A', 2.0, 0.6, { type: 'cathode' }), pin('b', 'B', 6.0, 0.6, { type: 'cathode' }),
+    pin('c', 'C', 10.0, 0.6, { type: 'cathode' }), pin('com1', 'COM', 12.5, 0.6, { type: 'anode' }),
+    pin('d', 'D', 2.0, 19.4, { type: 'cathode' }), pin('e', 'E', 6.0, 19.4, { type: 'cathode' }),
+    pin('f', 'F', 10.0, 19.4, { type: 'cathode' }), pin('g', 'G', 12.5, 19.4, { type: 'cathode' }),
+    pin('dp', 'DP', 14 - 1.5, 10, { type: 'cathode' }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.multiplexed',
+    validationRules: ['led-needs-resistor'],
+    description:
+      'Common-anode 7-segment digit: the common goes to the supply and a segment lights when its pin is pulled ' +
+      'LOW. That is the opposite of the common-cathode part, and wiring one as the other is the most common ' +
+      'reason a digit stays dark — which it does here too.',
+  },
+);
+
+/**
+ * A bare 8x8 matrix: sixteen pins, no driver chip.
+ *
+ * The MAX7219 module does the scanning for you. This one does not, which is the
+ * point — it is how a matrix is taught, and the firmware has to hold the whole
+ * frame and paint it row by row fast enough to look continuous.
+ */
+export const LED_MATRIX_8X8 = def(
+  'comp.led-matrix', 'LED Matrix 8×8 (bare)', 'Displays', 32, 32, 'led-matrix',
+  [
+    ...Array.from({ length: 8 }, (_, i) =>
+      pin(`r${i + 1}`, `R${i + 1}`, 2.5 + i * 3.8, 31.4, { type: 'cathode', caps: ['digital-in'] }),
+    ),
+    ...Array.from({ length: 8 }, (_, i) =>
+      pin(`c${i + 1}`, `C${i + 1}`, 2.5 + i * 3.8, 0.6, { type: 'anode', caps: ['digital-in'] }),
+    ),
+  ],
+  'simulated',
+  {
+    validationRules: ['led-needs-resistor'],
+    simulationAdapterId: 'sim.multiplexed',
+    description:
+      'An 8x8 matrix with no driver behind it: eight row cathodes and eight column anodes, and an LED at every ' +
+      'crossing. A pixel lights when its column is driven high and its row is pulled low, so a whole frame needs ' +
+      'firmware to scan the rows fast enough that the eye joins them up — which is exactly what the canvas ' +
+      'shows, averaged over the last few milliseconds. Stop scanning and it fades. Per-LED current and the ' +
+      'brightness drop from lighting many LEDs in one row are not modelled.',
+  },
+);
+
 export const SEVEN_SEGMENT = def(
   'comp.seven-segment', '7-Segment Display (CC)', 'Displays', 14, 20, 'seven-segment',
   [
@@ -1092,6 +1193,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   BUZZER, SPEAKER, RELAY,
   SERVO, DC_MOTOR, STEPPER, MOTOR_DRIVER,
   LCD1602, LCD1602_PARALLEL, LCD2004_PARALLEL, OLED, SH1107_OLED, SEVEN_SEGMENT,
+  SEVEN_SEGMENT_CA, SEVEN_SEGMENT_2, SEVEN_SEGMENT_4, LED_MATRIX_8X8,
   NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331,
   NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,

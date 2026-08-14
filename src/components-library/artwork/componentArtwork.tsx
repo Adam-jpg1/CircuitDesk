@@ -694,6 +694,123 @@ function Nokia5110Art(props: ArtProps) {
   return <MonoPanelArt {...props} cols={84} rows={48} idleLabel="5110" />;
 }
 
+/** Segment polygons for one digit, in a box of the given size. */
+function segmentShapes(x: number, y: number, w: number, h: number): Record<string, string> {
+  const t = Math.min(w, h) * 0.13; // segment thickness
+  const midY = y + h / 2;
+  const bar = (cx: number, cy: number, len: number, horizontal: boolean) =>
+    horizontal
+      ? `${cx - len / 2 + t / 2},${cy - t / 2} ${cx + len / 2 - t / 2},${cy - t / 2} ${cx + len / 2},${cy} ${cx + len / 2 - t / 2},${cy + t / 2} ${cx - len / 2 + t / 2},${cy + t / 2} ${cx - len / 2},${cy}`
+      : `${cx - t / 2},${cy - len / 2 + t / 2} ${cx},${cy - len / 2} ${cx + t / 2},${cy - len / 2 + t / 2} ${cx + t / 2},${cy + len / 2 - t / 2} ${cx},${cy + len / 2} ${cx - t / 2},${cy + len / 2 - t / 2}`;
+  const vLen = h / 2 - t;
+  return {
+    a: bar(x + w / 2, y + t / 2, w, true),
+    b: bar(x + w - t / 2, y + h / 4 + t / 4, vLen, false),
+    c: bar(x + w - t / 2, y + (3 * h) / 4 - t / 4, vLen, false),
+    d: bar(x + w / 2, y + h - t / 2, w, true),
+    e: bar(x + t / 2, y + (3 * h) / 4 - t / 4, vLen, false),
+    f: bar(x + t / 2, y + h / 4 + t / 4, vLen, false),
+    g: bar(x + w / 2, midY, w, true),
+  };
+}
+
+/**
+ * A multiplexed seven-segment module, drawn from perceived brightness.
+ *
+ * Each segment's opacity is the level the persistence model reports, so a
+ * properly scanned four-digit display shows four digits at roughly a quarter
+ * brightness each — which is what the hardware looks like — and a digit that is
+ * never enabled stays black.
+ */
+function SevenSegMultiArt({ def, visual }: ArtProps) {
+  const w = def.widthMm * MM;
+  const h = def.heightMm * MM;
+  const digits = def.pins.filter((p) => /^d\d+$/.test(p.id)).length;
+  const brightness = visual?.elementBrightness ?? {};
+
+  const pad = w * 0.05;
+  const cellW = (w - pad * 2) / digits;
+  const digitW = cellW * 0.72;
+  const digitH = h * 0.6;
+  const top = h * 0.14;
+
+  const parts: JSX.Element[] = [];
+  for (let d = 0; d < digits; d++) {
+    const x = pad + d * cellW + (cellW - digitW) / 2;
+    const shapes = segmentShapes(x, top, digitW, digitH);
+    for (const [seg, points] of Object.entries(shapes)) {
+      const level = brightness[`${d}.${seg}`] ?? 0;
+      parts.push(
+        <polygon
+          key={`${d}-${seg}`}
+          points={points}
+          fill={level > 0.01 ? '#ff4b3e' : '#2a1614'}
+          opacity={level > 0.01 ? 0.35 + level * 0.65 : 1}
+        />,
+      );
+    }
+    const dp = brightness[`${d}.dp`] ?? 0;
+    parts.push(
+      <circle
+        key={`${d}-dp`}
+        cx={x + digitW + cellW * 0.08}
+        cy={top + digitH}
+        r={Math.min(w, h) * 0.022}
+        fill={dp > 0.01 ? '#ff4b3e' : '#2a1614'}
+        opacity={dp > 0.01 ? 0.35 + dp * 0.65 : 1}
+      />,
+    );
+  }
+
+  return (
+    <g>
+      <rect x="1" y="1.5" width={w} height={h} rx="3" fill="rgba(0,0,0,0.35)" />
+      <rect width={w} height={h} rx="3" fill="#1a1210" stroke="#2e2320" />
+      {parts}
+    </g>
+  );
+}
+
+/**
+ * A bare 8x8 matrix, drawn from perceived brightness.
+ *
+ * Distinct from the MAX7219 panel below it: that one reads the driver's own row
+ * registers, which hold a whole frame at once. This one has no driver, so every
+ * pixel it shows is a scan the firmware is running right now.
+ */
+function BareLedMatrixArt({ def, visual }: ArtProps) {
+  const w = def.widthMm * MM;
+  const h = def.heightMm * MM;
+  const brightness = visual?.elementBrightness ?? {};
+  const pad = Math.min(w, h) * 0.12;
+  const cell = (Math.min(w, h) - pad * 2) / 8;
+
+  const dots: JSX.Element[] = [];
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      const level = brightness[`${row}.c${col + 1}`] ?? 0;
+      dots.push(
+        <circle
+          key={`${row}-${col}`}
+          cx={pad + (col + 0.5) * cell}
+          cy={pad + (row + 0.5) * cell}
+          r={cell * 0.34}
+          fill={level > 0.01 ? '#ff4b3e' : '#241a18'}
+          opacity={level > 0.01 ? 0.3 + level * 0.7 : 1}
+        />,
+      );
+    }
+  }
+
+  return (
+    <g>
+      <rect x="1" y="1.5" width={w} height={h} rx="3" fill="rgba(0,0,0,0.35)" />
+      <rect width={w} height={h} rx="3" fill="#141010" stroke="#2e2320" />
+      {dots}
+    </g>
+  );
+}
+
 function OledArt(props: ArtProps) {
   return <MonoPanelArt {...props} cols={128} rows={64} idleLabel="OLED" />;
 }
@@ -1540,6 +1657,8 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   lcd1602: (p) => <Lcd1602Art {...p} />,
   oled: (p) => <OledArt {...p} />,
   sh1107: (p) => <Sh1107Art {...p} />,
+  'seven-segment-multi': (p) => <SevenSegMultiArt {...p} />,
+  'led-matrix': (p) => <BareLedMatrixArt {...p} />,
   nokia5110: (p) => <Nokia5110Art {...p} />,
   tft: (p) => <RasterPanelArt {...p} />,
   'tft-round': (p) => <RasterPanelArt {...p} round />,

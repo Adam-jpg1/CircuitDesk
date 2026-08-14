@@ -248,11 +248,12 @@ const DISPLAYS: CoverageEntry[] = [
   entry('comp.ssd1331', 'SSD1331 colour OLED', 'Displays', '-', 'display-controller', 'simulated', ['spi'], NONE, 'hardware', ['tests/displays.tft.mts']),
   entry('comp.epaper29', '2.9" e-paper', 'Displays', 'w', 'display-controller', 'missing', ['spi'], ['spi-register-device'], 'none', NONE),
   entry('comp.seven-segment', 'Seven-segment (1 digit)', 'Displays', 'wt', 'gpio-device', 'simulated', ['gpio'], NONE, 'hardware', ['tests/sim.behaviors.mts']),
-  entry('comp.seven-segment-2', 'Seven-segment (2 digit)', 'Displays', 't', 'gpio-device', 'missing', ['gpio'], NONE, 'none', NONE),
-  entry('comp.seven-segment-4', 'Seven-segment (4 digit)', 'Displays', 'wt', 'gpio-device', 'missing', ['gpio'], NONE, 'none', NONE),
+  entry('comp.seven-segment-ca', 'Seven-segment (1 digit, common anode)', 'Displays', 'wt', 'gpio-device', 'simulated', ['gpio'], NONE, 'hardware', ['tests/displays.multiplexed.mts']),
+  entry('comp.seven-segment-2', 'Seven-segment (2 digit)', 'Displays', 't', 'gpio-device', 'simulated', ['gpio'], NONE, 'hardware', ['tests/displays.multiplexed.mts']),
+  entry('comp.seven-segment-4', 'Seven-segment (4 digit)', 'Displays', 'wt', 'gpio-device', 'simulated', ['gpio'], NONE, 'hardware', ['tests/displays.multiplexed.mts']),
   entry('comp.tm1637', 'TM1637 4-digit display', 'Displays', 'w', 'gpio-device', 'missing', ['gpio'], ['tm1637-protocol'], 'none', NONE),
   entry('comp.max7219', 'MAX7219 8x8 matrix (chainable)', 'Displays', 'w', 'spi-register', 'simulated', ['spi'], ['spi-register-device', 'device-chaining'], 'hardware', ['tests/displays.batch4.mts']),
-  entry('comp.led-matrix', 'LED matrix 8×8', 'Displays', 'w', 'gpio-device', 'missing', ['gpio'], NONE, 'none', NONE),
+  entry('comp.led-matrix', 'LED matrix 8×8', 'Displays', 'w', 'gpio-device', 'simulated', ['gpio'], NONE, 'hardware', ['tests/displays.multiplexed.mts']),
 ];
 
 // ---------------------------------------------------------------------- LEDs
