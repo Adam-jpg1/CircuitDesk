@@ -1266,6 +1266,86 @@ function KeyMatrixArt({ def, instance, visual }: ArtProps) {
   );
 }
 
+/**
+ * The TSOP module: a black epoxy lump with a domed lens and three legs.
+ *
+ * The dome is the recognisable part — it is what tells you at a glance that
+ * this is a receiver and not a transistor, which is otherwise the same shape.
+ */
+function IrReceiverArt({ def, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const lit = visual?.on === true;
+  return (
+    <g>
+      <rect x={W * 0.1} y={H * 0.12} width={W * 0.8} height={H * 0.56} rx={W * 0.12} fill="#14181d" stroke="#04070a" />
+      <path
+        d={`M ${W * 0.24} ${H * 0.5} A ${W * 0.26} ${H * 0.24} 0 1 1 ${W * 0.76} ${H * 0.5} Z`}
+        fill={lit ? '#3a2f22' : '#20262d'}
+        stroke="#0a0d11"
+        strokeWidth="0.8"
+      />
+      <ellipse cx={W * 0.42} cy={H * 0.3} rx={W * 0.08} ry={H * 0.05} fill="rgba(255,255,255,0.16)" />
+      {def.pins.map((p) => (
+        <line key={p.id} x1={p.x} y1={H * 0.66} x2={p.x} y2={H} stroke="#a8b0b8" strokeWidth="1.6" />
+      ))}
+    </g>
+  );
+}
+
+/**
+ * The virtual remote: a body of round keys, drawn from the same rects the
+ * canvas hit-tests, with an emitter window at the top that lights while a key
+ * is held.
+ */
+function IrRemoteArt({ def, instance, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const keys = interactiveHotspots(def, instance);
+  const anyDown = keys.some((k) => engagedIn(visual, k.key));
+  return (
+    <g>
+      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={H - 1 * MM} rx={3 * MM} fill="#1b1f24" stroke="#0a0d11" />
+      <rect x={1.8 * MM} y={1.8 * MM} width={W - 3.6 * MM} height={H - 3.6 * MM} rx={2.4 * MM} fill="#262c33" />
+      <rect
+        x={W / 2 - 5 * MM}
+        y={1.4 * MM}
+        width={10 * MM}
+        height={2.4 * MM}
+        rx={1.2 * MM}
+        fill={anyDown ? '#7a2f24' : '#12161a'}
+        stroke={anyDown ? '#ff7a5f' : '#0a0d11'}
+        strokeWidth="0.8"
+      />
+      {keys.map((k) => {
+        const down = engagedIn(visual, k.key);
+        return (
+          <g key={k.key}>
+            <circle
+              cx={k.x + k.w / 2}
+              cy={k.y + k.h / 2}
+              r={k.w / 2}
+              fill={down ? '#4d5a68' : '#333b44'}
+              stroke={down ? '#7fb2e8' : '#171c22'}
+              strokeWidth={down ? 1.4 : 0.8}
+            />
+            <text
+              x={k.x + k.w / 2}
+              y={k.y + k.h * 0.64}
+              textAnchor="middle"
+              fontSize={k.h * (k.cap.length > 2 ? 0.34 : 0.5)}
+              fill={down ? '#eaf3ff' : '#c3ccd5'}
+              fontFamily="sans-serif"
+            >
+              {k.cap}
+            </text>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
 // ---------- Batch 2: logic ----------
 
 /**
@@ -1689,6 +1769,8 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   capacitor: (p) => <CapacitorArt {...p} />,
   tmp36: (p) => <Tmp36Art {...p} />,
   ldr: (p) => <LdrArt {...p} />,
+  'ir-receiver': (p) => <IrReceiverArt {...p} />,
+  'ir-remote': (p) => <IrRemoteArt {...p} />,
   'battery-9v': (p) => <BatteryArt {...p} />,
   'battery-aa': (p) => <BatteryArt {...p} />,
 };

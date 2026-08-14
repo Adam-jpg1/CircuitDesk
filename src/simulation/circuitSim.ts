@@ -57,6 +57,9 @@ import { UartLink, type UartPeripheral } from './devices/uartEndpoint';
 import { GpsNeo6mDevice } from './devices/gpsNeo6m';
 import { Hc05Device } from './devices/hc05';
 import { Esp01Device, DEFAULT_ACCESS_POINT } from './devices/esp01';
+import { IrMedium } from './devices/irMedium';
+import { NEC_CARRIER_HZ } from './devices/necCodec';
+import { IrReceiverDevice, IrRemoteDevice, STARTER_REMOTE_KEYS } from './devices/irParts';
 import { DfPlayerDevice } from './devices/dfplayer';
 import { Ads1115Device, ADS1115_ADDRESSES } from './devices/ads1115';
 import { Mcp3008Device, MCP3008_CHANNELS } from './devices/mcp3008';
@@ -107,6 +110,14 @@ export interface ComponentVisualState {
   segments?: Record<string, boolean>;
   pressed?: boolean;
   toggledOn?: boolean;
+  /**
+   * A part whose whole body is either doing something or not.
+   *
+   * An IR receiver's demodulated output is the case that needs it: while it
+   * hears a carrier its lens is being hit by light, and the artwork shows that
+   * rather than leaving a black lump that never changes.
+   */
+  on?: boolean;
   potPosition?: number;
   value?: number;
   coilOn?: boolean;
@@ -745,6 +756,11 @@ export class CircuitBinding {
     this.addressableLeds.clear();
     this.twoWireDisplays.clear();
     this.uartLinks.clear();
+    for (const link of this.irReceivers.values()) link.cancels.forEach((c) => c());
+    this.irReceivers.clear();
+    // Forces the schedule to be rebuilt against the new wiring, not carried
+    // over from pins that may no longer exist.
+    this.irScheduledBurst = -1;
     const i2c: I2cDevice[] = [];
     const spi: SpiDevice[] = [];
     for (const [instanceId, owner] of this.runners) {
@@ -754,6 +770,7 @@ export class CircuitBinding {
       this.setupAddressableLeds(owner, instanceId);
       this.setupTwoWireDisplays(owner, instanceId);
       this.setupUartLinks(owner, instanceId);
+      this.setupIrReceivers(owner, instanceId);
     }
     this.i2cDevices = i2c;
     this.spiDevices = spi;
@@ -1489,6 +1506,117 @@ export class CircuitBinding {
     }
   }
 
+  /**
+   * Attaches IR receivers wired to this board.
+   *
+   * A module needs power, ground and its OUT pin on one of this board's pads,
+   * exactly like every other part: a receiver with VCC unwired is not attached
+   * and its pin stays wherever the board's own pull-up leaves it, which is what
+   * an unpowered TSOP does.
+   */
+  private setupIrReceivers(runner: BoardRunner, boardInstanceId: string): void {
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (def?.id !== 'comp.ir-receiver') continue;
+
+      const outNet = this.netOfInstancePin(inst.id, 'out');
+      const outPin = outNet
+        ? (this.netEndpoints.get(outNet) ?? []).find((e) => e.instance === boardInstanceId)?.pin ?? null
+        : null;
+      if (outPin === null) continue;
+
+      const powered = this.netFedByOther(this.netOfInstancePin(inst.id, 'vcc'), inst.id, POWER_PIN_TYPES);
+      const grounded = this.netFedByOther(this.netOfInstancePin(inst.id, 'gnd'), inst.id, ['ground']);
+      if (!powered || !grounded) continue;
+
+      const cached = this.irDeviceCache.get(inst.id);
+      const device =
+        cached instanceof IrReceiverDevice ? cached : new IrReceiverDevice(inst.id, Number(inst.properties.carrierHz ?? NEC_CARRIER_HZ));
+      this.irDeviceCache.set(inst.id, device);
+      device.centreHz = Number(inst.properties.carrierHz ?? NEC_CARRIER_HZ);
+      this.irReceivers.set(inst.id, { device, runner, outPin, cancels: [] });
+    }
+  }
+
+  /**
+   * Rebuilds every receiver's pin schedule from the medium.
+   *
+   * A demodulated output changes at mark boundaries, which are tens of
+   * microseconds apart — far finer than a settle — so the transitions are
+   * scheduled on the runner's own microsecond timeline rather than sampled.
+   * The whole schedule is rebuilt whenever a new burst arrives, because a
+   * second emitter starting mid-frame changes the union the receiver sees.
+   */
+  private pumpIrReceivers(): void {
+    for (const link of this.irReceivers.values()) {
+      link.cancels.forEach((c) => c());
+      link.cancels = [];
+
+      const nowUs = link.runner.timeMs * 1000;
+      const centre = link.device.centreHz;
+      const now = this.irMedium.sample(centre, nowUs);
+      link.device.setIlluminated(now.illuminated, nowUs);
+      link.runner.setDigitalInput(link.outPin, !now.illuminated);
+
+      const until = this.irMedium.latestEnd();
+      for (const at of this.irMedium.transitionsAfter(centre, nowUs, until)) {
+        link.cancels.push(
+          link.runner.addMicrosecondEvent(at - nowUs, () => {
+            const state = this.irMedium.sample(centre, at);
+            link.device.setIlluminated(state.illuminated, at);
+            link.runner.setDigitalInput(link.outPin, !state.illuminated);
+          }),
+        );
+      }
+    }
+    this.irScheduledBurst = this.irMedium.burstCount;
+  }
+
+  /**
+   * Presses on the virtual remotes, and the bursts they put in the air.
+   *
+   * The remote is not wired to anything and does not need to be — it is a
+   * light source. It cannot name a receiver, so it cannot reach one it should
+   * not, and two remotes held at once collide in the medium rather than being
+   * arbitrated anywhere.
+   */
+  private updateIr(controls: SimControls): void {
+    const nowUs = this.irTimeUs();
+
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (def?.id !== 'comp.ir-remote') continue;
+
+      const cached = this.irDeviceCache.get(inst.id);
+      const remote = cached instanceof IrRemoteDevice ? cached : new IrRemoteDevice(inst.id);
+      this.irDeviceCache.set(inst.id, remote);
+      this.irRemotes.set(inst.id, remote);
+      remote.address = Number(inst.properties.address ?? 0) & 0xffff;
+      remote.extended = inst.properties.extended === true;
+      remote.carrierHz = Number(inst.properties.carrierHz ?? NEC_CARRIER_HZ);
+
+      const pressed = new Set<string>();
+      for (const button of STARTER_REMOTE_KEYS) {
+        if (controls.pressedButtons.has(contactStateKey(inst.id, button.key))) pressed.add(button.key);
+      }
+      for (const burst of remote.update(pressed, nowUs)) {
+        this.irMedium.emit(inst.id, remote.carrierHz, burst);
+      }
+    }
+
+    if (this.irScheduledBurst !== this.irMedium.burstCount) this.pumpIrReceivers();
+    for (const link of this.irReceivers.values()) link.device.flushIfIdle(nowUs);
+    // Marks that finished more than a frame ago cannot affect anything.
+    this.irMedium.prune(nowUs - 100000);
+  }
+
+  /** The shared timeline, as the medium sees it. Every runner is on it. */
+  private irTimeUs(): number {
+    let us = 0;
+    for (const r of this.runners.values()) us = Math.max(us, r.timeMs * 1000);
+    return us;
+  }
+
   private setupUltrasonic(runner: BoardRunner): void {
     for (const inst of this.graph.instances) {
       const def = this.graph.definitions.get(inst.id);
@@ -1753,6 +1881,33 @@ export class CircuitBinding {
 
   /** The baud last pushed from a part's property, so AT+UART= is not undone. */
   private appliedUartBaud = new Map<string, number>();
+
+  /**
+   * The room's infrared, shared by every IR part on the canvas.
+   *
+   * One medium rather than a link per pair, because IR is not addressed: a
+   * remote flashes an LED and whoever can see it sees it. Kept on the binding
+   * so a re-bind does not throw away a burst that is still in flight.
+   */
+  private readonly irMedium = new IrMedium();
+  private irReceivers = new Map<
+    string,
+    { device: IrReceiverDevice; runner: BoardRunner; outPin: number; cancels: (() => void)[] }
+  >();
+  private irRemotes = new Map<string, IrRemoteDevice>();
+  /** Models kept across re-binds, so a receiver does not forget what it saw. */
+  private irDeviceCache = new Map<string, IrReceiverDevice | IrRemoteDevice>();
+  /** The medium revision the receivers' schedules were built from. */
+  private irScheduledBurst = -1;
+
+  /** An IR part's model, for the canvas and the inspector. */
+  irDeviceFor(instanceId: string): IrReceiverDevice | IrRemoteDevice | undefined {
+    return this.irDeviceCache.get(instanceId);
+  }
+  /** The shared medium, for the inspector and for tests. */
+  get infrared(): IrMedium {
+    return this.irMedium;
+  }
 
   /** A UART device's link, for the canvas and the inspector. */
   uartLinkFor(instanceId: string): UartLink | undefined {
@@ -2545,6 +2700,22 @@ export class CircuitBinding {
       }
     }
 
+    // Infrared. After the levels, because a receiver's schedule is only worth
+    // rebuilding once the wiring behind it has settled.
+    this.updateIr(controls);
+    for (const [instId, link] of this.irReceivers) {
+      const outNet = this.netOfInstancePin(instId, 'out');
+      if (!outNet) continue;
+      // A TSOP's output is a real driver: it pulls hard to ground while it
+      // hears a carrier, and idles high through an internal pull-up of about
+      // 30 k. That weakness matters — anything else driving this net wins,
+      // which is what would happen on a breadboard. The microsecond schedule
+      // sets the pin between settles; this is the same state, so that anything
+      // else on the wire sees it too.
+      const low = link.device.outputLow;
+      setLevel(outNet, low ? 0 : highVolts, null, low ? 0 : 30000);
+    }
+
     // Relay coils. Read before the contacts are next solved, so the armature
     // follows the coil by one slice — see `energisedRelays`.
     for (const inst of this.graph.instances) {
@@ -2715,6 +2886,21 @@ export class CircuitBinding {
             this.driveJoystickAxes(inst.id, controls, runner, levelOf);
           }
           visuals.set(inst.id, state);
+          break;
+        }
+        case 'sim.ir-remote': {
+          // The keys come from the same table the codes do, so a key that
+          // lights up is the key whose command went into the air.
+          const engaged: Record<string, boolean> = {};
+          for (const button of STARTER_REMOTE_KEYS) {
+            engaged[button.key] = controls.pressedButtons.has(contactStateKey(inst.id, button.key));
+          }
+          visuals.set(inst.id, { contacts: engaged });
+          break;
+        }
+        case 'sim.ir-receiver': {
+          const device = this.irDeviceCache.get(inst.id);
+          visuals.set(inst.id, { on: device instanceof IrReceiverDevice && device.outputLow });
           break;
         }
         case 'sim.toggle-switch':

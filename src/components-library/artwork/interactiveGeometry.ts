@@ -11,6 +11,7 @@
 import { MM } from '../../boards/pinHelpers';
 import { contactLayoutOf } from '../../simulation/devices/contactRegistry';
 import { keyCapDescription } from '../../simulation/devices/matrixInput';
+import { STARTER_REMOTE_KEYS } from '../../simulation/devices/irParts';
 import type { ComponentDefinition, ComponentInstance } from '../../types';
 
 export interface Hotspot {
@@ -72,6 +73,41 @@ function matrixHotspots(def: ComponentDefinition, instance: ComponentInstance): 
     title: keyCapDescription(k.cap),
     kind: 'momentary' as const,
   }));
+}
+
+/**
+ * The keys of the virtual IR remote, three across.
+ *
+ * The remote has no pins and no wires, so unlike every other interactive part
+ * there is no header to leave room for — the whole body is buttons. The keys
+ * come from the same table the simulation sends codes from, so a cap and the
+ * command behind it cannot drift apart.
+ */
+function remoteHotspots(def: ComponentDefinition): Hotspot[] {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const cols = 3;
+  const rows = Math.ceil(STARTER_REMOTE_KEYS.length / cols);
+  const marginX = 3 * MM;
+  const marginY = 5 * MM;
+  const cw = (W - marginX * 2) / cols;
+  const ch = (H - marginY * 2) / rows;
+  const size = Math.min(cw, ch) * 0.82;
+  return STARTER_REMOTE_KEYS.map((k, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    return {
+      key: k.key,
+      x: marginX + col * cw + (cw - size) / 2,
+      y: marginY + row * ch + (ch - size) / 2,
+      w: size,
+      h: size,
+      radius: size / 2,
+      cap: k.label,
+      title: `Send NEC command 0x${k.command.toString(16).padStart(2, '0')}`,
+      kind: 'momentary' as const,
+    };
+  });
 }
 
 /**
@@ -144,6 +180,8 @@ export function interactiveHotspots(def: ComponentDefinition, instance: Componen
   switch (def.simulationAdapterId) {
     case 'sim.keypad':
       return matrixHotspots(def, instance);
+    case 'sim.ir-remote':
+      return remoteHotspots(def);
     case 'sim.dip-switch':
       return dipHotspots(def);
     case 'sim.slide-switch':

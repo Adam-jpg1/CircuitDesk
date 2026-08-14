@@ -349,9 +349,9 @@ const MOTORS: CoverageEntry[] = [
 
 // ------------------------------------------------------------- Communication
 const COMMUNICATION: CoverageEntry[] = [
-  entry('comp.ir-receiver', 'IR receiver (TSOP)', 'Communication', 'w', 'gpio-device', 'missing', ['ir', 'gpio'], ['ir-channel'], 'none', NONE),
+  entry('comp.ir-receiver', 'IR receiver (TSOP)', 'Communication', 'w', 'gpio-device', 'simulated', ['ir', 'gpio'], NONE, 'hardware', ['tests/ir.channel.mts'], 'Demodulates the shared IR medium and drives OUT active-low on the microsecond timeline, so firmware decodes the real mark and space timing itself. Distance, angle, ambient light and AGC recovery are not modelled.'),
   entry('comp.ir-led', 'IR LED / transmitter', 'Communication', 'w', 'gpio-device', 'missing', ['ir', 'gpio'], ['ir-channel'], 'none', NONE),
-  entry('comp.ir-remote', 'Virtual IR remote', 'Communication', 'w', 'gpio-device', 'missing', ['ir'], ['ir-channel'], 'none', NONE),
+  entry('comp.ir-remote', 'Virtual IR remote', 'Communication', 'w', 'gpio-device', 'simulated', ['ir'], NONE, 'hardware', ['tests/ir.channel.mts'], 'Puts real NEC frames and repeat codes into the shared medium on a key press. It cannot address a receiver, so two remotes at once collide rather than being arbitrated.'),
   entry('comp.hc05', 'HC-05 Bluetooth module', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['bluetooth-channel'], 'hardware', ['tests/uart.modules.mts'], 'The UART and AT-command side is real; there is no Bluetooth radio, pairing, inquiry, RFCOMM or profile handling. Data-mode bytes are recorded where a channel would attach.'),
   entry('comp.gps', 'GPS NEO-6M', 'Communication', '-', 'uart-device', 'simulated', ['uart'], NONE, 'hardware', ['tests/uart.link.mts']),
   entry('comp.esp01', 'ESP-01 AT modem', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['network-stack'], 'hardware', ['tests/uart.esp01.mts'], 'The AT modem is real — parser, echo, CH_PD/RST gating, mode and association against a simulated access point. There is no network behind it, so AT+CIPSTART fails rather than reporting a connection that cannot exist.'),
