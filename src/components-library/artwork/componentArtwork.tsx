@@ -1342,6 +1342,49 @@ function LoraArt({ def, visual }: ArtProps) {
   );
 }
 
+/** The little square transmitter: a SAW resonator and a coil on bare board. */
+function Rf433TxArt({ def, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const keyed = visual?.on === true;
+  return (
+    <g>
+      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={H - 1 * MM} rx="1.5" fill="#1f3a52" stroke="#0c1c2b" />
+      <rect x={W * 0.12} y={H * 0.14} width={W * 0.34} height={H * 0.3} rx="1" fill={keyed ? '#c86a3a' : '#8a9299'} stroke="#4a5259" strokeWidth="0.6" />
+      <path
+        d={`M ${W * 0.56} ${H * 0.18} q ${W * 0.06} ${H * 0.08} 0 ${H * 0.16} q ${W * -0.06} ${H * 0.08} 0 ${H * 0.16}`}
+        fill="none" stroke="#c9a227" strokeWidth={W * 0.05}
+      />
+      <rect x={W * 0.12} y={H * 0.54} width={W * 0.2} height={H * 0.12} rx="0.8" fill="#12232f" />
+      {def.pins.map((p) => (
+        <rect key={p.id} x={p.x - 1.1} y={p.y - 1.1} width="2.2" height="2.2" rx="0.5" fill="#d8b24a" />
+      ))}
+    </g>
+  );
+}
+
+/** The wider receiver board, with its coil and the tuning can. */
+function Rf433RxArt({ def, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const hearing = visual?.on === true;
+  return (
+    <g>
+      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={H - 1 * MM} rx="1.5" fill="#1f3a52" stroke="#0c1c2b" />
+      <rect x={W * 0.08} y={H * 0.16} width={W * 0.22} height={H * 0.4} rx="1" fill="#8a9299" stroke="#4a5259" strokeWidth="0.6" />
+      <rect x={W * 0.36} y={H * 0.2} width={W * 0.14} height={H * 0.3} rx="0.8" fill={hearing ? '#c86a3a' : '#12232f'} />
+      <path
+        d={`M ${W * 0.58} ${H * 0.2} q ${W * 0.04} ${H * 0.1} 0 ${H * 0.2} q ${W * -0.04} ${H * 0.1} 0 ${H * 0.18}`}
+        fill="none" stroke="#c9a227" strokeWidth={W * 0.03}
+      />
+      <circle cx={W * 0.82} cy={H * 0.34} r={W * 0.05} fill="#2b3a45" stroke="#101a20" strokeWidth="0.5" />
+      {def.pins.map((p) => (
+        <rect key={p.id} x={p.x - 1.1} y={p.y - 1.1} width="2.2" height="2.2" rx="0.5" fill="#d8b24a" />
+      ))}
+    </g>
+  );
+}
+
 /** A 5 mm LED in clear or smoked epoxy, with the flat on the cathode side. */
 function IrLedArt({ def, visual }: ArtProps) {
   const W = def.widthMm * MM;
@@ -1842,6 +1885,8 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   ldr: (p) => <LdrArt {...p} />,
   nrf24: (p) => <Nrf24Art {...p} />,
   lora: (p) => <LoraArt {...p} />,
+  'rf433-tx': (p) => <Rf433TxArt {...p} />,
+  'rf433-rx': (p) => <Rf433RxArt {...p} />,
   'ir-receiver': (p) => <IrReceiverArt {...p} />,
   'ir-led': (p) => <IrLedArt {...p} />,
   'ir-remote': (p) => <IrRemoteArt {...p} />,

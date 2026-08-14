@@ -93,16 +93,33 @@ export interface RfListener {
   match: Readonly<Record<string, string | number>>;
 }
 
-function matches(listener: RfListener, t: RfTransmission): boolean {
-  if (listener.band !== t.band || listener.channel !== t.channel) return false;
-  for (const [key, want] of Object.entries(listener.match)) {
-    if (t.match[key] !== want) return false;
+function matchesFields(
+  wanted: Readonly<Record<string, string | number>>,
+  have: Readonly<Record<string, string | number>>,
+): boolean {
+  for (const [key, want] of Object.entries(wanted)) {
+    if (have[key] !== want) return false;
   }
   return true;
 }
 
+function matches(listener: RfListener, t: RfTransmission): boolean {
+  if (listener.band !== t.band || listener.channel !== t.channel) return false;
+  return matchesFields(listener.match, t.match);
+}
+
 export class RfMedium {
   private transmissions: RfTransmission[] = [];
+  /**
+   * Carrier that is on now and whose end is not known yet.
+   *
+   * A packet radio hands over a whole transmission with both ends, because it
+   * knows the payload and the data rate. A bare on-off-keyed transmitter does
+   * not: its carrier is on because a pin is high, and nothing can say when the
+   * sketch will drop it. So it opens a mark and closes it later — the same
+   * shape the infrared medium needs, for the same reason.
+   */
+  private open = new Map<string, { startUs: number; channel: number; match: Readonly<Record<string, string | number>> }>();
   private nextId = 1;
   private collisions = 0;
 
@@ -117,6 +134,93 @@ export class RfMedium {
     const record: RfTransmission = { ...t, id: this.nextId++ };
     this.transmissions.push(record);
     return record;
+  }
+
+  /** Turns the carrier on, with no end yet. See `open`. */
+  beginLive(transmitterId: string, channel: number, startUs: number, match: Readonly<Record<string, string | number>>): void {
+    if (this.open.has(transmitterId)) return;
+    this.open.set(transmitterId, { startUs, channel, match });
+  }
+
+  /** Turns it off, turning the mark into an ordinary transmission. */
+  endLive(transmitterId: string, endUs: number): void {
+    const live = this.open.get(transmitterId);
+    if (!live) return;
+    this.open.delete(transmitterId);
+    if (endUs > live.startUs) {
+      this.transmissions.push({
+        id: this.nextId++,
+        transmitterId,
+        band: RF_BAND,
+        channel: live.channel,
+        startUs: live.startUs,
+        endUs,
+        payload: new Uint8Array(0),
+        match: live.match,
+      });
+    }
+  }
+
+  isLive(transmitterId: string): boolean {
+    return this.open.has(transmitterId);
+  }
+
+  /**
+   * Who a listener can hear at this instant.
+   *
+   * The waveform view of the medium, as against the packet view `completed`
+   * gives. An on-off-keyed receiver has no notion of a packet — it has a
+   * detector and an output pin, and it follows whatever energy is there.
+   */
+  energisedBy(listener: RfListener, us: number): string[] {
+    const on = new Set<string>();
+    for (const t of this.transmissions) {
+      if (us < t.startUs || us >= t.endUs) continue;
+      if (!matches(listener, t)) continue;
+      on.add(t.transmitterId);
+    }
+    for (const [id, live] of this.open) {
+      if (us < live.startUs || live.channel !== listener.channel) continue;
+      if (!matchesFields(listener.match, live.match)) continue;
+      on.add(id);
+    }
+    return [...on];
+  }
+
+  /**
+   * Samples the waveform, counting a collision when more than one transmitter
+   * is heard at once. The output does not change — a detector cannot tell two
+   * sources apart — the count only lets an inspector explain the garbage.
+   */
+  sampleWaveform(listener: RfListener, us: number): { energised: boolean; sources: number } {
+    const sources = this.energisedBy(listener, us).length;
+    if (sources > 1) this.collisions++;
+    return { energised: sources > 0, sources };
+  }
+
+  /** Every moment after `afterUs` at which a listener's carrier could change. */
+  waveformTransitions(listener: RfListener, afterUs: number, untilUs: number): number[] {
+    const points = new Set<number>();
+    for (const t of this.transmissions) {
+      if (!matches(listener, t)) continue;
+      if (t.startUs > afterUs && t.startUs <= untilUs) points.add(t.startUs);
+      if (t.endUs > afterUs && t.endUs <= untilUs) points.add(t.endUs);
+    }
+    for (const live of this.open.values()) {
+      if (live.channel !== listener.channel || !matchesFields(listener.match, live.match)) continue;
+      if (live.startUs > afterUs) points.add(live.startUs);
+    }
+    return [...points].sort((a, b) => a - b);
+  }
+
+  /** Start times of open marks, for a receiver that has not reached them. */
+  openStarts(listener: RfListener): number[] {
+    const starts: number[] = [];
+    for (const live of this.open.values()) {
+      if (live.channel !== listener.channel || !matchesFields(listener.match, live.match)) continue;
+      starts.push(live.startUs);
+    }
+    return starts;
   }
 
   /** Everything still in the air at this instant, on any band. */
@@ -198,6 +302,7 @@ export class RfMedium {
 
   reset(): void {
     this.transmissions = [];
+    this.open.clear();
     this.nextId = 1;
     this.collisions = 0;
   }

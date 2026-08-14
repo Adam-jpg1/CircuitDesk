@@ -1498,6 +1498,48 @@ export const LORA_SX1278 = def(
   },
 );
 
+export const RF433_TX = def(
+  'comp.rf433-tx', '433 MHz Transmitter (ASK)', 'Modules', 19, 19, 'rf433-tx',
+  [
+    pin('data', 'DATA', 4.0, 18.6, { type: 'digital', caps: ['digital-in'] }),
+    pin('vcc', 'VCC', 9.5, 18.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('gnd', 'GND', 15.0, 18.6, { type: 'ground', caps: ['ground'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.rf433-tx',
+    properties: [prop('frequencyKhz', 'Frequency', 'number', 433920, { unit: 'kHz' })],
+    description:
+      'An on-off-keyed 433 MHz transmitter, which has no protocol at all: DATA high means the carrier is on ' +
+      'and DATA low means it is off. Whatever your sketch puts on that pin goes into the shared radio medium ' +
+      'with exactly that timing, so an encoder you write yourself works here the way it works on a bench — and ' +
+      'so does one you got wrong. Two transmitters keyed at once produce the sum of their carriers and whatever ' +
+      'decodes it gets nonsense; nothing arbitrates. NOT modelled: range, antenna length, supply-voltage ' +
+      'dependence, and any encoding whatsoever — no preamble, no Manchester, nothing.',
+  },
+);
+
+export const RF433_RX = def(
+  'comp.rf433-rx', '433 MHz Receiver (ASK)', 'Modules', 30, 15, 'rf433-rx',
+  [
+    pin('vcc', 'VCC', 4.0, 14.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('data', 'DATA', 11.5, 14.6, { type: 'digital', caps: ['digital-out'] }),
+    pin('gnd', 'GND', 19.0, 14.6, { type: 'ground', caps: ['ground'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.rf433-rx',
+    properties: [prop('frequencyKhz', 'Frequency', 'number', 433920, { unit: 'kHz' })],
+    description:
+      'A superregenerative 433 MHz receiver whose DATA pin follows the carrier it hears, edge for edge, on the ' +
+      'microsecond clock — so your own decoder measures the same pulse widths the transmitter produced. A ' +
+      'receiver on a different frequency hears nothing. One place this is KINDER than the hardware, stated ' +
+      'rather than hidden: a real idle receiver winds its gain up and produces continuous noise on DATA, and ' +
+      'this one reads low instead. NOT modelled: the noise floor, AGC and squelch behaviour, range, antenna ' +
+      'length, and receiver bandwidth.',
+  },
+);
+
 // ---------- Power ----------
 
 export const BATTERY_9V = def(
@@ -1905,7 +1947,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331, EPAPER29,
   NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
-  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_LED, IR_REMOTE, NRF24L01, LORA_SX1278,
+  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_LED, IR_REMOTE, NRF24L01, LORA_SX1278, RF433_TX, RF433_RX,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
   CELL_15, COIN_CELL, DC_SUPPLY, REGULATOR_5, REGULATOR_33, LDO_33, BUCK_CONVERTER, BOOST_CONVERTER,
   HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,
