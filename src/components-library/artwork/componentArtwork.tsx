@@ -1293,6 +1293,33 @@ function IrReceiverArt({ def, visual }: ArtProps) {
   );
 }
 
+/**
+ * The nRF24 module: a blue board with the chip antenna's meander at the top
+ * and the 2x4 header at the bottom. The meander is the recognisable part.
+ */
+function Nrf24Art({ def, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const busy = visual?.on === true;
+  const trace = `M ${W * 0.18} ${H * 0.1} ` +
+    [0, 1, 2, 3].map((i) => `L ${W * (0.18 + i * 0.21)} ${H * (i % 2 ? 0.1 : 0.22)} L ${W * (0.28 + i * 0.21)} ${H * (i % 2 ? 0.1 : 0.22)}`).join(' ');
+  return (
+    <g>
+      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={H - 1 * MM} rx="2" fill="#12356b" stroke="#0a1f42" />
+      <path d={trace} fill="none" stroke="#c9a227" strokeWidth={W * 0.05} strokeLinejoin="miter" />
+      <rect x={W * 0.24} y={H * 0.34} width={W * 0.52} height={H * 0.24} rx="1.5" fill="#14181d" stroke="#000" strokeWidth="0.6" />
+      <circle cx={W * 0.3} cy={H * 0.4} r={W * 0.035} fill="#2b323a" />
+      <rect
+        x={W * 0.2} y={H * 0.63} width={W * 0.16} height={H * 0.05} rx="1"
+        fill={busy ? '#ff8a5f' : '#1d2b45'}
+      />
+      {def.pins.map((p) => (
+        <rect key={p.id} x={p.x - 1.1} y={p.y - 1.1} width="2.2" height="2.2" rx="0.5" fill="#d8b24a" />
+      ))}
+    </g>
+  );
+}
+
 /** A 5 mm LED in clear or smoked epoxy, with the flat on the cathode side. */
 function IrLedArt({ def, visual }: ArtProps) {
   const W = def.widthMm * MM;
@@ -1791,6 +1818,7 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   capacitor: (p) => <CapacitorArt {...p} />,
   tmp36: (p) => <Tmp36Art {...p} />,
   ldr: (p) => <LdrArt {...p} />,
+  nrf24: (p) => <Nrf24Art {...p} />,
   'ir-receiver': (p) => <IrReceiverArt {...p} />,
   'ir-led': (p) => <IrLedArt {...p} />,
   'ir-remote': (p) => <IrRemoteArt {...p} />,
