@@ -58,6 +58,40 @@ import { GpsNeo6mDevice } from './devices/gpsNeo6m';
 import { Hc05Device } from './devices/hc05';
 import { Esp01Device, DEFAULT_ACCESS_POINT } from './devices/esp01';
 import { IrMedium } from './devices/irMedium';
+
+/**
+ * Two edges no further apart than this are cycles of one carrier.
+ *
+ * 40 us covers everything from about 12 kHz upwards, which is well below any
+ * IR carrier in use, and is two orders of magnitude shorter than the 560 us
+ * space that separates NEC marks — so nothing can be mistaken for the other.
+ */
+const IR_CARRIER_MAX_GAP_US = 40;
+/** Silence for this long ends a mark. */
+const IR_MARK_END_GAP_US = 60;
+/** A gap this long means the next boundary starts a new burst. */
+const IR_BURST_GAP_US = 50000;
+/**
+ * How far ahead of a receiver's clock a burst is delivered.
+ *
+ * Wide enough to clear the worst skew between two boards taking turns on the
+ * shared timeline — a couple of scheduling slices — so no boundary ever has to
+ * be clamped into the past.
+ */
+const IR_DELIVERY_GUARD_US = 2000;
+
+interface IrEmitterState {
+  instanceId: string;
+  runner: BoardRunner;
+  pin: number;
+  lastEdgeUs: number;
+  carrierHz: number;
+  cancelGap: (() => void) | null;
+  edges: number;
+  /** Start of the mark being emitted, and how many edges it has had. */
+  markStartUs: number;
+  markEdges: number;
+}
 import { NEC_CARRIER_HZ } from './devices/necCodec';
 import { IrReceiverDevice, IrRemoteDevice, STARTER_REMOTE_KEYS } from './devices/irParts';
 import { DfPlayerDevice } from './devices/dfplayer';
@@ -758,9 +792,10 @@ export class CircuitBinding {
     this.uartLinks.clear();
     for (const link of this.irReceivers.values()) link.cancels.forEach((c) => c());
     this.irReceivers.clear();
-    // Forces the schedule to be rebuilt against the new wiring, not carried
-    // over from pins that may no longer exist.
-    this.irScheduledBurst = -1;
+    this.irEmitterListeners.forEach((off) => off());
+    this.irEmitterListeners = [];
+    for (const emitter of this.irEmitters.values()) emitter.cancelGap?.();
+    this.irEmitters.clear();
     const i2c: I2cDevice[] = [];
     const spi: SpiDevice[] = [];
     for (const [instanceId, owner] of this.runners) {
@@ -771,6 +806,7 @@ export class CircuitBinding {
       this.setupTwoWireDisplays(owner, instanceId);
       this.setupUartLinks(owner, instanceId);
       this.setupIrReceivers(owner, instanceId);
+      this.setupIrEmitters(owner, instanceId);
     }
     this.i2cDevices = i2c;
     this.spiDevices = spi;
@@ -1534,7 +1570,7 @@ export class CircuitBinding {
         cached instanceof IrReceiverDevice ? cached : new IrReceiverDevice(inst.id, Number(inst.properties.carrierHz ?? NEC_CARRIER_HZ));
       this.irDeviceCache.set(inst.id, device);
       device.centreHz = Number(inst.properties.carrierHz ?? NEC_CARRIER_HZ);
-      this.irReceivers.set(inst.id, { device, runner, outPin, cancels: [] });
+      this.irReceivers.set(inst.id, { device, runner, outPin, cancels: [], cursorUs: -1, deliveredUs: -1, offsetUs: 0 });
     }
   }
 
@@ -1549,27 +1585,142 @@ export class CircuitBinding {
    */
   private pumpIrReceivers(): void {
     for (const link of this.irReceivers.values()) {
-      link.cancels.forEach((c) => c());
-      link.cancels = [];
-
-      const nowUs = link.runner.timeMs * 1000;
       const centre = link.device.centreHz;
-      const now = this.irMedium.sample(centre, nowUs);
-      link.device.setIlluminated(now.illuminated, nowUs);
-      link.runner.setDigitalInput(link.outPin, !now.illuminated);
+      const nowUs = link.runner.timeMs * 1000;
 
-      const until = this.irMedium.latestEnd();
-      for (const at of this.irMedium.transitionsAfter(centre, nowUs, until)) {
-        link.cancels.push(
-          link.runner.addMicrosecondEvent(at - nowUs, () => {
-            const state = this.irMedium.sample(centre, at);
-            link.device.setIlluminated(state.illuminated, at);
-            link.runner.setDigitalInput(link.outPin, !state.illuminated);
-          }),
-        );
+      // Every boundary this receiver has not consumed yet, in order. An open
+      // mark's start counts: it is a real transition even though its end is
+      // still unknown.
+      const boundaries = new Set(
+        this.irMedium.transitionsAfter(centre, link.cursorUs, Math.max(this.irMedium.latestEnd(), nowUs)),
+      );
+      for (const start of this.irMedium.openStarts(centre)) {
+        if (start > link.cursorUs) boundaries.add(start);
+      }
+
+      for (const at of [...boundaries].sort((a, b) => a - b)) {
+        // Boards take turns on the shared timeline, so a receiver's board can
+        // already be past the instant another board's LED lit. Delivering at
+        // the absolute time would drop those boundaries, or worse collapse two
+        // of them onto one instant, which is a pulse the pin never makes.
+        //
+        // So a burst gets ONE offset, chosen when it starts and wide enough to
+        // clear the skew, and every boundary in it is delivered at that same
+        // offset. The intervals — which are the entire content of an IR
+        // protocol — are preserved exactly; the frame simply arrives a couple
+        // of milliseconds later than it left. A constant delay is meaningless
+        // to a decoder that measures gaps. Dropped marks are not.
+        if (link.cursorUs < 0 || at - link.cursorUs > IR_BURST_GAP_US) {
+          link.offsetUs = Math.max(0, nowUs + IR_DELIVERY_GUARD_US - at);
+        }
+        let deliverUs = at + link.offsetUs;
+        // A backstop, never expected to fire: two boundaries must never land
+        // on the same microsecond, or the pin would not move at all.
+        if (deliverUs <= link.deliveredUs) deliverUs = link.deliveredUs + 1;
+        link.cursorUs = at;
+        link.deliveredUs = deliverUs;
+
+        const apply = () => {
+          const state = this.irMedium.sample(centre, at);
+          link.device.setIlluminated(state.illuminated, deliverUs);
+          link.runner.setDigitalInput(link.outPin, !state.illuminated);
+        };
+        if (deliverUs <= nowUs) apply();
+        else link.cancels.push(link.runner.addMicrosecondEvent(deliverUs - nowUs, apply));
       }
     }
-    this.irScheduledBurst = this.irMedium.burstCount;
+  }
+
+  /**
+   * Attaches IR LEDs the firmware itself drives.
+   *
+   * The anode has to be on one of this board's pads and the cathode has to
+   * reach a real ground, because an LED with its cathode in the air does not
+   * light. Nothing is emitted from the wiring alone: light only exists while
+   * the pin is actually toggling.
+   */
+  private setupIrEmitters(runner: BoardRunner, boardInstanceId: string): void {
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (def?.id !== 'comp.ir-led') continue;
+
+      const anodeNet = this.netOfInstancePin(inst.id, 'anode');
+      const pin = anodeNet
+        ? (this.netEndpoints.get(anodeNet) ?? []).find((e) => e.instance === boardInstanceId)?.pin ?? null
+        : null;
+      if (pin === null) continue;
+      if (!this.netFedByOther(this.netOfInstancePin(inst.id, 'cathode'), inst.id, ['ground'])) continue;
+
+      const state: IrEmitterState = {
+        instanceId: inst.id,
+        runner,
+        pin,
+        lastEdgeUs: -1,
+        carrierHz: 0,
+        cancelGap: null,
+        edges: 0,
+        markStartUs: -1,
+        markEdges: 0,
+      };
+      this.irEmitters.set(inst.id, state);
+      this.irEmitterListeners.push(runner.addPinListener((changed) => {
+        if (changed !== state.pin) return;
+        this.irEdge(state);
+      }));
+    }
+  }
+
+  /**
+   * One edge on an IR LED's pin.
+   *
+   * A demodulating receiver does not see individual carrier cycles; it sees
+   * whether a carrier is there. So the model does what the receiver's own
+   * bandpass does: two edges close enough together are a carrier, and the
+   * frequency is MEASURED from their spacing rather than assumed. A sketch
+   * that generates 56 kHz emits 56 kHz here and a 38 kHz module will not hear
+   * it — which is the mistake this is worth modelling for.
+   *
+   * The mark ends when the toggling stops, found with a timer rearmed on every
+   * edge. A NEC space is 560 us at the shortest, twenty times the gap that
+   * ends a mark, so there is no ambiguity between "between cycles" and
+   * "between marks".
+   */
+  private irEdge(state: IrEmitterState): void {
+    const nowUs = state.runner.timeMs * 1000;
+    state.edges++;
+    const gap = state.lastEdgeUs >= 0 ? nowUs - state.lastEdgeUs : Infinity;
+
+    if (gap <= IR_CARRIER_MAX_GAP_US) {
+      if (!this.irMedium.isLive(state.instanceId)) {
+        // The mark began at the first of the two edges, not the second.
+        state.markStartUs = state.lastEdgeUs;
+        state.markEdges = 2;
+        state.carrierHz = 1_000_000 / (2 * gap);
+        this.irMedium.beginLive(state.instanceId, state.carrierHz, state.markStartUs);
+        this.pumpIrReceivers();
+      } else {
+        // Averaged over the whole mark rather than taken from one cycle. A
+        // sketch's carrier loop has a longer gap at each mark boundary, and
+        // judging the burst on that one cycle would throw an in-band mark out
+        // of band — which is not what a bandpass does.
+        state.markEdges++;
+        const span = nowUs - state.markStartUs;
+        if (span > 0) {
+          state.carrierHz = ((state.markEdges - 1) * 1_000_000) / (2 * span);
+          this.irMedium.setLiveCarrier(state.instanceId, state.carrierHz);
+        }
+      }
+    }
+    state.lastEdgeUs = nowUs;
+
+    state.cancelGap?.();
+    state.cancelGap = state.runner.addMicrosecondEvent(IR_MARK_END_GAP_US, () => {
+      state.cancelGap = null;
+      if (!this.irMedium.isLive(state.instanceId)) return;
+      // The light stopped at the last edge, not when the timer noticed.
+      this.irMedium.endLive(state.instanceId, nowUs);
+      this.pumpIrReceivers();
+    });
   }
 
   /**
@@ -1604,8 +1755,10 @@ export class CircuitBinding {
       }
     }
 
-    if (this.irScheduledBurst !== this.irMedium.burstCount) this.pumpIrReceivers();
-    for (const link of this.irReceivers.values()) link.device.flushIfIdle(nowUs);
+    this.pumpIrReceivers();
+    for (const link of this.irReceivers.values()) {
+      link.device.flushIfIdle(link.runner.timeMs * 1000);
+    }
     // Marks that finished more than a frame ago cannot affect anything.
     this.irMedium.prune(nowUs - 100000);
   }
@@ -1892,13 +2045,24 @@ export class CircuitBinding {
   private readonly irMedium = new IrMedium();
   private irReceivers = new Map<
     string,
-    { device: IrReceiverDevice; runner: BoardRunner; outPin: number; cancels: (() => void)[] }
+    {
+      device: IrReceiverDevice;
+      runner: BoardRunner;
+      outPin: number;
+      cancels: (() => void)[];
+      /** Last medium boundary consumed, so none is applied twice or missed. */
+      cursorUs: number;
+      /** When that boundary reached this receiver's own clock. */
+      deliveredUs: number;
+      /** Delay applied to every boundary of the current burst. */
+      offsetUs: number;
+    }
   >();
   private irRemotes = new Map<string, IrRemoteDevice>();
+  private irEmitters = new Map<string, IrEmitterState>();
+  private irEmitterListeners: (() => void)[] = [];
   /** Models kept across re-binds, so a receiver does not forget what it saw. */
   private irDeviceCache = new Map<string, IrReceiverDevice | IrRemoteDevice>();
-  /** The medium revision the receivers' schedules were built from. */
-  private irScheduledBurst = -1;
 
   /** An IR part's model, for the canvas and the inspector. */
   irDeviceFor(instanceId: string): IrReceiverDevice | IrRemoteDevice | undefined {
@@ -2898,6 +3062,11 @@ export class CircuitBinding {
           visuals.set(inst.id, { contacts: engaged });
           break;
         }
+        case 'sim.ir-led':
+          // Lit means "a carrier is genuinely going out right now", which is a
+          // different thing from the pin being high.
+          visuals.set(inst.id, { on: this.irMedium.isLive(inst.id) });
+          break;
         case 'sim.ir-receiver': {
           const device = this.irDeviceCache.get(inst.id);
           visuals.set(inst.id, { on: device instanceof IrReceiverDevice && device.outputLow });

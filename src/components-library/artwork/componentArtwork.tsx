@@ -1293,6 +1293,28 @@ function IrReceiverArt({ def, visual }: ArtProps) {
   );
 }
 
+/** A 5 mm LED in clear or smoked epoxy, with the flat on the cathode side. */
+function IrLedArt({ def, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const lit = visual?.on === true;
+  return (
+    <g>
+      <path
+        d={`M ${W * 0.16} ${H * 0.52} L ${W * 0.16} ${H * 0.3} A ${W * 0.34} ${H * 0.26} 0 1 1 ${W * 0.84} ${H * 0.3} L ${W * 0.84} ${H * 0.52} Z`}
+        fill={lit ? '#6a3a55' : '#3a3550'}
+        stroke="#241f36"
+        strokeWidth="0.8"
+      />
+      <rect x={W * 0.12} y={H * 0.5} width={W * 0.76} height={H * 0.07} rx={W * 0.03} fill="#2b2740" />
+      <ellipse cx={W * 0.38} cy={H * 0.24} rx={W * 0.09} ry={H * 0.06} fill="rgba(255,255,255,0.28)" />
+      {def.pins.map((p) => (
+        <line key={p.id} x1={p.x} y1={H * 0.56} x2={p.x} y2={H} stroke="#a8b0b8" strokeWidth="1.4" />
+      ))}
+    </g>
+  );
+}
+
 /**
  * The virtual remote: a body of round keys, drawn from the same rects the
  * canvas hit-tests, with an emitter window at the top that lights while a key
@@ -1770,6 +1792,7 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   tmp36: (p) => <Tmp36Art {...p} />,
   ldr: (p) => <LdrArt {...p} />,
   'ir-receiver': (p) => <IrReceiverArt {...p} />,
+  'ir-led': (p) => <IrLedArt {...p} />,
   'ir-remote': (p) => <IrRemoteArt {...p} />,
   'battery-9v': (p) => <BatteryArt {...p} />,
   'battery-aa': (p) => <BatteryArt {...p} />,
