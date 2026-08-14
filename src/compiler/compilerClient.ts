@@ -84,6 +84,7 @@ export async function compileProjectCode(
       diagnostics: Array.isArray(raw.diagnostics) ? raw.diagnostics : [],
       firmware: raw.firmware,
       memory: raw.memory,
+      simulationNotes: Array.isArray(raw.simulationNotes) ? raw.simulationNotes : undefined,
       durationMs: typeof raw.durationMs === 'number' ? raw.durationMs : 0,
       error: raw.error ?? (res.ok ? undefined : `Compiler service returned HTTP ${res.status}.`),
       errorCode: raw.errorCode,

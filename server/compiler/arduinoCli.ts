@@ -36,6 +36,14 @@ export interface CliAvailability {
    * drifted looks healthy under the first one.
    */
   coreVersions: Record<string, string>;
+  /**
+   * Installed version per library name, from `arduino-cli lib list`.
+   *
+   * Reported for the same reason coreVersions is: a sketch that includes
+   * Servo.h either compiles or does not, and which of those it is depends on
+   * something the service can state up front instead of finding out per build.
+   */
+  libraryVersions: Record<string, string>;
   avrCoreInstalled: boolean;
   reason?: string;
 }
@@ -60,12 +68,14 @@ export async function detectArduinoCli(): Promise<CliAvailability> {
     } catch {
       installedCores = [];
     }
+    const libraryVersions = await listLibraries();
     const avrCoreInstalled = installedCores.includes('arduino:avr');
     cached = {
       available: true,
       version,
       installedCores,
       coreVersions,
+      libraryVersions,
       avrCoreInstalled,
       reason: avrCoreInstalled
         ? undefined
@@ -77,11 +87,43 @@ export async function detectArduinoCli(): Promise<CliAvailability> {
       version: '',
       installedCores: [],
       coreVersions: {},
+      libraryVersions: {},
       avrCoreInstalled: false,
       reason: 'arduino-cli is not installed or not on PATH.',
     };
   }
   return cached;
+}
+
+/**
+ * `name -> version` for every installed library.
+ *
+ * The JSON key for this listing has moved between arduino-cli releases, so both
+ * spellings are accepted; guessing one and reporting every library as missing
+ * after an upgrade would be the same class of silent drift the pins exist to
+ * prevent.
+ */
+async function listLibraries(): Promise<Record<string, string>> {
+  const versions: Record<string, string> = {};
+  try {
+    const { stdout } = await execFileAsync('arduino-cli', ['lib', 'list', '--format', 'json'], {
+      timeout: 30_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    const parsed: unknown = JSON.parse(stdout);
+    const container = parsed as Record<string, unknown> | unknown[];
+    const list = Array.isArray(container)
+      ? container
+      : ((container?.['installed_libraries'] ?? container?.['installedLibraries'] ?? []) as unknown[]);
+    for (const entry of Array.isArray(list) ? list : []) {
+      const row = entry as { library?: { name?: string; version?: string }; name?: string; version?: string };
+      const lib = row.library ?? row;
+      if (lib?.name) versions[lib.name] = lib.version ?? 'unknown';
+    }
+  } catch {
+    return {};
+  }
+  return versions;
 }
 
 export interface CliBuildOutput {
@@ -106,8 +148,14 @@ export async function cliCompile(
   arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' = 'avr',
 ): Promise<CliBuildOutput> {
   const jobs = ['--jobs', String(COMPILE_JOBS)];
+  // Syntax-only is a real compile with the artifacts thrown away, not a flag.
+  // It used to pass `--dry-run`, which arduino-cli 1.5.1 does not have: every
+  // call to /api/compiler/validate failed with "unknown flag: --dry-run" and
+  // reported it as a build failure. Nothing in the app calls that endpoint, so
+  // it went unnoticed. Omitting --output-dir leaves the artifacts in
+  // arduino-cli's own build directory, where they are never read.
   const args = syntaxOnly
-    ? ['compile', ...jobs, '--fqbn', fqbn, '--warnings', 'default', '--dry-run', sketchDir]
+    ? ['compile', ...jobs, '--fqbn', fqbn, '--warnings', 'default', sketchDir]
     : ['compile', ...jobs, '--fqbn', fqbn, '--warnings', 'default', '--output-dir', outputDir, sketchDir];
   try {
     const { stdout, stderr } = await execFileAsync('arduino-cli', args, {

@@ -4,6 +4,7 @@ import { detectGccToolchain, gccCompile, parseDiagnostics, BuildTimeoutError } f
 import { buildSketchDir, buildCliSketchDir } from './sketchBuilder.js';
 import { cleanupDir, createBuildDir, validateFiles, InputValidationError } from './fileService.js';
 import { findTarget, SUPPORTED_TARGETS, type CompileRequest, type CompileResult, type Diagnostic } from './types.js';
+import { includeWarnings } from './libraries.js';
 
 export interface CompilerHealth {
   available: boolean;
@@ -81,6 +82,12 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
     throw err;
   }
 
+  // Computed from the sources as submitted, before anything is written to
+  // disk, so it is reported on a failed build as readily as a successful one:
+  // a sketch that includes a header this target cannot build should say so
+  // even when there are twenty other errors above it.
+  const notes = includeWarnings(req.files.map((f) => f.content).join('\n'), target.fqbn);
+
   const cli = await detectArduinoCli();
 
   // Non-AVR architectures (RP2040) compile ONLY through arduino-cli with the
@@ -112,7 +119,7 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
       const out = await cliCompile(sketchDir, outDir, target.fqbn, syntaxOnly, target.arch);
       const nameMap = new Map<string, string>([['cdsketch.ino', 'sketch.ino']]);
       const diagnostics = parseDiagnostics(out.stderr, nameMap);
-      return finish(out.code === 0, 'arduino-cli', cli.version, out, diagnostics, target, started, syntaxOnly);
+      return finish(out.code === 0, 'arduino-cli', cli.version, out, diagnostics, target, started, syntaxOnly, notes);
     } catch (err) {
       if (err instanceof BuildTimeoutError) {
         return { ...base, success: false, error: err.message, errorCode: 'BUILD_TIMEOUT', durationMs: Date.now() - started };
@@ -148,7 +155,7 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
       const out = await cliCompile(sketchDir, outDir, target.fqbn, syntaxOnly, target.arch);
       const nameMap = new Map<string, string>([['cdsketch.ino', 'sketch.ino']]);
       const diagnostics = parseDiagnostics(out.stderr, nameMap);
-      return finish(out.code === 0, 'arduino-cli', health.version, out, diagnostics, target, started, syntaxOnly);
+      return finish(out.code === 0, 'arduino-cli', health.version, out, diagnostics, target, started, syntaxOnly, notes);
     }
 
     const gcc = await detectGccToolchain();
@@ -157,12 +164,12 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
     const out = await gccCompile(buildDir, target, gcc.coreRoot!, sketch.units, sourcesText, syntaxOnly);
     const diagnostics = parseDiagnostics(out.stderr, sketch.nameMap);
     if (out.missingLibraries.length > 0 && out.code !== 0) {
-      const result = finish(false, 'avr-gcc', gcc.version, out, diagnostics, target, started, syntaxOnly);
+      const result = finish(false, 'avr-gcc', gcc.version, out, diagnostics, target, started, syntaxOnly, notes);
       result.error = `Missing library: ${out.missingLibraries.join(', ')}. Only the Arduino core libraries (Wire, SPI, EEPROM, SoftwareSerial) are bundled with the local toolchain.`;
       result.errorCode = 'MISSING_LIBRARY';
       return result;
     }
-    return finish(out.code === 0, 'avr-gcc', gcc.version, out, diagnostics, target, started, syntaxOnly);
+    return finish(out.code === 0, 'avr-gcc', gcc.version, out, diagnostics, target, started, syntaxOnly, notes);
   } catch (err) {
     if (err instanceof BuildTimeoutError) {
       return {
@@ -194,6 +201,7 @@ function finish(
   target: { id: string; fqbn: string; flashMaxBytes: number; ramMaxBytes: number },
   started: number,
   syntaxOnly: boolean,
+  simulationNotes: CompileResult['simulationNotes'],
 ): CompileResult {
   const result: CompileResult = {
     success,
@@ -208,6 +216,7 @@ function finish(
     boardId: target.id,
     fqbn: target.fqbn,
   };
+  if (simulationNotes && simulationNotes.length > 0) result.simulationNotes = simulationNotes;
   if (success && !syntaxOnly) {
     if (out.hex) {
       result.firmware = { format: 'intel-hex', data: out.hex };

@@ -48,6 +48,22 @@ export interface CompileResult {
     regions?: { offset: number; data: string }[];
   };
   memory?: MemoryUsage;
+  /**
+   * Things that are true about this build that the compiler cannot say.
+   *
+   * Chiefly: a library that compiles for this target and then does nothing,
+   * because CircuitDesk does not model the peripheral it drives. That is not a
+   * compiler diagnostic — the build is genuinely fine — but it is the single
+   * most confusing state a simulator can leave a user in, so it travels with
+   * the result instead of being discovered by staring at a motionless servo.
+   */
+  simulationNotes?: {
+    header: string;
+    kind: 'unsupported' | 'no-effect';
+    reason: string;
+    alternative?: string;
+    workaround?: string;
+  }[];
   durationMs: number;
   /** Board this firmware was built for — execution paths refuse a mismatch. */
   boardId?: string;

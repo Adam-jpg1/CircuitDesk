@@ -9,11 +9,15 @@
 // signal pin does nothing.
 //
 // So every case here drives the servo from a hand-written pulse loop rather
-// than through the Servo library. That is deliberate twice over: it proves the
-// angle is derived from the wire, and it works today — the Servo library is
-// not part of the pinned toolchain, so a sketch that includes it does not
-// build. Pinning bundled Arduino libraries is recorded as its own piece of
-// infrastructure work rather than half-done here.
+// than through the Servo library. That isolates the model: nothing in this file
+// can pass because something intercepted `Servo::write`, because nothing here
+// calls it.
+//
+// The library route is now pinned and tested separately, in
+// tests/compiler.libraries.mts — an Uno running the real Servo library reaches
+// the same three angles this file reaches by hand. The two together are what
+// rule out an API shim: one proves the angle comes from the wire, the other
+// proves the library reaches the wire.
 
 import { simulationController } from '../src/simulation/simulationController';
 import { useSimulationStore } from '../src/simulation/simulationStore';

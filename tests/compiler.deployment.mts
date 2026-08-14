@@ -25,6 +25,12 @@ const BASE = process.env.CIRCUITDESK_URL ?? 'http://localhost:3411';
 const manifest = JSON.parse(readFileSync(new URL('../server/compiler/cores.json', import.meta.url), 'utf8')) as {
   cores: { id: string; version: string; targets: string[]; required?: boolean }[];
 };
+const libManifest = JSON.parse(
+  readFileSync(new URL('../server/compiler/libraries.json', import.meta.url), 'utf8'),
+) as {
+  libraries: { id: string; version: string; provides: string[]; required?: boolean }[];
+  headers: { header: string; via: { source: string; targets: string[]; effect?: string }[] }[];
+};
 
 let failures = 0;
 let skipped = 0;
@@ -69,6 +75,24 @@ if (!LOCAL_TARGET) {
     }
     check(output.includes('esp32:esp32@'), 'the ESP32 core is part of the environment at all, which is the regression this covers');
   }
+
+  // Libraries are the same class of promise as cores. A deployment without the
+  // Servo library cannot build the sketch every servo tutorial in the world is
+  // written as, and would report itself perfectly healthy while doing it.
+  const libVerify = spawnSync('node', ['server/compiler/installLibraries.mjs', '--verify'], {
+    encoding: 'utf8',
+    cwd: new URL('..', import.meta.url).pathname,
+  });
+  const libOutput = `${libVerify.stdout ?? ''}${libVerify.stderr ?? ''}`;
+  if (libVerify.error) {
+    skip(`the library verifier could not run: ${libVerify.error.message}`);
+  } else {
+    console.log(libOutput.trim().split('\n').map((l) => `   ${l}`).join('\n'));
+    check(libVerify.status === 0, `every pinned library is installed at its pinned version (exit ${libVerify.status})`);
+    for (const lib of libManifest.libraries) {
+      check(libOutput.includes(`ok       ${lib.id}@${lib.version}`), `${lib.id} is ${lib.version}, the version this service is validated against`);
+    }
+  }
 }
 
 // ================================= 2. what the service says it can build ====
@@ -77,6 +101,18 @@ interface Capabilities {
   arduinoCli?: { available: boolean; version: string };
   missingRequiredCores?: string[];
   driftedCores?: string[];
+  missingRequiredLibraries?: string[];
+  driftedLibraries?: string[];
+  libraries?: {
+    id: string;
+    expectedVersion: string;
+    installedVersion: string | null;
+    installed: boolean;
+    matchesPin: boolean;
+    required: boolean;
+    provides: string[];
+    reason?: string;
+  }[];
   cores?: {
     id: string;
     expectedVersion: string;
@@ -87,7 +123,14 @@ interface Capabilities {
     fqbnFamilies: string[];
     reason?: string;
   }[];
-  targets?: { id: string; fqbn: string; core: string; installed: boolean; coreVersion: string | null }[];
+  targets?: {
+    id: string;
+    fqbn: string;
+    core: string;
+    installed: boolean;
+    coreVersion: string | null;
+    headers?: { header: string; source: string; effect: string }[];
+  }[];
 }
 
 let capabilities: Capabilities | null = null;
@@ -133,6 +176,35 @@ if (!capabilities) {
     const target = capabilities.targets?.find((t) => t.fqbn === fqbn);
     check(target?.installed === true, `${fqbn} is reported as buildable`);
   }
+
+  check(
+    (capabilities.missingRequiredLibraries ?? []).length === 0,
+    `no required library is missing (${(capabilities.missingRequiredLibraries ?? []).join(', ') || 'none'})`,
+  );
+  check(
+    (capabilities.driftedLibraries ?? []).length === 0,
+    `no library has drifted from its pin (${(capabilities.driftedLibraries ?? []).join(', ') || 'none'})`,
+  );
+  for (const lib of libManifest.libraries) {
+    const reported = capabilities.libraries?.find((l) => l.id === lib.id);
+    check(reported !== undefined, `${lib.id} appears in the capability report`);
+    check(reported?.installed === true, `${lib.id} is reported installed`);
+    check(reported?.matchesPin === true, `${lib.id} matches the pin this service was built against`);
+  }
+
+  // The report has to say what a board can build, not only which core it uses.
+  // Servo.h on an Uno is the case a user hits first.
+  const uno = capabilities.targets?.find((t) => t.fqbn === 'arduino:avr:uno');
+  const unoServo = uno?.headers?.find((h) => h.header === 'Servo.h');
+  check(unoServo !== undefined, 'the Uno target reports that it can build Servo.h');
+  check(unoServo?.effect === 'works', 'and that the library actually drives a pin there, not merely compiles');
+
+  // And it has to be honest where it cannot. A Pico compiles Servo.h and moves
+  // nothing; a capability report that hid that would be the same bug this file
+  // was written for, one layer up.
+  const pico = capabilities.targets?.find((t) => t.fqbn === 'rp2040:rp2040:rpipico');
+  const picoServo = pico?.headers?.find((h) => h.header === 'Servo.h');
+  check(picoServo?.effect === 'compiles-only', 'the Pico target reports Servo.h as compiling without effect');
 }
 
 // ================================ 3. real builds through the real endpoint ==

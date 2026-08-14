@@ -324,6 +324,18 @@ export interface Diagnostic {
   message: string;
 }
 
+/** One include the build is fine with and the simulation is not. */
+export interface SimulationNote {
+  header: string;
+  /** `unsupported` — will not compile. `no-effect` — compiles and moves nothing. */
+  kind: 'unsupported' | 'no-effect';
+  reason: string;
+  /** A header to use instead, for `unsupported`. */
+  alternative?: string;
+  /** A different way to get the same result, for `no-effect`. */
+  workaround?: string;
+}
+
 export interface CompileResult {
   success: boolean;
   toolchain: 'arduino-cli' | 'avr-gcc' | 'none';
@@ -333,6 +345,16 @@ export interface CompileResult {
   diagnostics: Diagnostic[];
   firmware?: { format: 'intel-hex' | 'uf2' | 'bin' | 'esp-image'; data: string };
   memory?: { flashBytes: number; flashMaxBytes: number; ramBytes: number; ramMaxBytes: number };
+  /**
+   * True things about this build that are not compiler diagnostics.
+   *
+   * A library can compile perfectly for the selected board and still do
+   * nothing, because CircuitDesk does not model the peripheral it drives —
+   * Servo.h on a Pico goes through PIO, and the pin never moves. The build is
+   * not wrong, so it is not an error; but a silent dead circuit is the worst
+   * thing to leave someone debugging, so it is said out loud.
+   */
+  simulationNotes?: SimulationNote[];
   durationMs: number;
   error?: string;
   errorCode?: string;
