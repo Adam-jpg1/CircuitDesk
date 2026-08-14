@@ -272,7 +272,10 @@ section('5. the 433 MHz pair in the library');
     const cov = COMPONENT_COVERAGE.find((c) => c.id === id);
     check(cov?.status === 'simulated', `${id} is recorded as simulated`);
     check((cov?.tests ?? []).includes('tests/rf.ook433.mts'), `${id} names this file as its proof`);
-    check((cov?.dependencies ?? []).length === 0, `${id} has no blocker left`);
+    // Not "no dependencies": on a finished part the field records the
+    // primitive it rests on, which is how the coverage audit knows the shared
+    // radio medium exists and stops other entries from claiming to wait for it.
+    check((cov?.dependencies ?? []).includes('rf-channel'), `${id} records the medium it rests on`);
   }
 }
 

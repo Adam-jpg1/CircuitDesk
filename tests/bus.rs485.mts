@@ -370,7 +370,12 @@ section('5. the MAX485 in the library');
   const cov = COMPONENT_COVERAGE.find((c) => c.id === 'comp.max485');
   check(cov?.status === 'simulated', 'recorded as simulated');
   check((cov?.tests ?? []).includes('tests/bus.rs485.mts'), 'and names this file as its proof');
-  check((cov?.dependencies ?? []).length === 0, 'with no blocker left');
+  // `dependencies` on a FINISHED part is what it rests on, not what it waits
+  // for. Asserting it is empty would quietly undo that: the point of recording
+  // the shared differential bus here is that the next part built on it can be
+  // estimated honestly, and the coverage audit derives "this primitive exists"
+  // from exactly these rows.
+  check((cov?.dependencies ?? []).includes('differential-bus'), 'and records the primitive it rests on');
 }
 
 console.log(
