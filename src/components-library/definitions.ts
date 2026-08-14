@@ -1366,6 +1366,53 @@ export const WIFI_ESP01 = def(
   },
 );
 
+// ---------- Infrared ----------
+
+export const IR_RECEIVER = def(
+  'comp.ir-receiver', 'IR Receiver (TSOP)', 'Modules', 8, 12, 'ir-receiver',
+  [
+    // The TSOP38238 order, looking at the domed face: OUT, GND, VCC.
+    pin('out', 'OUT', 1.6, 11.6, { type: 'digital', caps: ['digital-out'] }),
+    pin('gnd', 'GND', 4.0, 11.6, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', 'VCC', 6.4, 11.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.ir-receiver',
+    properties: [prop('carrierHz', 'Carrier', 'number', 38000, { unit: 'Hz' })],
+    description:
+      'A demodulating IR receiver. It watches the shared infrared medium, and while it hears a carrier inside ' +
+      'its passband it pulls OUT LOW — active low, exactly like the hardware, which is why an idle module ' +
+      'reads HIGH. The output follows the real mark and space timing on the runner\'s microsecond clock, so a ' +
+      'sketch decodes it with its own timing code and a sketch whose timing is wrong fails here too. Nothing ' +
+      'hands a decoded command to firmware. A carrier more than 20 % away from this module\'s centre ' +
+      'frequency is not heard, so a 56 kHz remote does nothing to a 38 kHz part. Two transmitters at once are ' +
+      'not arbitrated: the module sees the sum of the light and decodes rubbish, as it would on a table. ' +
+      'Distance, angle, ambient light and AGC recovery are not modelled.',
+  },
+);
+
+export const IR_REMOTE = def(
+  'comp.ir-remote', 'Virtual IR Remote', 'Modules', 46, 108, 'ir-remote',
+  [],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.ir-remote',
+    properties: [
+      prop('address', 'NEC address', 'number', 0),
+      prop('extended', 'Extended (16-bit) address', 'boolean', false),
+      prop('carrierHz', 'Carrier', 'number', 38000, { unit: 'Hz' }),
+    ],
+    description:
+      'A remote you press on the canvas. It has no pins because a remote has no wires: pressing a key puts a ' +
+      'real NEC burst into the shared infrared medium, and any receiver that can see it sees it. One press ' +
+      'sends one frame; holding a key sends NEC repeat codes every 108 ms rather than re-sending the frame, ' +
+      'which is what makes "one press, one action" sketches behave the same here as on a bench. The key caps ' +
+      'carry the NEC commands published for the common starter-kit remote, so a tutorial sketch recognises ' +
+      'them. It cannot address a receiver, so it cannot reach one it should not.',
+  },
+);
+
 // ---------- Power ----------
 
 export const BATTERY_9V = def(
@@ -1773,7 +1820,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331, EPAPER29,
   NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
-  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER,
+  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_REMOTE,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
   CELL_15, COIN_CELL, DC_SUPPLY, REGULATOR_5, REGULATOR_33, LDO_33, BUCK_CONVERTER, BOOST_CONVERTER,
   HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,
