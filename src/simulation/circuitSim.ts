@@ -52,6 +52,7 @@ import { ANALOG_SENSORS, GPIO_SENSORS } from './devices/analogSensors';
 import { contactsOf } from './devices/contactRegistry';
 import { LOGIC_PARTS } from './devices/logicParts';
 import { Hd44780ParallelDevice, LCD_DATA_PINS_8 } from './devices/lcdParallel';
+import { Ws2812Device } from './devices/ws2812';
 import { LogicIcDevice, levelOf as levelOfVolts, type Logic } from './devices/logicIc';
 import { isContactClosed, contactStateKey } from './devices/contacts';
 
@@ -98,6 +99,14 @@ export interface ComponentVisualState {
    * down at once and the artwork has to show which four.
    */
   contacts?: Record<string, boolean>;
+  /**
+   * One colour per pixel of an addressable strip, in strip order.
+   *
+   * Separate from `rgb` because that is a single LED's three channels; this is
+   * a frame. Empty means the strip's data line reaches no board pin, which is
+   * a dark strip rather than a missing one.
+   */
+  pixelColors?: { r: number; g: number; b: number }[];
 }
 
 export interface SimControls {
@@ -232,6 +241,19 @@ interface SpiCreateContext extends DeviceCreateContext {
  * The controller is identical across them — this table is only how many
  * characters are in front of it.
  */
+/**
+ * Addressable-LED parts, and how many pixels each has by default.
+ *
+ * The count is a property on the instance; this is only the fallback for a part
+ * dropped on the canvas and not configured.
+ */
+const WS2812_DEFAULT_PIXELS: Record<string, number> = {
+  'comp.neopixel': 1,
+  'comp.neopixel-ring': 16,
+  'comp.neopixel-strip': 8,
+  'comp.neopixel-matrix': 64,
+};
+
 const PARALLEL_LCD_GEOMETRY: Record<string, { columns: number; rows: number }> = {
   'comp.lcd1602-parallel': { columns: 16, rows: 2 },
   'comp.lcd2004-parallel': { columns: 20, rows: 4 },
@@ -399,12 +421,14 @@ export class CircuitBinding {
     this.hc595.clear();
     this.hc165.clear();
     this.parallelLcds.clear();
+    this.addressableLeds.clear();
     const i2c: I2cDevice[] = [];
     const spi: SpiDevice[] = [];
     for (const [instanceId, owner] of this.runners) {
       i2c.push(...this.setupI2cDevices(owner, instanceId));
       spi.push(...this.setupSpiDevices(owner, instanceId));
       this.setupParallelLcds(owner, instanceId);
+      this.setupAddressableLeds(owner, instanceId);
     }
     this.i2cDevices = i2c;
     this.spiDevices = spi;
@@ -557,6 +581,45 @@ export class CircuitBinding {
    * further edges, and a panel that only knew about changes would read it as
    * low forever.
    */
+  /**
+   * WS2812 strips, watched as raw edges on their data pin.
+   *
+   * There is nothing else to hook: the part's entire protocol is the time
+   * between one edge and the next. The timestamp comes from the runner's own
+   * cycle counter at the moment the listener fires, which is what makes a
+   * 400 ns pulse distinguishable from an 800 ns one — wall time could not.
+   */
+  private setupAddressableLeds(runner: BoardRunner, boardInstanceId: string): void {
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      const fallback = def ? WS2812_DEFAULT_PIXELS[def.id] : undefined;
+      if (fallback === undefined) continue;
+
+      const dinNet = this.netOfInstancePin(inst.id, 'din');
+      const dinPin =
+        dinNet === undefined
+          ? null
+          : (this.netEndpoints.get(dinNet) ?? []).find((e) => e.instance === boardInstanceId)?.pin ?? null;
+      // Its data line reaches no pad on this board. Another board may drive it,
+      // and a strip chained off another strip's DOUT is driven by nothing at
+      // all — which is the documented limit, not a silent failure.
+      if (dinPin === null) continue;
+
+      const count = Math.max(1, Math.floor(Number(inst.properties.pixelCount ?? fallback)));
+      const existing = this.addressableLedDevices.get(inst.id);
+      const device =
+        existing && existing.pixelCount === count ? existing : new Ws2812Device(inst.id, count);
+      this.addressableLedDevices.set(inst.id, device);
+      this.addressableLeds.set(inst.id, { device, runner });
+
+      this.unsubscribeLatches.push(
+        runner.addPinListener((pin, high) => {
+          if (pin === dinPin) device.onEdge(high, runner.timeMs * 1e6);
+        }),
+      );
+    }
+  }
+
   private setupParallelLcds(runner: BoardRunner, boardInstanceId: string): void {
     const boardPinOn = (netId: string | undefined): number | null =>
       netId === undefined
@@ -1139,6 +1202,23 @@ export class CircuitBinding {
   private parallelLcdDevices = new Map<string, Hd44780ParallelDevice>();
   private parallelLcds = new Map<string, Hd44780ParallelDevice>();
 
+  /** WS2812 strips, kept across re-binds for the same reason the LCDs are. */
+  private addressableLedDevices = new Map<string, Ws2812Device>();
+  /**
+   * The strips currently reachable, each with the board that drives it.
+   *
+   * The runner is carried here because a frame latches on elapsed time rather
+   * than on an edge, and "elapsed" means elapsed on the clock of the board
+   * whose pin is driving this strip — which on a two-board canvas is not
+   * necessarily the primary one.
+   */
+  private addressableLeds = new Map<string, { device: Ws2812Device; runner: BoardRunner }>();
+
+  /** A strip's model, for the canvas and the inspector. */
+  addressableLedFor(instanceId: string): Ws2812Device | undefined {
+    return this.addressableLeds.get(instanceId)?.device;
+  }
+
   /** A directly-wired LCD's model, for the canvas and the inspector. */
   parallelLcdFor(instanceId: string): Hd44780ParallelDevice | undefined {
     return this.parallelLcds.get(instanceId);
@@ -1354,6 +1434,15 @@ export class CircuitBinding {
     // them. sync() keeps existing devices by instance id, so re-binding does
     // not wipe an SSD1306's display RAM or an EEPROM's contents.
     if (this.busPinSignature() !== this.boundBusPins) this.rebindBuses();
+
+    // A WS2812 frame is latched by a gap, not by an edge, so a sketch that
+    // writes the strip once and then sits in an empty loop produces no further
+    // edges and would never show anything. Giving each strip the current time
+    // once per slice is what closes that.
+    for (const { device, runner: owner } of this.addressableLeds.values()) {
+      device.settle(owner.timeMs * 1e6);
+    }
+
     const highVolts = Number(this.boardDef?.metadata.logicVoltage ?? 5);
     // A CMOS input switches around half the supply, so the threshold comes
     // from the board rather than being fixed at an AVR's 2.5 V.
@@ -1820,6 +1909,19 @@ export class CircuitBinding {
           } else {
             // Not wired to the bus (or no simulation running): stays dark.
             visuals.set(inst.id, { display: { pixels: null, on: false, revision: 0 } });
+          }
+          break;
+        }
+        case 'sim.neopixel': {
+          const strip = this.addressableLedFor(inst.id);
+          if (strip) {
+            visuals.set(inst.id, {
+              pixelColors: strip.pixels.map((c) => ({ ...c })),
+              value: strip.litCount,
+            });
+          } else {
+            // Its data line reaches no board pin, so nothing can drive it.
+            visuals.set(inst.id, { pixelColors: [] });
           }
           break;
         }

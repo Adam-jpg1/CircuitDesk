@@ -375,6 +375,51 @@ function parallelLcd(
 export const LCD1602_PARALLEL = parallelLcd('comp.lcd1602-parallel', 'LCD 16×2 (parallel)', 16, 2, 80, 36);
 export const LCD2004_PARALLEL = parallelLcd('comp.lcd2004-parallel', 'LCD 20×4 (parallel)', 20, 4, 98, 60);
 
+/**
+ * A WS2812 part: data in, data out, power, and a pixel count.
+ *
+ * Ring, strip, matrix and a single pixel are the same silicon repeated — the
+ * only thing that differs is how many there are and how they are laid out, so
+ * they are one builder rather than four hand-written parts.
+ */
+function neopixel(
+  id: string,
+  name: string,
+  pixels: number,
+  widthMm: number,
+  heightMm: number,
+  artworkId: string,
+  layout: string,
+): ComponentDefinition {
+  return def(
+    id, name, 'LEDs', widthMm, heightMm, artworkId,
+    [
+      pin('gnd', 'GND', widthMm * 0.2, heightMm - 0.6, { type: 'ground', caps: ['ground'] }),
+      pin('vcc', '5V', widthMm * 0.4, heightMm - 0.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+      pin('din', 'DIN', widthMm * 0.6, heightMm - 0.6, { type: 'digital', caps: ['digital-in'] }),
+      pin('dout', 'DOUT', widthMm * 0.8, heightMm - 0.6, { type: 'digital', caps: ['digital-out'] }),
+    ],
+    'simulated',
+    {
+      properties: [prop('pixelCount', 'Pixels', 'number', pixels, { min: 1, max: 256 })],
+      simulationAdapterId: 'sim.neopixel',
+      description:
+        `${layout} of WS2812B addressable LEDs. The colours are decoded from the waveform on DIN — each bit is a ` +
+        `~1.25 us period whose high time is short for a zero and long for a one, twenty-four bits per pixel in ` +
+        `green-red-blue order, latched by a gap of 50 us or more. Nothing watches for a library call, so a ` +
+        `hand-written bit-bang loop lights it and a sketch driving the wrong pin lights nothing. Sending fewer ` +
+        `bits than the strip has pixels leaves the rest holding their last colour, as the hardware does. ` +
+        `Brightness is a colour rather than a current draw, the WS2811's 400 kHz mode is not modelled, and DOUT ` +
+        `drives nothing — chain by raising this part's pixel count rather than by wiring two parts together.`,
+    },
+  );
+}
+
+export const NEOPIXEL = neopixel('comp.neopixel', 'NeoPixel (WS2812B)', 1, 10, 10, 'neopixel', 'A single');
+export const NEOPIXEL_RING = neopixel('comp.neopixel-ring', 'NeoPixel Ring (16)', 16, 46, 46, 'neopixel-ring', 'A ring');
+export const NEOPIXEL_STRIP = neopixel('comp.neopixel-strip', 'NeoPixel Strip (8)', 8, 84, 12, 'neopixel-strip', 'A strip');
+export const NEOPIXEL_MATRIX = neopixel('comp.neopixel-matrix', 'NeoPixel Matrix (8×8)', 64, 42, 46, 'neopixel-matrix', 'An 8x8 matrix');
+
 export const OLED = def(
   'comp.oled', 'OLED 128×64 (SSD1306)', 'Displays', 27, 27, 'oled',
   [
@@ -956,6 +1001,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   BUZZER, SPEAKER, RELAY,
   SERVO, DC_MOTOR, STEPPER, MOTOR_DRIVER,
   LCD1602, LCD1602_PARALLEL, LCD2004_PARALLEL, OLED, SH1107_OLED, SEVEN_SEGMENT,
+  NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
   GPS, BLUETOOTH, WIFI_ESP01,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
