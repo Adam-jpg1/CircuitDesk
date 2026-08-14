@@ -53,6 +53,10 @@ import { contactsOf } from './devices/contactRegistry';
 import { LOGIC_PARTS } from './devices/logicParts';
 import { Hd44780ParallelDevice, LCD_DATA_PINS_8 } from './devices/lcdParallel';
 import { Ws2812Device } from './devices/ws2812';
+import { Ads1115Device, ADS1115_ADDRESSES } from './devices/ads1115';
+import { Mcp3008Device, MCP3008_CHANNELS } from './devices/mcp3008';
+import { Ds1307Device, DS1307_ADDRESS } from './devices/ds1307';
+import { FramDevice, FRAM_ADDRESSES, type FramSnapshotData } from './devices/fram';
 import { PersistenceTracker } from './devices/persistence';
 import { MotorModel, QuadratureEncoder } from './devices/motorState';
 import { CoilStepper, StepDirDriver } from './devices/steppers';
@@ -205,6 +209,22 @@ const I2C_DEVICE_MODELS: Record<string, I2cDeviceModel> = {
   'comp.oled': {
     defaultAddress: SSD1306_ADDRESSES[0],
     create: (ctx) => new Ssd1306Device(ctx.instanceId, ctx.address),
+  },
+  'comp.ads1115': {
+    defaultAddress: ADS1115_ADDRESSES[0],
+    create: (ctx) => new Ads1115Device(ctx.instanceId, ctx.address),
+  },
+  'comp.ds1307': {
+    defaultAddress: DS1307_ADDRESS,
+    create: (ctx) => new Ds1307Device(ctx.instanceId, ctx.address, () => ctx.nowUs() / 1000),
+  },
+  'comp.fram': {
+    defaultAddress: FRAM_ADDRESSES[0],
+    create: (ctx) => {
+      const device = new FramDevice(ctx.instanceId, ctx.address);
+      device.loadState(ctx.saved.fram as FramSnapshotData | undefined);
+      return device;
+    },
   },
   'comp.sh1107': {
     defaultAddress: SH1107_ADDRESSES[0],
@@ -509,6 +529,10 @@ const SPI_DEVICE_MODELS: Record<string, SpiDeviceModel> = {
     busPins: { sck: 'sck', mosi: 'mosi', miso: null, cs: 'cs' },
     controlPins: ['dc', 'rst'],
     create: (ctx) => new EpaperDevice(ctx.instanceId, ctx.csPinId, () => ctx.nowUs() / 1000),
+  },
+  'comp.mcp3008': {
+    busPins: { sck: 'clk', mosi: 'din', miso: 'dout', cs: 'cs' },
+    create: (ctx) => new Mcp3008Device(ctx.instanceId, ctx.csPinId),
   },
   'comp.nokia5110': {
     busPins: { sck: 'sck', mosi: 'mosi', miso: null, cs: 'cs' },
@@ -2219,6 +2243,33 @@ export class CircuitBinding {
           drivenNets.add(outNet);
         }
       }
+    }
+
+    // External ADCs read the wire.
+    //
+    // Done here, from the settled levels, so the number firmware gets back over
+    // I2C or SPI is the voltage the circuit actually produced. Nothing anywhere
+    // can set a reading: an unwired input is passed as null and reads as an
+    // unwired input rather than as a confident zero.
+    const voltsOnPin = (instanceId: string, pinId: string): number | null => {
+      const netId = this.netOfInstancePin(instanceId, pinId);
+      if (!netId) return null;
+      return levels.get(netId)?.volts ?? null;
+    };
+    for (const device of this.i2cDevices) {
+      if (!(device instanceof Ads1115Device)) continue;
+      for (let ch = 0; ch < 4; ch++) {
+        device.setInputVolts(ch, voltsOnPin(device.instanceId, `a${ch}`));
+      }
+    }
+    for (const device of this.spiDevices) {
+      if (!(device instanceof Mcp3008Device)) continue;
+      for (let ch = 0; ch < MCP3008_CHANNELS; ch++) {
+        device.setInputVolts(ch, voltsOnPin(device.instanceId, `ch${ch}`));
+      }
+      // The reference is a wire too: the same input reads differently on a
+      // part running from 3.3 V and one from 5 V.
+      device.setReference(voltsOnPin(device.instanceId, 'vref'));
     }
 
     // Regulators and converters. Done before everything that reads a rail, so a

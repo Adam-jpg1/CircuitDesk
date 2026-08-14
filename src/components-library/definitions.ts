@@ -1022,6 +1022,117 @@ export const BOOST_CONVERTER = regulatorPart(
   5,
 );
 
+// ---------- ADC, DAC, memory and clocks ----------
+
+export const ADS1115 = def(
+  'comp.ads1115', 'ADS1115 (16-bit I²C ADC)', 'ICs', 22, 20, 'dip-ic',
+  [
+    pin('vcc', 'VDD', 1.2, 3, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('gnd', 'GND', 1.2, 6, { type: 'ground', caps: ['ground'] }),
+    pin('scl', 'SCL', 1.2, 9, { type: 'digital', caps: ['i2c-scl'] }),
+    pin('sda', 'SDA', 1.2, 12, { type: 'digital', caps: ['i2c-sda'] }),
+    pin('addr', 'ADDR', 1.2, 15, { type: 'digital', caps: ['digital-in'] }),
+    pin('alrt', 'ALRT', 1.2, 18, { type: 'digital', caps: ['digital-out'] }),
+    pin('a0', 'A0', 20.8, 3, { type: 'analog', caps: ['analog-in'] }),
+    pin('a1', 'A1', 20.8, 7, { type: 'analog', caps: ['analog-in'] }),
+    pin('a2', 'A2', 20.8, 11, { type: 'analog', caps: ['analog-in'] }),
+    pin('a3', 'A3', 20.8, 15, { type: 'analog', caps: ['analog-in'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.ads1115',
+    validationRules: ['i2c-pins'],
+    properties: [prop('i2cAddress', 'I²C address', 'text', '')],
+    description:
+      'A 16-bit ADC over I²C. The number firmware reads is computed from the volts actually on the input pins ' +
+      'through the mux and gain it selected — there is no way to set a reading. So the mistakes are the real ' +
+      'ones: 5 V into the default ±2.048 V range rails rather than reading 5 V, a differential mux gives a ' +
+      'signed result, an unwired input is not an input at 0 V, and the conversion register holds the last ' +
+      'result until something starts a new one. Single-shot and continuous modes both work. NOT modelled: ' +
+      'conversion time as a real delay (a conversion completes immediately and OS always reads ready), the ' +
+      'comparator and the ALERT pin, and input impedance.',
+  },
+);
+
+export const MCP3008 = def(
+  'comp.mcp3008', 'MCP3008 (8-channel SPI ADC)', 'ICs', 22, 24, 'dip-ic',
+  [
+    ...Array.from({ length: 8 }, (_, i) =>
+      pin(`ch${i}`, `CH${i}`, 1.2, 2.5 + i * 2.4, { type: 'analog', caps: ['analog-in'] }),
+    ),
+    pin('dgnd', 'DGND', 1.2, 22, { type: 'ground', caps: ['ground'] }),
+    pin('cs', 'CS', 20.8, 2.5, { type: 'digital', caps: ['digital-in'] }),
+    pin('din', 'DIN', 20.8, 5.5, { type: 'digital', caps: ['spi-mosi'] }),
+    pin('dout', 'DOUT', 20.8, 8.5, { type: 'digital', caps: ['spi-miso'] }),
+    pin('clk', 'CLK', 20.8, 11.5, { type: 'digital', caps: ['spi-sck'] }),
+    pin('agnd', 'AGND', 20.8, 14.5, { type: 'ground', caps: ['ground'] }),
+    pin('vref', 'VREF', 20.8, 17.5, { type: 'passive', caps: ['power'] }),
+    pin('vcc', 'VDD', 20.8, 20.5, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.mcp3008',
+    description:
+      'Eight 10-bit channels over SPI, with no register map at all: the controller clocks in a start bit, a ' +
+      'mode bit and three channel bits, and the part clocks back a null bit and ten data bits in the exact ' +
+      'positions the usual three-byte transfer expects. The reference is a wire, so the same input reads ' +
+      'differently on a part fed 3.3 V and one fed 5 V — which is the second most common source of confusion ' +
+      'with these. An unwired channel is reported as unwired rather than as 0 V. NOT modelled: the input-range ' +
+      'rules of true differential conversion, conversion time, and input impedance.',
+  },
+);
+
+export const DS1307 = def(
+  'comp.ds1307', 'DS1307 Real-Time Clock', 'ICs', 22, 16, 'dip-ic',
+  [
+    pin('vcc', 'VCC', 1.2, 3, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('gnd', 'GND', 1.2, 7, { type: 'ground', caps: ['ground'] }),
+    pin('sda', 'SDA', 1.2, 11, { type: 'digital', caps: ['i2c-sda'] }),
+    pin('scl', 'SCL', 20.8, 3, { type: 'digital', caps: ['i2c-scl'] }),
+    pin('sqw', 'SQW', 20.8, 7, { type: 'digital', caps: ['digital-out'] }),
+    pin('bat', 'BAT', 20.8, 11, { type: 'passive', caps: ['power'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.ds1307',
+    validationRules: ['i2c-pins'],
+    description:
+      'The classic I²C real-time clock. Time advances from the simulation clock, never from the host, so a ' +
+      'sketch that sets the time and waits sees exactly the time it waited — and a test gives the same answer ' +
+      'on any machine at any hour. Every register is packed BCD, as on the part, so a sketch that forgets to ' +
+      'convert reads nonsense here too. The clock-halt bit is real: a fresh DS1307 comes up with its ' +
+      'oscillator stopped and does nothing until firmware clears it. The 56 bytes of user RAM work. NOT ' +
+      'modelled: the square-wave output, battery backup as distinct from main supply, and oscillator trim.',
+  },
+);
+
+export const FRAM_I2C = def(
+  'comp.fram', 'FRAM (FM24CL64, 8KB I²C)', 'Memory', 20, 16, 'dip-ic',
+  [
+    pin('a0', 'A0', 1.2, 3, { type: 'digital', caps: ['digital-in'] }),
+    pin('a1', 'A1', 1.2, 7, { type: 'digital', caps: ['digital-in'] }),
+    pin('a2', 'A2', 1.2, 11, { type: 'digital', caps: ['digital-in'] }),
+    pin('gnd', 'GND', 1.2, 15, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', 'VCC', 18.8, 3, { type: 'power-3v3', caps: ['power'], voltage: 3.3 }),
+    pin('wp', 'WP', 18.8, 7, { type: 'digital', caps: ['digital-in'] }),
+    pin('scl', 'SCL', 18.8, 11, { type: 'digital', caps: ['i2c-scl'] }),
+    pin('sda', 'SDA', 18.8, 15, { type: 'digital', caps: ['i2c-sda'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.fram',
+    validationRules: ['i2c-pins'],
+    description:
+      'Ferroelectric RAM on the same pins and the same addresses as a 24C-series EEPROM, which is the trap: a ' +
+      'sketch written for one runs against the other and nothing complains. The difference is the writes. An ' +
+      'EEPROM writes a page at a time and is busy for milliseconds afterwards, NACKing everything until it ' +
+      'finishes; this writes a byte at bus speed, has no page boundary, and is never busy. That is the whole ' +
+      'reason to choose the part, so it is exactly where the two models differ. Contents survive a board ' +
+      'reset and are saved with the project. NOT modelled: the write-protect pin, endurance, and the ' +
+      'device-ID sequence.',
+  },
+);
+
 export const SEVEN_SEGMENT = def(
   'comp.seven-segment', '7-Segment Display (CC)', 'Displays', 14, 20, 'seven-segment',
   [
@@ -1580,6 +1691,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
   CELL_15, COIN_CELL, DC_SUPPLY, REGULATOR_5, REGULATOR_33, LDO_33, BUCK_CONVERTER, BOOST_CONVERTER,
   HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,
+  ADS1115, MCP3008, DS1307, FRAM_I2C,
   GENERIC_IC, HEADER_CONNECTOR,
   PUSH_BUTTON_6MM, SLIDE_SWITCH, LIMIT_SWITCH,
   DIP_SWITCH_4, DIP_SWITCH_6, DIP_SWITCH_8,
