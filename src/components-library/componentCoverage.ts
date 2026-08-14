@@ -324,8 +324,8 @@ const ICS: CoverageEntry[] = [
   entry('comp.lm393', 'LM393 comparator', 'ICs', 't', 'logic-ic', 'missing', ['analog'], ['comparator'], 'none', NONE),
   entry('comp.optocoupler', 'Optocoupler (4N35)', 'ICs', 't', 'logic-ic', 'missing', ['gpio'], NONE, 'none', NONE),
   entry('comp.mcp4725', 'MCP4725 12-bit DAC', 'ICs', '-', 'i2c-register', 'simulated', ['i2c', 'analog'], ['i2c-register-device'], 'hardware', ['tests/components.i2c.mts']),
-  entry('comp.ads1115', 'ADS1115 16-bit ADC', 'ICs', '-', 'i2c-register', 'missing', ['i2c', 'analog'], ['i2c-register-device'], 'none', NONE),
-  entry('comp.mcp3008', 'MCP3008 8-channel ADC', 'ICs', '-', 'spi-register', 'missing', ['spi', 'analog'], ['spi-register-device'], 'none', NONE),
+  entry('comp.ads1115', 'ADS1115 16-bit ADC', 'Sensors', 'wt', 'i2c-register', 'simulated', ['i2c','analog'], NONE, 'hardware', ['tests/data.converters.mts']),
+  entry('comp.mcp3008', 'MCP3008 8-ch ADC', 'Sensors', 'w', 'spi-register', 'simulated', ['spi','analog'], NONE, 'hardware', ['tests/data.converters.mts']),
   entry('comp.ina219', 'INA219 current/voltage monitor', 'ICs', '-', 'i2c-register', 'missing', ['i2c'], ['i2c-register-device', 'current-sensing'], 'none', NONE),
   entry('comp.generic-ic', 'Generic IC (DIP)', 'ICs', 't', 'structural', 'wiring', NONE, NONE, 'basic', NONE, 'A package with pins and no behaviour, for sketching a layout.'),
 ];
@@ -378,12 +378,12 @@ const EXPANDERS: CoverageEntry[] = [
 const MEMORY: CoverageEntry[] = [
   entry('comp.eeprom-24c', '24C256 I2C EEPROM', 'Memory & Storage', '-', 'memory', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/components.i2c.mts']),
   entry('comp.eeprom-24c-variants', 'I2C EEPROM (24C02–24C512)', 'Memory & Storage', '-', 'memory', 'missing', ['i2c'], ['i2c-register-device'], 'none', NONE),
-  entry('comp.fram', 'FRAM (FM24CL64)', 'Memory & Storage', '-', 'memory', 'missing', ['i2c'], ['i2c-register-device'], 'none', NONE),
+  entry('comp.fram', 'FRAM (FM24CL64)', 'Memory & Storage', '-', 'memory', 'simulated', ['i2c'], NONE, 'hardware', ['tests/data.converters.mts']),
   entry('comp.sram-23lc', 'SPI SRAM (23LC1024)', 'Memory & Storage', '-', 'memory', 'missing', ['spi'], ['spi-register-device'], 'none', NONE),
   entry('comp.spi-flash', 'SPI NOR flash', 'Memory & Storage', '-', 'memory', 'simulated', ['spi'], ['spi-register-device'], 'hardware', ['tests/spi.devices.mts']),
   entry('comp.sd-card', 'microSD card', 'Memory & Storage', 'w', 'memory', 'simulated', ['spi'], ['spi-register-device'], 'hardware', ['tests/spi.devices.mts']),
   entry('comp.ds3231', 'DS3231 RTC', 'Memory & Storage', '-', 'i2c-register', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/components.i2c.mts']),
-  entry('comp.ds1307', 'DS1307 RTC', 'Memory & Storage', 'w', 'i2c-register', 'missing', ['i2c'], ['i2c-register-device'], 'none', NONE),
+  entry('comp.ds1307', 'DS1307 RTC', 'ICs', 'wt', 'i2c-register', 'simulated', ['i2c'], NONE, 'hardware', ['tests/data.converters.mts']),
 ];
 
 // --------------------------------------------------------------------- Power
