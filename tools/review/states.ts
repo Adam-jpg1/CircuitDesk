@@ -158,7 +158,7 @@ export function activeState(id: string): ComponentVisualState | undefined {
     case 'comp.rotary-encoder':
       return { value: 37, contacts: { sw: true } };
     case 'comp.joystick':
-      return { value: 0, contacts: { sw: true }, readout: ['X 0.82', 'Y 0.19'] };
+      return { value: 0.86, axes: { x: 0.86, y: 0.22 }, contacts: { sw: true } };
     case 'comp.keypad-3x4':
       return { contacts: { 'r1c2': true } };
     case 'comp.keypad-4x4':

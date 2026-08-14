@@ -146,12 +146,21 @@ function dipHotspots(def: ComponentDefinition): Hotspot[] {
  * Derived from the hotspot so the two can never drift apart: the nub is always
  * centred in the slot the pointer is aimed at.
  */
-export function dipActuatorRect(spot: Hotspot, on: boolean): { x: number; y: number; w: number; h: number } {
+export function dipActuatorRect(
+  spot: Hotspot,
+  on: boolean,
+  /** The window it travels in, so the nub cannot end up outside it. */
+  window?: { y: number; h: number },
+): { x: number; y: number; w: number; h: number } {
   const w = 1.7 * MM;
-  const h = 2.3 * MM;
+  const top = window ? window.y + 0.4 : 2.3 * MM;
+  const bottom = window ? window.y + window.h - 0.4 : 7.2 * MM;
+  // Two positions with a gap between them, rather than a fixed height that
+  // stopped fitting once the case made room to print the pole numbers.
+  const h = (bottom - top) * 0.56;
   return {
     x: spot.x + (spot.w - w) / 2,
-    y: on ? 2.3 * MM : 4.9 * MM,
+    y: on ? top : bottom - h,
     w,
     h,
   };

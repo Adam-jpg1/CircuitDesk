@@ -255,6 +255,41 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
           <div style={{ fontSize: 11, color: 'var(--text-2)' }}>Wiper: {Math.round((potPositions[inst.id] ?? 0.5) * 100)}%</div>
         </div>
       )}
+      {adapter === 'sim.joystick' && (
+        // Two wipers, because that is what the module is: the sliders set the
+        // same positions the axes impose on VRx and VRy, so what the stick
+        // shows and what the ADC reads are one number each.
+        <div>
+          {(['x', 'y'] as const).map((axis) => (
+            <div key={axis} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-2)', width: 12 }}>{axis.toUpperCase()}</span>
+              <input
+                type="range" min="0" max="1" step="0.01" disabled={disabled}
+                value={potPositions[`${inst.id}#${axis}`] ?? 0.5}
+                onChange={(e) => sim.getState().setPot(`${inst.id}#${axis}`, Number(e.target.value))}
+                style={{ flex: 1 }}
+              />
+              <span style={{ fontSize: 11, color: 'var(--text-1)', fontFamily: 'var(--font-mono)', width: 34 }}>
+                {(potPositions[`${inst.id}#${axis}`] ?? 0.5).toFixed(2)}
+              </span>
+            </div>
+          ))}
+          <button
+            className="btn sm"
+            disabled={disabled}
+            style={{ marginTop: 4 }}
+            onClick={() => {
+              sim.getState().setPot(`${inst.id}#x`, 0.5);
+              sim.getState().setPot(`${inst.id}#y`, 0.5);
+            }}
+          >
+            Centre
+          </button>
+          <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 4 }}>
+            The wipers are across whatever reaches VCC — a stick on 3.3 V reads 3.3 V at full scale.
+          </div>
+        </div>
+      )}
       {adapter === 'sim.ultrasonic' && (
         <div>
           <input

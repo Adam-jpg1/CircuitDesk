@@ -164,6 +164,14 @@ export interface ComponentVisualState {
    */
   on?: boolean;
   potPosition?: number;
+  /**
+   * A two-axis stick's wiper positions, 0..1 each, centred at 0.5.
+   *
+   * The same numbers the axes impose on the ADC, so the drawn stick and the
+   * voltage firmware reads cannot disagree. A joystick with no supply publishes
+   * nothing here, because an unpowered stick's wipers impose nothing.
+   */
+  axes?: { x: number; y: number };
   value?: number;
   coilOn?: boolean;
   /**
@@ -3419,7 +3427,10 @@ export class CircuitBinding {
           }
           const state: ComponentVisualState = { contacts: engaged };
           if (def.simulationAdapterId === 'sim.joystick') {
-            state.value = controls.potPositions.get(`${inst.id}#x`) ?? 0.5;
+            const x = controls.potPositions.get(`${inst.id}#x`) ?? 0.5;
+            const y = controls.potPositions.get(`${inst.id}#y`) ?? 0.5;
+            state.value = x;
+            state.axes = { x, y };
             this.driveJoystickAxes(inst.id, controls, runner, levelOf);
           }
           visuals.set(inst.id, state);
