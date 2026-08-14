@@ -245,8 +245,16 @@ export const RELAY = def(
     pin('in', 'IN', 12.0, 33.6, { type: 'digital', caps: ['digital-in'] }),
     pin('com', 'COM', 6.0, 0.6), pin('no', 'NO', 13.0, 0.6), pin('nc', 'NC', 20.0, 0.6),
   ],
-  'validation',
-  { description: 'Relay breakout. Wiring/validation-level: coil energizing indicator only; switched load side is not electrically simulated.' },
+  'simulated',
+  {
+    simulationAdapterId: 'sim.relay',
+    description:
+      'A single changeover on a coil. At rest COM is joined to NC; energise the coil and it moves to NO. The ' +
+      'contacts are the same model a switch uses, moved by the coil rather than by a finger, so a relay ' +
+      'switching a real load behaves like a switch switching one — and a module whose ground was forgotten, ' +
+      'or one fed 3.3 V by a coil that wants 5, does not click. Behavioural: coil inductance, the flyback a ' +
+      'driving transistor needs, contact bounce and contact ratings are not modelled.',
+  },
 );
 
 export const SERVO = def(
@@ -861,6 +869,33 @@ export const ULN2003 = def(
   },
 );
 
+/** DPDT relay: one coil, two mechanically linked changeover sections. */
+export const RELAY_DPDT = def(
+  'comp.relay-dpdt', 'Relay (DPDT, 5V)', 'Motors', 30, 24, 'relay',
+  [
+    pin('vcc', 'VCC', 3, 23.4, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('gnd', 'GND', 8, 23.4, { type: 'ground', caps: ['ground'] }),
+    pin('in', 'IN', 13, 23.4, { type: 'digital', caps: ['digital-in'] }),
+    pin('com1', 'COM1', 3, 0.6, { type: 'passive' }),
+    pin('no1', 'NO1', 9, 0.6, { type: 'passive' }),
+    pin('nc1', 'NC1', 15, 0.6, { type: 'passive' }),
+    pin('com2', 'COM2', 21, 0.6, { type: 'passive' }),
+    pin('no2', 'NO2', 27, 0.6, { type: 'passive' }),
+    pin('nc2', 'NC2', 27, 12, { type: 'passive' }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.relay',
+    description:
+      'Two changeover sections on one armature. At rest each COM is joined to its NC; energise the coil and ' +
+      'both move together to NO — you cannot switch one pole without the other, which is the whole reason to ' +
+      'use a DPDT. The contacts are the same model a switch uses, moved by the coil rather than by a finger, ' +
+      'so a relay switching a real load behaves like a switch switching one. The coil needs most of its rated ' +
+      'voltage to pull in, and a module whose ground was forgotten does not click. Behavioural: coil ' +
+      'inductance, the flyback a driving transistor needs, contact bounce and contact ratings are not modelled.',
+  },
+);
+
 export const SEVEN_SEGMENT = def(
   'comp.seven-segment', '7-Segment Display (CC)', 'Displays', 14, 20, 'seven-segment',
   [
@@ -1401,7 +1436,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   PUSH_BUTTON, TOGGLE_SWITCH, POTENTIOMETER,
   BUZZER, SPEAKER, RELAY,
   SERVO, DC_MOTOR, STEPPER, MOTOR_DRIVER,
-  GEARMOTOR, VIBRATION_MOTOR, DC_MOTOR_ENCODER, SOLENOID, STEPPER_28BYJ, A4988, ULN2003,
+  GEARMOTOR, VIBRATION_MOTOR, DC_MOTOR_ENCODER, SOLENOID, STEPPER_28BYJ, A4988, ULN2003, RELAY_DPDT,
   LCD1602, LCD1602_PARALLEL, LCD2004_PARALLEL, OLED, SH1107_OLED, SEVEN_SEGMENT,
   SEVEN_SEGMENT_CA, SEVEN_SEGMENT_2, SEVEN_SEGMENT_4, LED_MATRIX_8X8, TM1637,
   NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331, EPAPER29,
