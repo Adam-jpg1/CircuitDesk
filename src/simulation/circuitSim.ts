@@ -62,6 +62,7 @@ import { RfMedium, RF_BAND } from './devices/rfMedium';
 import { Nrf24Device } from './devices/nrf24';
 import { Sx1278Device } from './devices/sx1278';
 import { Ook433Receiver, Ook433Transmitter, OOK_MODULATION, OOK_DEFAULT_KHZ } from './devices/ook433';
+import { Max485Device, Rs485Bus } from './devices/rs485';
 
 /**
  * Two edges no further apart than this are cycles of one carrier.
@@ -819,6 +820,8 @@ export class CircuitBinding {
     for (const link of this.ookReceivers.values()) link.cancels.forEach((c) => c());
     this.ookReceivers.clear();
     this.ookTransmitters.clear();
+    this.rs485Nodes.clear();
+    this.rs485Buses.clear();
     const i2c: I2cDevice[] = [];
     const spi: SpiDevice[] = [];
     for (const [instanceId, owner] of this.runners) {
@@ -831,6 +834,7 @@ export class CircuitBinding {
       this.setupIrReceivers(owner, instanceId);
       this.setupIrEmitters(owner, instanceId);
       this.setupOokParts(owner, instanceId);
+      this.setupRs485(owner, instanceId);
     }
     this.i2cDevices = i2c;
     this.spiDevices = spi;
@@ -983,6 +987,7 @@ export class CircuitBinding {
     const downstream = runner.onSerialByte;
     runner.onSerialByte = (byte: number) => {
       downstream?.(byte);
+      this.rs485ByteFromBoard(runner, byte);
       const nowUs = runner.timeMs * 1000;
       for (const { link, runner: owner } of this.uartLinks.values()) {
         if (owner !== runner) continue;
@@ -1675,6 +1680,89 @@ export class CircuitBinding {
   }
 
   /**
+   * Attaches the RS-485 transceivers wired to this board.
+   *
+   * The bus is identified by the net its A line sits on, so every transceiver
+   * wired A-to-A shares one — which is what makes three nodes on one pair a
+   * bus rather than three private links. DE and /RE are real board pads read
+   * as edges, because a turnaround happens between two bytes and a per-slice
+   * sample would miss it.
+   */
+  private setupRs485(runner: BoardRunner, boardInstanceId: string): void {
+    const padOn = (instanceId: string, pinId: string): number | null => {
+      const net = this.netOfInstancePin(instanceId, pinId);
+      return net ? (this.netEndpoints.get(net) ?? []).find((e) => e.instance === boardInstanceId)?.pin ?? null : null;
+    };
+
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (def?.id !== 'comp.max485') continue;
+
+      const aNet = this.netOfInstancePin(inst.id, 'a');
+      if (!aNet) continue;
+      const diPin = padOn(inst.id, 'di');
+      const roPin = padOn(inst.id, 'ro');
+      // The transceiver has to be on THIS board's UART pads to be this board's
+      // transceiver. One with neither is somebody else's.
+      if (diPin === null && roPin === null) continue;
+
+      const powered = this.netFedByOther(this.netOfInstancePin(inst.id, 'vcc'), inst.id, POWER_PIN_TYPES);
+      const grounded = this.netFedByOther(this.netOfInstancePin(inst.id, 'gnd'), inst.id, ['ground']);
+      if (!powered || !grounded) continue;
+
+      const bus = this.rs485Buses.get(aNet) ?? new Rs485Bus(aNet);
+      this.rs485Buses.set(aNet, bus);
+      const device = this.rs485DeviceCache.get(inst.id) ?? new Max485Device(inst.id);
+      this.rs485DeviceCache.set(inst.id, device);
+      device.setDriverEnable(false);
+      bus.setDriver(inst.id, false);
+      this.rs485Nodes.set(inst.id, { device, bus, runner, boardInstanceId });
+
+      const dePin = padOn(inst.id, 'de');
+      const rePin = padOn(inst.id, 're');
+      const watch = (pad: number | null, apply: (high: boolean) => boolean) => {
+        if (pad === null) return;
+        this.irEmitterListeners.push(
+          runner.addPinListener((pin, high) => {
+            if (pin !== pad) return;
+            if (!apply(high)) return;
+            bus.setDriver(inst.id, device.driving);
+          }),
+        );
+      };
+      watch(dePin, (high) => device.setDriverEnable(high));
+      watch(rePin, (high) => device.setReceiverEnable(!high));
+
+      // The bytes themselves come off the USART, which is where an AVR puts
+      // them — the TX pad is never driven, so there are no edges to carry.
+      if (diPin !== null) this.tapBoardSerial(runner);
+    }
+  }
+
+  /**
+   * A byte leaving one board, offered to the pair its transceiver sits on.
+   *
+   * DE decides whether it reaches the bus at all; every node with its receiver
+   * enabled hears it, INCLUDING THE SENDER if it forgot to raise /RE — which
+   * is exactly the echo that catches people out. Two drivers enabled at once
+   * mangle it for everybody rather than one of them winning.
+   */
+  private rs485ByteFromBoard(runner: BoardRunner, byte: number): void {
+    for (const [instId, node] of this.rs485Nodes) {
+      if (node.runner !== runner) continue;
+      const carried = node.bus.carry(byte, instId);
+      if (!carried) continue;
+      node.device.noteSent();
+      for (const listener of this.rs485Nodes.values()) {
+        if (listener.bus !== node.bus) continue;
+        const heard = listener.device.receive(carried);
+        if (heard === null) continue;
+        listener.runner.queueSerialInput(String.fromCharCode(heard));
+      }
+    }
+  }
+
+  /**
    * Attaches the 433 MHz parts wired to this board.
    *
    * The transmitter needs its DATA pin on one of this board's pads plus power
@@ -2229,6 +2317,23 @@ export class CircuitBinding {
     }
   >();
   private ookDeviceCache = new Map<string, Ook433Transmitter | Ook433Receiver>();
+
+  /** RS-485: one bus object per differential pair on the canvas. */
+  private rs485Buses = new Map<string, Rs485Bus>();
+  private rs485Nodes = new Map<
+    string,
+    { device: Max485Device; bus: Rs485Bus; runner: BoardRunner; boardInstanceId: string }
+  >();
+  private rs485DeviceCache = new Map<string, Max485Device>();
+
+  /** A transceiver's model, for the canvas and the inspector. */
+  rs485DeviceFor(instanceId: string): Max485Device | undefined {
+    return this.rs485DeviceCache.get(instanceId);
+  }
+  /** The bus a transceiver sits on, for tests and the inspector. */
+  rs485BusFor(instanceId: string): Rs485Bus | undefined {
+    return this.rs485Nodes.get(instanceId)?.bus;
+  }
 
   /** An OOK part's model, for the canvas and the inspector. */
   ookDeviceFor(instanceId: string): Ook433Transmitter | Ook433Receiver | undefined {
@@ -3280,6 +3385,11 @@ export class CircuitBinding {
             engaged[button.key] = controls.pressedButtons.has(contactStateKey(inst.id, button.key));
           }
           visuals.set(inst.id, { contacts: engaged });
+          break;
+        }
+        case 'sim.max485': {
+          const device = this.rs485DeviceCache.get(inst.id);
+          visuals.set(inst.id, { on: device instanceof Max485Device && device.driving });
           break;
         }
         case 'sim.rf433-tx': {
