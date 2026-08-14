@@ -8,6 +8,7 @@ import { Toolbar } from './Toolbar';
 import { LibraryPanel } from './LibraryPanel';
 import { Inspector } from './Inspector';
 import { BottomPanel } from './BottomPanel';
+import { KeyMatrixOverlay } from './KeyMatrixOverlay';
 import { layoutCodeEditor } from './CodePanel';
 import { ErrorBoundary, ResizeHandle, navigate } from '../ui/primitives';
 import { PANEL_LIMITS } from '../persistence/settings';
@@ -97,6 +98,9 @@ export function EditorShell({ projectId }: { projectId: string }) {
           <ErrorBoundary name="canvas">
             <CanvasStage />
           </ErrorBoundary>
+          <ErrorBoundary name="key panel">
+            <KeyPanelHost />
+          </ErrorBoundary>
           {!panelSizes.bottomCollapsed && (
             <>
               <ResizeHandle
@@ -137,6 +141,13 @@ export function EditorShell({ projectId }: { projectId: string }) {
       <StatusBar />
     </div>
   );
+}
+
+/** The full-size key panel, when one is open on a keypad or keyboard. */
+function KeyPanelHost() {
+  const instanceId = useEditorStore((s) => s.keyPanelInstanceId);
+  if (!instanceId) return null;
+  return <KeyMatrixOverlay instanceId={instanceId} onClose={() => useEditorStore.getState().setKeyPanel(null)} />;
 }
 
 function StatusBar() {

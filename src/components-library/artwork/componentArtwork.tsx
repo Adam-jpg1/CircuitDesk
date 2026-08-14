@@ -1634,17 +1634,32 @@ function KeyMatrixArt({ def, instance, visual }: ArtProps) {
             ) : (
               <rect x={k.x} y={k.y} width={k.w} height={k.h * 0.42} rx={k.radius} fill="rgba(255,255,255,0.09)" />
             )}
-            <text
-              x={k.x + k.w / 2}
-              y={k.y + dy + k.h * 0.68}
-              textAnchor="middle"
-              fontSize={k.h * 0.5}
-              fill={down ? '#eaf3ff' : '#d5dde5'}
-              fontFamily="sans-serif"
-              fontWeight={600}
-            >
-              {k.cap.trim()}
-            </text>
+            {/* A blank cap is a real cap — the mini keyboard's space bar is
+                four of them — so it gets the bar rather than nothing, which
+                would read as a key that failed to draw. */}
+            {k.cap.trim() === '' ? (
+              <rect
+                x={k.x + k.w * 0.26}
+                y={k.y + dy + k.h * 0.52}
+                width={k.w * 0.48}
+                height={Math.max(0.8, k.h * 0.06)}
+                rx="0.5"
+                fill={down ? '#eaf3ff' : '#d5dde5'}
+                opacity="0.7"
+              />
+            ) : (
+              <text
+                x={k.x + k.w / 2}
+                y={k.y + dy + k.h * 0.68}
+                textAnchor="middle"
+                fontSize={k.h * 0.5}
+                fill={down ? '#eaf3ff' : '#d5dde5'}
+                fontFamily="sans-serif"
+                fontWeight={600}
+              >
+                {k.cap.trim()}
+              </text>
+            )}
           </g>
         );
       })}
