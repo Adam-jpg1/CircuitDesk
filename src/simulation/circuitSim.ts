@@ -60,6 +60,7 @@ import { Esp01Device, DEFAULT_ACCESS_POINT } from './devices/esp01';
 import { IrMedium } from './devices/irMedium';
 import { RfMedium } from './devices/rfMedium';
 import { Nrf24Device } from './devices/nrf24';
+import { Sx1278Device } from './devices/sx1278';
 
 /**
  * Two edges no further apart than this are cycles of one carrier.
@@ -567,6 +568,11 @@ const SPI_DEVICE_MODELS: Record<string, SpiDeviceModel> = {
     busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'csn' },
     controlPins: ['ce'],
     create: (ctx) => new Nrf24Device(ctx.instanceId, ctx.csPinId ?? 'csn', ctx.radio, ctx.nowUs),
+  },
+  'comp.lora-sx1278': {
+    busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'nss' },
+    controlPins: ['rst', 'dio0'],
+    create: (ctx) => new Sx1278Device(ctx.instanceId, ctx.csPinId ?? 'nss', ctx.radio, ctx.nowUs),
   },
   'comp.sd-card': {
     busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'cs' },
@@ -2563,10 +2569,10 @@ export class CircuitBinding {
     // retransmit a packet that had in fact arrived — and the receiver would
     // get it twice.
     for (const device of this.spiDevices) {
-      if (device instanceof Nrf24Device) device.radioReceive();
+      if (device instanceof Nrf24Device || device instanceof Sx1278Device) device.radioReceive();
     }
     for (const device of this.spiDevices) {
-      if (device instanceof Nrf24Device) device.radioTransmit();
+      if (device instanceof Nrf24Device || device instanceof Sx1278Device) device.radioTransmit();
     }
 
     const highVolts = Number(this.boardDef?.metadata.logicVoltage ?? 5);
@@ -2937,11 +2943,19 @@ export class CircuitBinding {
     // unmasked interrupt is asserted and releases otherwise — so a sketch that
     // waits on a falling edge sees one only when something genuinely happened.
     for (const device of this.spiDevices) {
-      if (!(device instanceof Nrf24Device)) continue;
-      const irqNet = this.netOfInstancePin(device.instanceId, 'irq');
-      if (!irqNet) continue;
-      const asserted = device.irqAsserted;
-      setLevel(irqNet, asserted ? 0 : highVolts, null, asserted ? 0 : 30000);
+      if (device instanceof Nrf24Device) {
+        const irqNet = this.netOfInstancePin(device.instanceId, 'irq');
+        if (!irqNet) continue;
+        const asserted = device.irqAsserted;
+        setLevel(irqNet, asserted ? 0 : highVolts, null, asserted ? 0 : 30000);
+      } else if (device instanceof Sx1278Device) {
+        // DIO0 is the other polarity: an SX127x drives it HIGH on TxDone or
+        // RxDone, which is why LoRa sketches attach a RISING interrupt.
+        const dioNet = this.netOfInstancePin(device.instanceId, 'dio0');
+        if (!dioNet) continue;
+        const asserted = device.irqAsserted;
+        setLevel(dioNet, asserted ? highVolts : 0, null, 0);
+      }
     }
     // Traffic older than a hundred milliseconds cannot affect anything: the
     // longest airtime here is well under a millisecond and every receiver

@@ -1467,6 +1467,37 @@ export const NRF24L01 = def(
   },
 );
 
+export const LORA_SX1278 = def(
+  'comp.lora-sx1278', 'LoRa Module (SX1278)', 'Modules', 17, 32, 'lora',
+  [
+    pin('gnd', 'GND', 2.0, 31.6, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', 'VCC', 4.5, 31.6, { type: 'power-3v3', caps: ['power'], voltage: 3.3 }),
+    pin('nss', 'NSS', 7.0, 31.6, { type: 'digital', caps: ['spi-ss'], voltage: 3.3 }),
+    pin('mosi', 'MOSI', 9.5, 31.6, { type: 'digital', caps: ['spi-mosi'], voltage: 3.3 }),
+    pin('miso', 'MISO', 12.0, 31.6, { type: 'digital', caps: ['spi-miso'], voltage: 3.3 }),
+    pin('sck', 'SCK', 14.5, 31.6, { type: 'digital', caps: ['spi-sck'], voltage: 3.3 }),
+    pin('rst', 'RST', 2.0, 29.0, { type: 'reset', voltage: 3.3 }),
+    pin('dio0', 'DIO0', 4.5, 29.0, { type: 'digital', caps: ['digital-out'], voltage: 3.3, description: 'Goes HIGH on TxDone or RxDone' }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.sx1278',
+    validationRules: ['spi-pins', 'voltage-level'],
+    description:
+      'An SX1278 LoRa transceiver as a real SPI peripheral: the register file, the 256-byte FIFO with its own ' +
+      'address pointer and base addresses, RegOpMode driving the modem, and RegIrqFlags with write-one-to-clear ' +
+      'so DIO0 rises on TxDone and RxDone. Time on air is computed from the datasheet formula, so the same ' +
+      '16-byte payload takes about 37 ms at SF7/125 kHz and about 1.15 seconds at SF12 — that difference is the ' +
+      'entire engineering tradeoff of LoRa and instant delivery would hide it. Two modules talk only when their ' +
+      'frequency, spreading factor, bandwidth and sync word all agree, which is the commonest LoRa failure and ' +
+      'is reproduced rather than smoothed over. It shares one radio medium with every other RF part, so two ' +
+      'transmitters on one frequency collide and the receiver raises a CRC error instead of getting clean data. ' +
+      'NOT modelled: RSSI, SNR, link budget, sensitivity and range (there is no geometry and no signal strength ' +
+      'here, and range is the number people would most want to trust), FSK/OOK mode, channel activity ' +
+      'detection, and frequency hopping.',
+  },
+);
+
 // ---------- Power ----------
 
 export const BATTERY_9V = def(
@@ -1874,7 +1905,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331, EPAPER29,
   NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
-  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_LED, IR_REMOTE, NRF24L01,
+  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_LED, IR_REMOTE, NRF24L01, LORA_SX1278,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
   CELL_15, COIN_CELL, DC_SUPPLY, REGULATOR_5, REGULATOR_33, LDO_33, BUCK_CONVERTER, BOOST_CONVERTER,
   HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,

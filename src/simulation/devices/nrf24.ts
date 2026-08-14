@@ -43,9 +43,12 @@
 //   ranges, distance      There is no geometry. See rfMedium.ts.
 
 import type { ControlPinReader, DeviceSnapshot, SpiDevice, SpiMode } from './types';
-import type { RfMedium, RfTransmission } from './rfMedium';
+import { RF_BAND, type RfMedium, type RfTransmission } from './rfMedium';
 
-export const NRF24_BAND = '2.4GHz-GFSK';
+/** The modulation this family uses, so only its own kind can demodulate it. */
+export const NRF24_MODULATION = 'gfsk';
+/** Channel 0 sits at 2400 MHz and each step is 1 MHz. */
+export const NRF24_BASE_KHZ = 2_400_000;
 
 export const NRF_REG = {
   CONFIG: 0x00,
@@ -423,6 +426,10 @@ export class Nrf24Device implements SpiDevice {
   get channel(): number {
     return this.regs[NRF_REG.RF_CH] & 0x7f;
   }
+  /** The centre frequency, which is what the medium actually keys on. */
+  get frequencyKhz(): number {
+    return NRF24_BASE_KHZ + this.channel * 1000;
+  }
 
   /** Airtime of a packet: preamble, address, packet control field, payload, CRC. */
   private airtimeUs(payloadBytes: number): number {
@@ -458,12 +465,13 @@ export class Nrf24Device implements SpiDevice {
     const start = this.nowUs();
     const sent = this.medium.transmit({
       transmitterId: this.instanceId,
-      band: NRF24_BAND,
-      channel: this.channel,
+      band: RF_BAND,
+      channel: this.frequencyKhz,
       startUs: start,
       endUs: start + this.airtimeUs(packet.payload.length),
       payload: packet.payload,
       match: {
+        modulation: NRF24_MODULATION,
         address: addressKey(this.txAddr, this.addressWidth),
         rate: this.dataRate,
         ack: 0,
@@ -525,9 +533,9 @@ export class Nrf24Device implements SpiDevice {
     if (this.phase === 'awaiting-ack' && flight) {
       const acks = this.medium.completed(
         {
-          band: NRF24_BAND,
-          channel: this.channel,
-          match: { address: addressKey(this.txAddr, this.addressWidth), ack: 1 },
+          band: RF_BAND,
+          channel: this.frequencyKhz,
+          match: { modulation: NRF24_MODULATION, address: addressKey(this.txAddr, this.addressWidth), ack: 1 },
         },
         this.ackCursor,
         now,
@@ -611,7 +619,11 @@ export class Nrf24Device implements SpiDevice {
 
     for (const { pipe, address } of this.enabledPipes()) {
       const received = this.medium.completed(
-        { band: NRF24_BAND, channel: this.channel, match: { address, rate: this.dataRate, ack: 0 } },
+        {
+          band: RF_BAND,
+          channel: this.frequencyKhz,
+          match: { modulation: NRF24_MODULATION, address, rate: this.dataRate, ack: 0 },
+        },
         this.rxCursor,
         now,
       );
@@ -639,15 +651,15 @@ export class Nrf24Device implements SpiDevice {
   private sendAck(to: RfTransmission, now: number): void {
     this.medium.transmit({
       transmitterId: this.instanceId,
-      band: NRF24_BAND,
-      channel: this.channel,
+      band: RF_BAND,
+      channel: this.frequencyKhz,
       // Timed from the packet it answers, not from when this radio happened
       // to be polled: the hardware turns the acknowledgement round in about
       // 130 microseconds regardless of anything the simulator is doing.
       startUs: Math.max(now, to.endUs) + ACK_TURNAROUND_US,
       endUs: Math.max(now, to.endUs) + ACK_TURNAROUND_US + this.airtimeUs(0),
       payload: new Uint8Array(0),
-      match: { address: String(to.match.address), rate: this.dataRate, ack: 1 },
+      match: { modulation: NRF24_MODULATION, address: String(to.match.address), rate: this.dataRate, ack: 1 },
     });
   }
 
