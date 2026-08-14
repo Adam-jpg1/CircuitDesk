@@ -420,6 +420,97 @@ export const NEOPIXEL_RING = neopixel('comp.neopixel-ring', 'NeoPixel Ring (16)'
 export const NEOPIXEL_STRIP = neopixel('comp.neopixel-strip', 'NeoPixel Strip (8)', 8, 84, 12, 'neopixel-strip', 'A strip');
 export const NEOPIXEL_MATRIX = neopixel('comp.neopixel-matrix', 'NeoPixel Matrix (8×8)', 64, 42, 46, 'neopixel-matrix', 'An 8x8 matrix');
 
+/**
+ * An SPI display module: the bus, a chip select, and the two control lines
+ * every one of these breakouts brings out.
+ *
+ * D/C is not optional decoration — it is what tells the controller whether the
+ * byte on MOSI is a command or a pixel, so a module without it wired shows
+ * nothing. RESET usually is optional (many boards tie it high), and the model
+ * treats an unwired RESET as never asserted rather than as held low.
+ */
+function spiDisplay(
+  id: string,
+  name: string,
+  widthMm: number,
+  heightMm: number,
+  artworkId: string,
+  adapterId: string,
+  description: string,
+  extraPins: [string, string][] = [],
+): ComponentDefinition {
+  const header: [string, string, Partial<PinSpec>][] = [
+    ['gnd', 'GND', { type: 'ground', caps: ['ground'] }],
+    ['vcc', 'VCC', { type: 'power-3v3', caps: ['power'], voltage: 3.3 }],
+    ['sck', 'SCK', { type: 'digital', caps: ['spi-sck'] }],
+    ['mosi', 'MOSI', { type: 'digital', caps: ['spi-mosi'] }],
+    ['cs', 'CS', { type: 'digital', caps: ['digital-in'] }],
+    ['dc', 'DC', { type: 'digital', caps: ['digital-in'] }],
+    ['rst', 'RST', { type: 'digital', caps: ['digital-in'] }],
+    ...extraPins.map(([pid, label]) => [pid, label, { type: 'digital', caps: ['digital-in'] }] as [string, string, Partial<PinSpec>]),
+  ];
+  const pitch = 2.54;
+  const originX = (widthMm - (header.length - 1) * pitch) / 2;
+  return def(
+    id, name, 'Displays', widthMm, heightMm, artworkId,
+    header.map(([pid, label, spec], i) => pin(pid, label, originX + i * pitch, heightMm - 1.2, spec)),
+    'simulated',
+    { simulationAdapterId: adapterId, description },
+  );
+}
+
+export const NOKIA5110 = spiDisplay(
+  'comp.nokia5110', 'Nokia 5110 LCD (PCD8544)', 45, 45, 'nokia5110', 'sim.pcd8544',
+  'The 84x48 Nokia 5110 panel. Not I2C and not quite SPI: a clock, a data line, no output at all, and a D/C ' +
+    'line deciding whether the byte is a command or display RAM. The catch every driver hits is modelled — the ' +
+    'function-set byte carries an H bit, and half the command set only exists while it is 1, so sending the ' +
+    'contrast command without setting H first is read as something else entirely and the screen comes up blank ' +
+    'or black. Contrast, bias and temperature coefficient are stored and reported rather than shown as darkness.',
+);
+
+export const ILI9341 = spiDisplay(
+  'comp.ili9341', 'TFT 2.8" 240×320 (ILI9341)', 50, 68, 'tft', 'sim.tft',
+  'A 240x320 colour TFT. Firmware sets a column range and a row range, issues a memory write, and streams ' +
+    'RGB565 pixels; the framebuffer is filled by walking that rectangle, so a driver that gets the window wrong ' +
+    'draws a skewed picture here too. MADCTL orientation and BGR order are applied. The pixel format is ' +
+    'checked against what the silicon accepts rather than assumed. Gamma, VCOM and power-control registers are ' +
+    'accepted and their arguments consumed with no visual effect; tearing output, partial and idle modes, ' +
+    'scrolling and reads back from display RAM are not modelled.',
+);
+
+export const ST7735 = spiDisplay(
+  'comp.st7735', 'TFT 1.8" 128×160 (ST7735)', 40, 56, 'tft', 'sim.tft',
+  'A 128x160 colour TFT. The visible panel is a corner of the controller\'s larger memory, so the two-pixel ' +
+    'column offset and one-pixel row offset are applied — a driver that omits them draws everything shifted ' +
+    'with a coloured edge, exactly as on a bench. Accepts 12-, 16- and 18-bit pixel formats. Same modelled ' +
+    'subset and same exclusions as the other controllers in this family.',
+);
+
+export const ST7789 = spiDisplay(
+  'comp.st7789', 'TFT 240×320 (ST7789)', 44, 60, 'tft', 'sim.tft',
+  'A 240x320 colour TFT with the ST7789 register set — porch, gate and VDV/VRH controls that the ILI9341 does ' +
+    'not have, and which an ILI9341 will not accept. Column and row addressing, memory write, MADCTL and pixel ' +
+    'format behave as the family does. Gamma and power registers are consumed without visual effect.',
+);
+
+export const GC9A01 = spiDisplay(
+  'comp.gc9a01', 'Round TFT 1.28" 240×240 (GC9A01)', 46, 46, 'tft-round', 'sim.tft',
+  'The round 240x240 module. Its register set is its own: the inter-register enable pair that unlocks it, and ' +
+    'a block of vendor registers whose opcodes collide numerically with other controllers and mean something ' +
+    'else. A sequence written for an ST7789 is recorded as unknown commands rather than half-accepted, which ' +
+    'is why the wrong driver produces a blank screen here as it does on hardware.',
+);
+
+export const SSD1331 = spiDisplay(
+  'comp.ssd1331', 'Colour OLED 0.95" 96×64 (SSD1331)', 34, 40, 'tft', 'sim.tft',
+  'A 96x64 colour OLED, and the odd one out: its command set predates MIPI DCS, so the address window is ' +
+    '0x15/0x75 rather than CASET/RASET and there is no memory-write command at all — pixel data simply ' +
+    'follows. It also draws in hardware, so the line, rectangle and clear-window commands are executed rather ' +
+    'than ignored, which is the difference between a filled rectangle appearing and nothing appearing. Only ' +
+    'the 65k-colour mode is decoded; a remap selecting 256 colours is recorded as refused. Dim and scroll are ' +
+    'accepted with no visual effect.',
+);
+
 export const OLED = def(
   'comp.oled', 'OLED 128×64 (SSD1306)', 'Displays', 27, 27, 'oled',
   [
@@ -1001,6 +1092,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   BUZZER, SPEAKER, RELAY,
   SERVO, DC_MOTOR, STEPPER, MOTOR_DRIVER,
   LCD1602, LCD1602_PARALLEL, LCD2004_PARALLEL, OLED, SH1107_OLED, SEVEN_SEGMENT,
+  NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331,
   NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
   GPS, BLUETOOTH, WIFI_ESP01,

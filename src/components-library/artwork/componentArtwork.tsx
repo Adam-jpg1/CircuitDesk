@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentDefinition, ComponentInstance } from '../../types';
 import type { ComponentVisualState } from '../../simulation/circuitSim';
 import { MM } from '../../boards/pinHelpers';
@@ -545,6 +545,153 @@ function NeoPixelArt({ def, visual, layout }: ArtProps & { layout: 'single' | 'r
       </defs>
     </g>
   );
+}
+
+/**
+ * A colour panel, rasterised once per frame rather than drawn as nodes.
+ *
+ * A 240x320 TFT is 76,800 pixels. One SVG rect each would be 76,800 DOM nodes
+ * on a part 50 mm across, rebuilt on every publish — the editor would stop
+ * responding the moment one appeared on the canvas. So the framebuffer is
+ * painted into an offscreen canvas and emitted as a single <image>, which is
+ * one node whatever the resolution, and the paint only happens when the
+ * device's revision counter changes.
+ *
+ * The pixels come from the simulated controller's own framebuffer. Nothing
+ * here draws anything firmware did not write: a panel that is asleep, off, or
+ * unreachable hands over null and gets dark glass.
+ */
+function RasterPanelArt({ def, visual, round }: ArtProps & { round?: boolean }) {
+  const w = def.widthMm * MM;
+  const h = def.heightMm * MM;
+  const raster = visual?.raster ?? null;
+
+  const [href, setHref] = useState<string | null>(null);
+  const lastRevision = useRef(-1);
+
+  useEffect(() => {
+    if (!raster) {
+      lastRevision.current = -1;
+      setHref(null);
+      return;
+    }
+    if (raster.revision === lastRevision.current) return;
+    lastRevision.current = raster.revision;
+
+    // Guarded because this runs in test and SSR environments too, where there
+    // is no document to make a canvas from.
+    if (typeof document === 'undefined') return;
+    const canvas = document.createElement('canvas');
+    canvas.width = raster.width;
+    canvas.height = raster.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const image = ctx.createImageData(raster.width, raster.height);
+    const src = raster.pixels;
+    const out = image.data;
+    for (let i = 0; i < src.length; i++) {
+      const v = src[i];
+      // RGB565 unpacked with the low bits replicated, so full scale stays full
+      // scale — a plain shift turns white into 248,252,248.
+      const r5 = (v >> 11) & 0x1f;
+      const g6 = (v >> 5) & 0x3f;
+      const b5 = v & 0x1f;
+      let r = (r5 << 3) | (r5 >> 2);
+      let g = (g6 << 2) | (g6 >> 4);
+      let b = (b5 << 3) | (b5 >> 2);
+      if (raster.inverted) {
+        r = 255 - r;
+        g = 255 - g;
+        b = 255 - b;
+      }
+      const o = i * 4;
+      out[o] = r;
+      out[o + 1] = g;
+      out[o + 2] = b;
+      out[o + 3] = 255;
+    }
+    ctx.putImageData(image, 0, 0);
+    setHref(canvas.toDataURL('image/png'));
+  }, [raster]);
+
+  // The glass keeps the panel's aspect ratio inside the module outline.
+  const bezel = Math.min(w, h) * 0.06;
+  const availW = w - bezel * 2;
+  const availH = h * 0.82 - bezel * 2;
+  const aspect = raster ? raster.width / raster.height : 1;
+  let gw = availW;
+  let gh = gw / aspect;
+  if (gh > availH) {
+    gh = availH;
+    gw = gh * aspect;
+  }
+  const gx = (w - gw) / 2;
+  const gy = bezel;
+
+  return (
+    <g>
+      <rect x="1" y="1.5" width={w} height={h} rx="4" fill="rgba(0,0,0,0.35)" />
+      <rect width={w} height={h} rx="4" fill="#12161b" stroke="#333c46" />
+      <rect
+        x={gx - 1.5}
+        y={gy - 1.5}
+        width={gw + 3}
+        height={gh + 3}
+        rx={round ? (gw + 3) / 2 : 2}
+        fill="#1b2028"
+        stroke="#39424c"
+      />
+      {round ? (
+        <>
+          <defs>
+            <clipPath id={`cd-round-${def.id}`}>
+              <circle cx={gx + gw / 2} cy={gy + gh / 2} r={Math.min(gw, gh) / 2} />
+            </clipPath>
+          </defs>
+          <circle cx={gx + gw / 2} cy={gy + gh / 2} r={Math.min(gw, gh) / 2} fill="#04060a" />
+          {href && (
+            <image
+              href={href}
+              x={gx}
+              y={gy}
+              width={gw}
+              height={gh}
+              clipPath={`url(#cd-round-${def.id})`}
+              style={{ imageRendering: 'pixelated' }}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          <rect x={gx} y={gy} width={gw} height={gh} fill="#04060a" />
+          {href && (
+            <image href={href} x={gx} y={gy} width={gw} height={gh} style={{ imageRendering: 'pixelated' }} />
+          )}
+        </>
+      )}
+      {/* Pin header along the bottom edge, over the pads the definition places. */}
+      {def.pins.map((p) => (
+        <rect key={p.id} x={p.x - 1.3} y={h - MM * 2.2} width="2.6" height={MM * 1.6} rx="1" fill="#d8b25c" />
+      ))}
+      {!raster && (
+        <text
+          x={w / 2}
+          y={gy + gh * 0.55}
+          fontSize={Math.min(gh * 0.16, gw * 0.16)}
+          fill="#2b333d"
+          textAnchor="middle"
+          fontFamily="'DejaVu Sans Mono', 'Courier New', monospace"
+        >
+          {def.name.split(' ')[0]}
+        </text>
+      )}
+    </g>
+  );
+}
+
+/** The Nokia 5110's 84x48 glass, on the shared monochrome renderer. */
+function Nokia5110Art(props: ArtProps) {
+  return <MonoPanelArt {...props} cols={84} rows={48} idleLabel="5110" />;
 }
 
 function OledArt(props: ArtProps) {
@@ -1393,6 +1540,9 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   lcd1602: (p) => <Lcd1602Art {...p} />,
   oled: (p) => <OledArt {...p} />,
   sh1107: (p) => <Sh1107Art {...p} />,
+  nokia5110: (p) => <Nokia5110Art {...p} />,
+  tft: (p) => <RasterPanelArt {...p} />,
+  'tft-round': (p) => <RasterPanelArt {...p} round />,
   neopixel: (p) => <NeoPixelArt {...p} layout="single" />,
   'neopixel-ring': (p) => <NeoPixelArt {...p} layout="ring" />,
   'neopixel-strip': (p) => <NeoPixelArt {...p} layout="strip" />,

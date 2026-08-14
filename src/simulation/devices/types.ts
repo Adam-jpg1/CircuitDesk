@@ -75,7 +75,18 @@ export type SpiMode = 0 | 1 | 2 | 3;
  * Selection is decided by the bus from the real chip-select pin level, not by
  * the device — a part whose CS is never pulled low simply never sees traffic.
  */
+/** Reads one of a device's non-bus control lines. Undefined when unwired. */
+export type ControlPinReader = (pinId: string) => boolean | undefined;
+
 export interface SpiDevice extends SimDevice {
+  /**
+   * Re-points the device at its control lines.
+   *
+   * Called on every bind, not only on creation: a wiring edit rebinds the
+   * circuit without power-cycling anything, so a display that keeps its
+   * framebuffer must also stop reading the pad its D/C used to be on.
+   */
+  attachControls?(read: ControlPinReader): void;
   /**
    * Component pin id that selects this device, or null for parts with no chip
    * select that shift whatever appears on the clock (a 74HC595 does this).
