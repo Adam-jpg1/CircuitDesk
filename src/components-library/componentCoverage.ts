@@ -97,7 +97,19 @@ export interface CoverageEntry {
   modelType: ModelType;
   status: CoverageStatus;
   protocols: Protocol[];
-  /** Simulation infrastructure this part needs before it can be honest. */
+  /**
+   * Simulation primitives this part rests on.
+   *
+   * Two readings, and they are not in conflict. On a finished part this is
+   * documentation: a 74HC138 rests on the logic-IC engine, which is how the
+   * next combinational part gets estimated honestly. On a gap it is the work
+   * plan — the primitives that do not exist yet are exactly what stands
+   * between the part and a Simulated badge.
+   *
+   * The consistency test derives "what exists" from the finished parts, so an
+   * entry that goes on citing an engine somebody already built is reported as
+   * stale rather than sitting there looking blocked.
+   */
   dependencies: string[];
   artworkStatus: 'hardware' | 'basic' | 'none';
   /** Test files that actually exercise it. Empty means untested. */
@@ -147,8 +159,8 @@ const NONE: never[] = [];
 const PROTOTYPING: CoverageEntry[] = [
   entry('comp.breadboard-half', 'Breadboard (half, 400pt)', 'Prototyping', 'wt', 'structural', 'simulated', NONE, NONE, 'hardware', ['tests/qa.beta.mts']),
   entry('comp.breadboard-mini', 'Breadboard (mini, 170pt)', 'Prototyping', 'wt', 'structural', 'simulated', NONE, NONE, 'hardware', ['tests/qa.beta.mts']),
-  entry('comp.header-4', 'Header (4-pin)', 'Prototyping', 'wt', 'structural', 'wiring', NONE, NONE, 'basic', NONE, 'Connector only — it has no behaviour to simulate.'),
-  entry('comp.breadboard-psu', 'Breadboard power module', 'Prototyping', '-', 'power', 'missing', NONE, NONE, 'none', NONE, 'Planned: 3.3V/5V rail selection feeding breadboard rails.'),
+  entry('comp.header-4', 'Header (4-pin)', 'Prototyping', 'wt', 'structural', 'simulated', NONE, NONE, 'basic', ['tests/coverage.report.mts'], 'A connector, and connecting is all it does — its pins are in the netlist and conduct. There is no missing primitive behind it.'),
+  entry('comp.breadboard-psu', 'Breadboard power module', 'Prototyping', '-', 'power', 'missing', NONE, ['selectable-rail-source'], 'none', NONE, 'Planned: 3.3V/5V rail selection feeding breadboard rails.'),
 ];
 
 // --------------------------------------------------------------------- Basic
@@ -158,13 +170,13 @@ const BASIC: CoverageEntry[] = [
   entry('comp.capacitor-electrolytic', 'Electrolytic capacitor', 'Basic', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE, 'Polarity warning is useful even before transients are modelled.'),
   entry('comp.capacitor-ceramic', 'Ceramic capacitor', 'Basic', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE),
   entry('comp.inductor', 'Inductor', 'Basic', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE),
-  entry('comp.diode', 'Diode (1N4148)', 'Basic', 'wt', 'passive', 'behavioral', NONE, NONE, 'hardware', ['tests/sim.behaviors.mts'], 'Conducts one way with a fixed series resistance. No I/V curve, no reverse recovery.'),
-  entry('comp.diode-schottky', 'Schottky diode', 'Basic', 'wt', 'passive', 'missing', NONE, NONE, 'none', NONE),
+  entry('comp.diode', 'Diode (1N4148)', 'Basic', 'wt', 'passive', 'behavioral', NONE, ['analog-solver'], 'hardware', ['tests/sim.behaviors.mts'], 'Conducts one way with a fixed series resistance. No I/V curve, no reverse recovery.'),
+  entry('comp.diode-schottky', 'Schottky diode', 'Basic', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE),
   entry('comp.diode-zener', 'Zener diode', 'Basic', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE, 'Reverse breakdown clamping needs the analog solver to be meaningful.'),
   entry('comp.fuse', 'Fuse', 'Basic', 't', 'passive', 'missing', NONE, ['current-sensing'], 'none', NONE, 'Needs modelled branch current before blowing means anything.'),
   entry('comp.polyfuse', 'Resettable fuse (PPTC)', 'Basic', 't', 'passive', 'missing', NONE, ['current-sensing'], 'none', NONE),
-  entry('comp.crystal', 'Crystal', 'Basic', 't', 'passive', 'missing', NONE, NONE, 'none', NONE),
-  entry('comp.clock-generator', 'Clock generator', 'Basic', 'w', 'gpio-device', 'missing', ['gpio'], NONE, 'none', NONE, 'Square wave source at a configurable frequency, driven off the world clock.'),
+  entry('comp.crystal', 'Crystal', 'Basic', 't', 'passive', 'missing', NONE, ['oscillator-model'], 'none', NONE),
+  entry('comp.clock-generator', 'Clock generator', 'Basic', 'w', 'gpio-device', 'missing', ['gpio'], ['oscillator-model'], 'none', NONE, 'Square wave source at a configurable frequency, driven off the world clock.'),
 ];
 
 // -------------------------------------------------------------------- Inputs
@@ -179,11 +191,11 @@ const INPUTS: CoverageEntry[] = [
   entry('comp.limit-switch', 'Limit switch (SPDT)', 'Inputs', 't', 'contact', 'simulated', ['gpio'], ['contacts'], 'hardware', ['tests/inputs.contacts.mts']),
   entry('comp.tilt-switch', 'Tilt switch', 'Sensors', 't', 'gpio-device', 'simulated', ['gpio'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
   entry('comp.potentiometer', 'Potentiometer', 'Inputs', 'wt', 'passive', 'simulated', ['analog'], NONE, 'hardware', ['tests/sim.behaviors.mts']),
-  entry('comp.slide-potentiometer', 'Slide potentiometer', 'Inputs', 'w', 'passive', 'missing', ['analog'], NONE, 'none', NONE),
+  entry('comp.slide-potentiometer', 'Slide potentiometer', 'Inputs', 'w', 'passive', 'missing', ['analog'], ['analog-solver'], 'none', NONE),
   entry('comp.rotary-encoder', 'Rotary encoder (KY-040)', 'Inputs', 'w', 'contact', 'simulated', ['gpio'], ['contacts'], 'hardware', ['tests/inputs.encoder.mts']),
   entry('comp.joystick', 'Analog joystick', 'Inputs', 'w', 'analog-source', 'simulated', ['analog', 'gpio'], ['contacts'], 'hardware', ['tests/inputs.joystick.mts']),
-  entry('comp.rotary-switch', 'Rotary switch', 'Inputs', '-', 'contact', 'missing', ['gpio'], ['contacts'], 'none', NONE),
-  entry('comp.touch-button', 'Capacitive touch button (TTP223)', 'Inputs', '-', 'gpio-device', 'missing', ['gpio'], NONE, 'none', NONE),
+  entry('comp.rotary-switch', 'Rotary switch', 'Inputs', '-', 'contact', 'missing', ['gpio'], ['multi-position-contact'], 'none', NONE),
+  entry('comp.touch-button', 'Capacitive touch button (TTP223)', 'Inputs', '-', 'gpio-device', 'missing', ['gpio'], ['capacitive-touch-model'], 'none', NONE),
 ];
 
 // ------------------------------------------------------- Keyboards & Keypads
@@ -192,7 +204,7 @@ const KEYPADS: CoverageEntry[] = [
   entry('comp.keypad-4x4', 'Membrane keypad 4×4', 'Keyboards & Keypads', 'wt', 'matrix', 'simulated', ['gpio'], ['contacts', 'matrix-input'], 'hardware', ['tests/inputs.keypad.mts']),
   entry('comp.keypad-matrix', 'Configurable matrix keypad', 'Keyboards & Keypads', '-', 'matrix', 'simulated', ['gpio'], ['contacts', 'matrix-input'], 'hardware', ['tests/inputs.keypad.mts']),
   entry('comp.mini-keyboard', 'Mini matrix keyboard', 'Keyboards & Keypads', '-', 'matrix', 'simulated', ['gpio'], ['contacts', 'matrix-input'], 'hardware', ['tests/inputs.keyboard.mts']),
-  entry('comp.keyboard-i2c', 'I2C keyboard module', 'Keyboards & Keypads', '-', 'i2c-register', 'missing', ['i2c'], ['i2c-register-device'], 'none', NONE),
+  entry('comp.keyboard-i2c', 'I2C keyboard module', 'Keyboards & Keypads', '-', 'i2c-register', 'missing', ['i2c'], ['i2c-keypad-controller'], 'none', NONE),
   entry('comp.keyboard-ps2', 'PS/2 keyboard', 'Keyboards & Keypads', '-', 'gpio-device', 'missing', ['gpio'], ['ps2-protocol'], 'none', NONE, 'Needs a real bidirectional clocked PS/2 model; not a character injector.'),
   entry('comp.keyboard-usb-hid', 'USB HID keyboard', 'Keyboards & Keypads', '-', 'uart-device', 'missing', NONE, ['usb-host-stack'], 'none', NONE, 'Blocked: requires genuine USB host/device modelling. Will not be faked.'),
 ];
@@ -202,33 +214,33 @@ const SENSORS: CoverageEntry[] = [
   entry('comp.dht11', 'DHT11 temperature/humidity', 'Sensors', 'wt', 'onewire-device', 'missing', ['onewire'], ['dht-timing'], 'none', NONE),
   entry('comp.dht22', 'DHT22 temperature/humidity', 'Sensors', 'w', 'onewire-device', 'missing', ['onewire'], ['dht-timing'], 'none', NONE),
   entry('comp.ds18b20', 'DS18B20 temperature', 'Sensors', 'wt', 'onewire-device', 'missing', ['onewire'], ['onewire-bus'], 'none', NONE),
-  entry('comp.bmp180', 'BMP180 pressure', 'Sensors', 'w', 'i2c-register', 'missing', ['i2c'], ['i2c-register-device'], 'none', NONE),
+  entry('comp.bmp180', 'BMP180 pressure', 'Sensors', 'w', 'i2c-register', 'missing', ['i2c'], ['bmp180-calibration-model'], 'none', NONE),
   entry('comp.bmp280', 'BMP280 pressure/temperature', 'Sensors', 'w', 'i2c-register', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/components.i2c.mts']),
   entry('comp.bme280', 'BME280 environmental', 'Sensors', 'w', 'i2c-register', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/sensors.batch3.mts']),
   entry('comp.sht31', 'SHT31 temperature/humidity', 'Sensors', '-', 'i2c-register', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/sensors.batch3.mts']),
   entry('comp.tmp36', 'TMP36 temperature', 'Sensors', 't', 'analog-source', 'simulated', ['analog'], NONE, 'hardware', ['tests/sim.behaviors.mts']),
   entry('comp.lm35', 'LM35 temperature', 'Sensors', 't', 'analog-source', 'simulated', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
   entry('comp.ntc-thermistor', 'NTC thermistor', 'Sensors', 'wt', 'analog-source', 'simulated', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
-  entry('comp.max6675', 'MAX6675 thermocouple', 'Sensors', '-', 'spi-register', 'missing', ['spi'], ['spi-register-device'], 'none', NONE),
+  entry('comp.max6675', 'MAX6675 thermocouple', 'Sensors', '-', 'spi-register', 'missing', ['spi'], ['thermocouple-model'], 'none', NONE),
   entry('comp.mpu6050', 'MPU6050 accelerometer/gyro', 'Sensors', 'w', 'i2c-register', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/components.i2c.mts']),
   entry('comp.pir', 'PIR motion sensor', 'Sensors', 'wt', 'gpio-device', 'simulated', ['gpio'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
   entry('comp.vibration-sensor', 'Vibration sensor (SW-420)', 'Sensors', '-', 'gpio-device', 'simulated', ['gpio'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
   entry('comp.hall-sensor', 'Hall-effect sensor', 'Sensors', 't', 'gpio-device', 'simulated', ['gpio'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
   entry('comp.ldr', 'Photoresistor (LDR)', 'Sensors', 'wt', 'analog-source', 'simulated', ['analog'], NONE, 'hardware', ['tests/sim.behaviors.mts']),
-  entry('comp.photodiode', 'Photodiode', 'Sensors', 't', 'analog-source', 'behavioral', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts'], 'Photocurrent taken as linear in illuminance through a fixed transimpedance. Junction physics needs the analog solver.'),
-  entry('comp.phototransistor', 'Phototransistor', 'Sensors', 't', 'analog-source', 'missing', ['analog'], NONE, 'none', NONE),
-  entry('comp.veml7700', 'VEML7700 ambient light', 'Sensors', '-', 'i2c-register', 'missing', ['i2c'], ['i2c-register-device'], 'none', NONE),
-  entry('comp.tcs34725', 'TCS34725 colour sensor', 'Sensors', '-', 'i2c-register', 'missing', ['i2c'], ['i2c-register-device'], 'none', NONE),
+  entry('comp.photodiode', 'Photodiode', 'Sensors', 't', 'analog-source', 'behavioral', ['analog'], ['optical-response-model'], 'hardware', ['tests/sensors.batch3.mts'], 'Photocurrent taken as linear in illuminance through a fixed transimpedance. Junction physics needs the analog solver.'),
+  entry('comp.phototransistor', 'Phototransistor', 'Sensors', 't', 'analog-source', 'missing', ['analog'], ['optical-response-model'], 'none', NONE),
+  entry('comp.veml7700', 'VEML7700 ambient light', 'Sensors', '-', 'i2c-register', 'missing', ['i2c'], ['ambient-light-model'], 'none', NONE),
+  entry('comp.tcs34725', 'TCS34725 colour sensor', 'Sensors', '-', 'i2c-register', 'missing', ['i2c'], ['colour-sensing-model'], 'none', NONE),
   entry('comp.ultrasonic', 'HC-SR04 ultrasonic', 'Sensors', 'wt', 'gpio-device', 'simulated', ['gpio'], NONE, 'hardware', ['tests/sim.behaviors.mts']),
-  entry('comp.vl53l0x', 'VL53L0X time-of-flight', 'Sensors', '-', 'i2c-register', 'missing', ['i2c'], ['i2c-register-device'], 'none', NONE),
+  entry('comp.vl53l0x', 'VL53L0X time-of-flight', 'Sensors', '-', 'i2c-register', 'missing', ['i2c'], ['time-of-flight-model'], 'none', NONE),
   entry('comp.flex-sensor', 'Flex sensor', 'Sensors', 't', 'analog-source', 'simulated', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
   entry('comp.fsr', 'Force-sensitive resistor', 'Sensors', 't', 'analog-source', 'simulated', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
-  entry('comp.hx711', 'HX711 + load cell', 'Sensors', 'w', 'gpio-device', 'missing', ['gpio'], NONE, 'none', NONE),
-  entry('comp.pulse-sensor', 'Pulse sensor', 'Sensors', '-', 'analog-source', 'wiring', ['analog'], NONE, 'hardware', NONE, 'Drawn and wired; no waveform is generated yet.'),
-  entry('comp.mq2', 'MQ-2 gas sensor', 'Sensors', 'wt', 'analog-source', 'behavioral', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts'], 'Logarithmic response curve only. No heater warm-up, no gas selectivity, no per-gas calibration.'),
+  entry('comp.hx711', 'HX711 + load cell', 'Sensors', 'w', 'gpio-device', 'missing', ['gpio'], ['strain-gauge-model'], 'none', NONE),
+  entry('comp.pulse-sensor', 'Pulse sensor', 'Sensors', '-', 'analog-source', 'wiring', ['analog'], ['analog-waveform-source'], 'hardware', NONE, 'Drawn and wired; no waveform is generated yet.'),
+  entry('comp.mq2', 'MQ-2 gas sensor', 'Sensors', 'wt', 'analog-source', 'behavioral', ['analog'], ['gas-response-model'], 'hardware', ['tests/sensors.batch3.mts'], 'Logarithmic response curve only. No heater warm-up, no gas selectivity, no per-gas calibration.'),
   entry('comp.soil-moisture', 'Soil moisture sensor', 'Sensors', 't', 'analog-source', 'simulated', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
-  entry('comp.rain-sensor', 'Rain sensor', 'Sensors', '-', 'analog-source', 'behavioral', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts'], 'Surface resistance falls when wet. Behavioural only — no droplet detection or hysteresis.'),
-  entry('comp.fingerprint', 'Fingerprint sensor (R307)', 'Sensors', '-', 'uart-device', 'missing', ['uart'], ['uart-endpoint'], 'none', NONE),
+  entry('comp.rain-sensor', 'Rain sensor', 'Sensors', '-', 'analog-source', 'behavioral', ['analog'], ['analog-solver'], 'hardware', ['tests/sensors.batch3.mts'], 'Surface resistance falls when wet. Behavioural only — no droplet detection or hysteresis.'),
+  entry('comp.fingerprint', 'Fingerprint sensor (R307)', 'Sensors', '-', 'uart-device', 'missing', ['uart'], ['fingerprint-template-model'], 'none', NONE),
 ];
 
 // ------------------------------------------------------------------ Displays
@@ -241,7 +253,7 @@ const DISPLAYS: CoverageEntry[] = [
   entry('comp.sh1107', 'OLED 128×128 (SH1107)', 'Displays', 'w', 'display-controller', 'simulated', ['i2c'], NONE, 'hardware', ['tests/displays.mono.mts']),
   entry('comp.nokia5110', 'Nokia 5110 (PCD8544)', 'Displays', 'w', 'display-controller', 'simulated', ['spi'], NONE, 'hardware', ['tests/displays.spi.mts']),
   entry('comp.ili9341', 'ILI9341 2.8" TFT', 'Displays', 'w', 'display-controller', 'simulated', ['spi'], NONE, 'hardware', ['tests/displays.tft.mts']),
-  entry('comp.ili9341-touch', 'ILI9341 TFT with touch', 'Displays', 'w', 'display-controller', 'missing', ['spi'], ['spi-register-device'], 'none', NONE),
+  entry('comp.ili9341-touch', 'ILI9341 TFT with touch', 'Displays', 'w', 'display-controller', 'missing', ['spi'], ['touch-input-model'], 'none', NONE),
   entry('comp.st7735', 'ST7735 TFT', 'Displays', '-', 'display-controller', 'simulated', ['spi'], NONE, 'hardware', ['tests/displays.tft.mts']),
   entry('comp.st7789', 'ST7789 TFT', 'Displays', '-', 'display-controller', 'simulated', ['spi'], NONE, 'hardware', ['tests/displays.tft.mts']),
   entry('comp.gc9a01', 'GC9A01 round TFT', 'Displays', '-', 'display-controller', 'simulated', ['spi'], NONE, 'hardware', ['tests/displays.tft.mts']),
@@ -260,7 +272,7 @@ const DISPLAYS: CoverageEntry[] = [
 const LEDS: CoverageEntry[] = [
   entry('comp.led', 'LED', 'LEDs', 'wt', 'passive', 'simulated', ['gpio', 'analog'], NONE, 'hardware', ['tests/sim.behaviors.mts']),
   entry('comp.rgb-led', 'RGB LED', 'LEDs', 'wt', 'passive', 'simulated', ['gpio', 'pwm'], NONE, 'hardware', ['tests/sim.behaviors.mts']),
-  entry('comp.led-bar-graph', 'LED bar graph', 'LEDs', 'wt', 'passive', 'missing', ['gpio'], NONE, 'none', NONE),
+  entry('comp.led-bar-graph', 'LED bar graph', 'LEDs', 'wt', 'passive', 'missing', ['gpio'], ['analog-solver'], 'none', NONE),
   entry('comp.neopixel', 'NeoPixel (WS2812)', 'LEDs', 'w', 'addressable-led', 'simulated', ['gpio'], NONE, 'hardware', ['tests/leds.addressable.mts']),
   entry('comp.neopixel-ring', 'NeoPixel ring', 'LEDs', 'w', 'addressable-led', 'simulated', ['gpio'], NONE, 'hardware', ['tests/leds.addressable.mts']),
   entry('comp.neopixel-strip', 'NeoPixel strip', 'LEDs', 'w', 'addressable-led', 'simulated', ['gpio'], NONE, 'hardware', ['tests/leds.addressable.mts']),
@@ -322,50 +334,50 @@ const ICS: CoverageEntry[] = [
   entry('comp.lm741', 'LM741 op-amp', 'ICs', 't', 'logic-ic', 'missing', ['analog'], ['analog-solver'], 'none', NONE),
   entry('comp.lm358', 'LM358 dual op-amp', 'ICs', 't', 'logic-ic', 'missing', ['analog'], ['analog-solver'], 'none', NONE),
   entry('comp.lm393', 'LM393 comparator', 'ICs', 't', 'logic-ic', 'missing', ['analog'], ['comparator'], 'none', NONE),
-  entry('comp.optocoupler', 'Optocoupler (4N35)', 'ICs', 't', 'logic-ic', 'missing', ['gpio'], NONE, 'none', NONE),
+  entry('comp.optocoupler', 'Optocoupler (4N35)', 'ICs', 't', 'logic-ic', 'missing', ['gpio'], ['optical-response-model'], 'none', NONE),
   entry('comp.mcp4725', 'MCP4725 12-bit DAC', 'ICs', '-', 'i2c-register', 'simulated', ['i2c', 'analog'], ['i2c-register-device'], 'hardware', ['tests/components.i2c.mts']),
   entry('comp.ads1115', 'ADS1115 16-bit ADC', 'Sensors', 'wt', 'i2c-register', 'simulated', ['i2c','analog'], NONE, 'hardware', ['tests/data.converters.mts']),
   entry('comp.mcp3008', 'MCP3008 8-ch ADC', 'Sensors', 'w', 'spi-register', 'simulated', ['spi','analog'], NONE, 'hardware', ['tests/data.converters.mts']),
   entry('comp.ina219', 'INA219 current/voltage monitor', 'ICs', '-', 'i2c-register', 'missing', ['i2c'], ['i2c-register-device', 'current-sensing'], 'none', NONE),
-  entry('comp.generic-ic', 'Generic IC (DIP)', 'ICs', 't', 'structural', 'wiring', NONE, NONE, 'basic', NONE, 'A package with pins and no behaviour, for sketching a layout.'),
+  entry('comp.generic-ic', 'Generic IC (DIP)', 'ICs', 't', 'structural', 'wiring', NONE, ['custom-ic-definition'], 'basic', NONE, 'A package with pins and no behaviour, for sketching a layout.'),
 ];
 
 // --------------------------------------------------------- Motors & Actuators
 const MOTORS: CoverageEntry[] = [
-  entry('comp.dc-motor', 'DC motor', 'Motors & Actuators', 'wt', 'actuator', 'behavioral', ['gpio', 'pwm'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Direction and magnitude come from the terminal voltages; the shaft position is integrated from them. No inertia, back-EMF, torque or load — those need the analog solver.'),
-  entry('comp.dc-motor-encoder', 'DC motor with encoder', 'Motors & Actuators', '-', 'actuator', 'behavioral', ['gpio', 'pwm'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Both encoder channels are derived from the integrated shaft position, so direction is readable from the edge order. No inertia or load.'),
-  entry('comp.gearmotor', 'Gearmotor', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio', 'pwm'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Same terminal-derived model at a geared rating. No inertia, torque or load.'),
-  entry('comp.vibration-motor', 'Vibration motor', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio', 'pwm'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Same terminal-derived model at a 3 V rating. No inertia or torque.'),
+  entry('comp.dc-motor', 'DC motor', 'Motors & Actuators', 'wt', 'actuator', 'behavioral', ['gpio', 'pwm'], ['mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'Direction and magnitude come from the terminal voltages; the shaft position is integrated from them. No inertia, back-EMF, torque or load — those need the analog solver.'),
+  entry('comp.dc-motor-encoder', 'DC motor with encoder', 'Motors & Actuators', '-', 'actuator', 'behavioral', ['gpio', 'pwm'], ['mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'Both encoder channels are derived from the integrated shaft position, so direction is readable from the edge order. No inertia or load.'),
+  entry('comp.gearmotor', 'Gearmotor', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio', 'pwm'], ['mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'Same terminal-derived model at a geared rating. No inertia, torque or load.'),
+  entry('comp.vibration-motor', 'Vibration motor', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio', 'pwm'], ['mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'Same terminal-derived model at a 3 V rating. No inertia or torque.'),
   entry('comp.servo', 'Micro servo (SG90)', 'Motors & Actuators', 'wt', 'actuator', 'simulated', ['pwm'], NONE, 'hardware', ['tests/motors.batch5.mts', 'tests/compiler.libraries.mts', 'tests/sim.behaviors.mts'], 'The angle is decoded from the pulse on the signal wire. Driven by hand or by the Servo library on AVR; on RP2040 and ESP32 the stock libraries reach for PIO and LEDC, which are not modelled, so a build there is flagged as having no effect and the pulse must be written directly.'),
-  entry('comp.stepper', 'Bipolar stepper', 'Motors & Actuators', 'wt', 'actuator', 'behavioral', ['gpio'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Position is the coil pattern walked around a recognised sequence. No torque, missed steps under load, or coil current.'),
-  entry('comp.stepper-28byj', '28BYJ-48 stepper', 'Motors & Actuators', 'w', 'actuator', 'behavioral', ['gpio'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Position is the coil pattern walked around a recognised sequence, geared 4096 steps per output revolution. No torque or load.'),
-  entry('comp.a4988', 'A4988 stepper driver', 'Motors & Actuators', 'w', 'actuator', 'behavioral', ['gpio'], NONE, 'hardware', ['tests/motors.drive.mts'], 'One microstep per rising STEP edge, in the DIR direction, gated by an active-low ENABLE and scaled by the MS1-MS3 divisor. No current limit, torque or thermal shutdown.'),
+  entry('comp.stepper', 'Bipolar stepper', 'Motors & Actuators', 'wt', 'actuator', 'behavioral', ['gpio'], ['mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'Position is the coil pattern walked around a recognised sequence. No torque, missed steps under load, or coil current.'),
+  entry('comp.stepper-28byj', '28BYJ-48 stepper', 'Motors & Actuators', 'w', 'actuator', 'behavioral', ['gpio'], ['mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'Position is the coil pattern walked around a recognised sequence, geared 4096 steps per output revolution. No torque or load.'),
+  entry('comp.a4988', 'A4988 stepper driver', 'Motors & Actuators', 'w', 'actuator', 'behavioral', ['gpio'], ['current-sensing', 'mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'One microstep per rising STEP edge, in the DIR direction, gated by an active-low ENABLE and scaled by the MS1-MS3 divisor. No current limit, torque or thermal shutdown.'),
   entry('comp.uln2003', 'ULN2003 driver', 'Motors & Actuators', 'w', 'logic-ic', 'simulated', ['gpio'], NONE, 'hardware', ['tests/motors.drive.mts']),
-  entry('comp.motor-driver', 'H-bridge motor driver (L298N)', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio', 'pwm'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Each half drives its outputs from its inputs while its enable is high, from the motor supply. No bridge drop, shoot-through, current limit or thermal shutdown.'),
-  entry('comp.relay', 'Relay (SPDT)', 'Motors & Actuators', 'wt', 'contact', 'behavioral', ['gpio'], NONE, 'hardware', ['tests/motors.relays.mts'], 'Contacts are moved by the coil through the shared contact model, with a one-slice pull-in that is faster than a real armature. Coil inductance, flyback, contact bounce and contact ratings are not modelled.'),
-  entry('comp.relay-dpdt', 'Relay (DPDT)', 'Motors & Actuators', 't', 'contact', 'behavioral', ['gpio'], NONE, 'hardware', ['tests/motors.relays.mts'], 'Contacts are moved by the coil through the shared contact model, with a one-slice pull-in that is faster than a real armature. Coil inductance, flyback, contact bounce and contact ratings are not modelled.'),
-  entry('comp.solenoid', 'Solenoid', 'Motors & Actuators', '-', 'actuator', 'behavioral', ['gpio'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Energised or released from the voltage across it. No stroke, force, inductance or flyback.'),
+  entry('comp.motor-driver', 'H-bridge motor driver (L298N)', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio', 'pwm'], ['current-sensing'], 'hardware', ['tests/motors.drive.mts'], 'Each half drives its outputs from its inputs while its enable is high, from the motor supply. No bridge drop, shoot-through, current limit or thermal shutdown.'),
+  entry('comp.relay', 'Relay (SPDT)', 'Motors & Actuators', 'wt', 'contact', 'behavioral', ['gpio'], ['contact-bounce-model'], 'hardware', ['tests/motors.relays.mts'], 'Contacts are moved by the coil through the shared contact model, with a one-slice pull-in that is faster than a real armature. Coil inductance, flyback, contact bounce and contact ratings are not modelled.'),
+  entry('comp.relay-dpdt', 'Relay (DPDT)', 'Motors & Actuators', 't', 'contact', 'behavioral', ['gpio'], ['contact-bounce-model'], 'hardware', ['tests/motors.relays.mts'], 'Contacts are moved by the coil through the shared contact model, with a one-slice pull-in that is faster than a real armature. Coil inductance, flyback, contact bounce and contact ratings are not modelled.'),
+  entry('comp.solenoid', 'Solenoid', 'Motors & Actuators', '-', 'actuator', 'behavioral', ['gpio'], ['magnetic-actuator-model'], 'hardware', ['tests/motors.drive.mts'], 'Energised or released from the voltage across it. No stroke, force, inductance or flyback.'),
 ];
 
 // ------------------------------------------------------------- Communication
 const COMMUNICATION: CoverageEntry[] = [
-  entry('comp.ir-receiver', 'IR receiver (TSOP)', 'Communication', 'w', 'gpio-device', 'simulated', ['ir', 'gpio'], NONE, 'hardware', ['tests/ir.channel.mts'], 'Demodulates the shared IR medium and drives OUT active-low on the microsecond timeline, so firmware decodes the real mark and space timing itself. Distance, angle, ambient light and AGC recovery are not modelled.'),
-  entry('comp.ir-led', 'IR LED / transmitter', 'Communication', 'w', 'gpio-device', 'simulated', ['ir', 'gpio'], NONE, 'hardware', ['tests/ir.channel.mts'], 'Emits into the shared medium only while its pin is genuinely toggling, at the carrier frequency measured from the edges. Brightness, current, beam angle and range are not modelled.'),
-  entry('comp.ir-remote', 'Virtual IR remote', 'Communication', 'w', 'gpio-device', 'simulated', ['ir'], NONE, 'hardware', ['tests/ir.channel.mts'], 'Puts real NEC frames and repeat codes into the shared medium on a key press. It cannot address a receiver, so two remotes at once collide rather than being arbitrated.'),
-  entry('comp.hc05', 'HC-05 Bluetooth module', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['bluetooth-channel'], 'hardware', ['tests/uart.modules.mts'], 'The UART and AT-command side is real; there is no Bluetooth radio, pairing, inquiry, RFCOMM or profile handling. Data-mode bytes are recorded where a channel would attach.'),
-  entry('comp.gps', 'GPS NEO-6M', 'Communication', '-', 'uart-device', 'simulated', ['uart'], NONE, 'hardware', ['tests/uart.link.mts']),
-  entry('comp.esp01', 'ESP-01 AT modem', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['network-stack'], 'hardware', ['tests/uart.esp01.mts'], 'The AT modem is real — parser, echo, CH_PD/RST gating, mode and association against a simulated access point. There is no network behind it, so AT+CIPSTART fails rather than reporting a connection that cannot exist.'),
-  entry('comp.dfplayer', 'DFPlayer Mini', 'Communication', 'w', 'uart-device', 'behavioral', ['uart'], ['audio-decoder'], 'hardware', ['tests/uart.modules.mts'], 'The serial protocol, checksums and playback state are real; nothing decodes audio or models a file system, so a track number is a number.'),
-  entry('comp.sim800l', 'SIM800L GSM modem', 'Communication', '-', 'uart-device', 'missing', ['uart'], ['uart-endpoint'], 'none', NONE),
-  entry('comp.nrf24l01', 'nRF24L01 radio', 'Communication', '-', 'spi-register', 'simulated', ['spi', 'rf'], NONE, 'hardware', ['tests/rf.nrf24.mts'], 'Register file, both FIFOs, CE/CSN as separate signals, real airtime through the shared RF medium, and genuine auto-acknowledgement with retries and MAX_RT. RPD/RSSI read zero because the medium has no signal strength; ack payloads, payload reuse and per-bit CRC are not modelled.'),
-  entry('comp.lora-sx1278', 'LoRa SX1278', 'Communication', '-', 'spi-register', 'simulated', ['spi', 'rf'], NONE, 'hardware', ['tests/rf.lora.mts'], 'Register file, FIFO with its own pointer, RegOpMode-driven modem, IRQ flags and DIO0, and datasheet time-on-air so SF7 and SF12 differ by thirty times. Frequency, spreading factor, bandwidth and sync word must all agree. RSSI, SNR, link budget, range, FSK/OOK mode, CAD and frequency hopping are not modelled.'),
-  entry('comp.rf433-tx', '433 MHz transmitter (ASK)', 'Communication', '-', 'gpio-device', 'simulated', ['rf', 'gpio'], NONE, 'hardware', ['tests/rf.ook433.mts'], 'A waveform path, not a packet radio: DATA high keys the carrier and the timing is preserved exactly, so an encoding written in the sketch behaves as it would on a bench. Range, antenna length and supply dependence are not modelled.'),
-  entry('comp.rf433-rx', '433 MHz receiver (ASK)', 'Communication', '-', 'gpio-device', 'simulated', ['rf', 'gpio'], NONE, 'hardware', ['tests/rf.ook433.mts'], 'DATA follows the carrier edge for edge on the microsecond clock. Deliberately kinder than the hardware in one place: a real idle receiver produces continuous AGC noise and this one reads low. Noise floor, squelch, range and bandwidth are not modelled.'),
-  entry('comp.mcp2515', 'MCP2515 CAN controller', 'Communication', '-', 'spi-register', 'behavioral', ['spi', 'can'], ['can-filters'], 'hardware', ['tests/bus.can.mts', 'tests/bus.mcp2515.mts'], 'The SPI command set, register file, three transmit and two receive buffers, CANINTF/CANINTE and INT, a mode machine that refuses to transmit from configuration mode, and a bitrate computed from CNF1-3. Underneath is a bit-level bus with real wire arbitration. Acceptance filters and masks are stored but every frame is accepted; there are no error counters, so error-passive and bus-off never happen.'),
-  entry('comp.max485', 'MAX485 RS-485 transceiver', 'Communication', '-', 'uart-device', 'simulated', ['uart'], NONE, 'hardware', ['tests/bus.rs485.mts'], 'A real shared bus: DE, active-low RE, self-echo, every node hearing every byte, and contention mangling traffic when two drivers are enabled at once. The pair carries bytes rather than bits because the emulator never drives the USART TX pad, so bit-banged framing on DI is not carried and a baud mismatch is not detected. Differential voltages, common-mode range, termination, cable length and slew-rate limits are not modelled.'),
-  entry('comp.w5500', 'W5500 Ethernet', 'Communication', '-', 'spi-register', 'missing', ['spi'], ['spi-register-device', 'network-stack'], 'none', NONE),
-  entry('comp.usb-uart', 'USB-UART adapter', 'Communication', '-', 'uart-device', 'missing', ['uart'], ['uart-endpoint'], 'none', NONE),
-  entry('comp.rfid-rc522', 'MFRC522 RFID reader', 'Communication', 'w', 'spi-register', 'missing', ['spi'], ['spi-register-device'], 'none', NONE),
+  entry('comp.ir-receiver', 'IR receiver (TSOP)', 'Communication', 'w', 'gpio-device', 'simulated', ['ir', 'gpio'], ['ir-channel'], 'hardware', ['tests/ir.channel.mts'], 'Demodulates the shared IR medium and drives OUT active-low on the microsecond timeline, so firmware decodes the real mark and space timing itself. Distance, angle, ambient light and AGC recovery are not modelled.'),
+  entry('comp.ir-led', 'IR LED / transmitter', 'Communication', 'w', 'gpio-device', 'simulated', ['ir', 'gpio'], ['ir-channel'], 'hardware', ['tests/ir.channel.mts'], 'Emits into the shared medium only while its pin is genuinely toggling, at the carrier frequency measured from the edges. Brightness, current, beam angle and range are not modelled.'),
+  entry('comp.ir-remote', 'Virtual IR remote', 'Communication', 'w', 'gpio-device', 'simulated', ['ir'], ['ir-channel'], 'hardware', ['tests/ir.channel.mts'], 'Puts real NEC frames and repeat codes into the shared medium on a key press. It cannot address a receiver, so two remotes at once collide rather than being arbitrated.'),
+  entry('comp.hc05', 'HC-05 Bluetooth module', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['uart-endpoint', 'bluetooth-channel'], 'hardware', ['tests/uart.modules.mts'], 'The UART and AT-command side is real; there is no Bluetooth radio, pairing, inquiry, RFCOMM or profile handling. Data-mode bytes are recorded where a channel would attach.'),
+  entry('comp.gps', 'GPS NEO-6M', 'Communication', '-', 'uart-device', 'simulated', ['uart'], ['uart-endpoint'], 'hardware', ['tests/uart.link.mts']),
+  entry('comp.esp01', 'ESP-01 AT modem', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['uart-endpoint', 'network-stack'], 'hardware', ['tests/uart.esp01.mts'], 'The AT modem is real — parser, echo, CH_PD/RST gating, mode and association against a simulated access point. There is no network behind it, so AT+CIPSTART fails rather than reporting a connection that cannot exist.'),
+  entry('comp.dfplayer', 'DFPlayer Mini', 'Communication', 'w', 'uart-device', 'behavioral', ['uart'], ['uart-endpoint', 'audio-decoder'], 'hardware', ['tests/uart.modules.mts'], 'The serial protocol, checksums and playback state are real; nothing decodes audio or models a file system, so a track number is a number.'),
+  entry('comp.sim800l', 'SIM800L GSM modem', 'Communication', '-', 'uart-device', 'missing', ['uart'], ['cellular-network'], 'none', NONE),
+  entry('comp.nrf24l01', 'nRF24L01 radio', 'Communication', '-', 'spi-register', 'simulated', ['spi', 'rf'], ['rf-channel', 'spi-register-device'], 'hardware', ['tests/rf.nrf24.mts'], 'Register file, both FIFOs, CE/CSN as separate signals, real airtime through the shared RF medium, and genuine auto-acknowledgement with retries and MAX_RT. RPD/RSSI read zero because the medium has no signal strength; ack payloads, payload reuse and per-bit CRC are not modelled.'),
+  entry('comp.lora-sx1278', 'LoRa SX1278', 'Communication', '-', 'spi-register', 'simulated', ['spi', 'rf'], ['rf-channel', 'spi-register-device'], 'hardware', ['tests/rf.lora.mts'], 'Register file, FIFO with its own pointer, RegOpMode-driven modem, IRQ flags and DIO0, and datasheet time-on-air so SF7 and SF12 differ by thirty times. Frequency, spreading factor, bandwidth and sync word must all agree. RSSI, SNR, link budget, range, FSK/OOK mode, CAD and frequency hopping are not modelled.'),
+  entry('comp.rf433-tx', '433 MHz transmitter (ASK)', 'Communication', '-', 'gpio-device', 'simulated', ['rf', 'gpio'], ['rf-channel'], 'hardware', ['tests/rf.ook433.mts'], 'A waveform path, not a packet radio: DATA high keys the carrier and the timing is preserved exactly, so an encoding written in the sketch behaves as it would on a bench. Range, antenna length and supply dependence are not modelled.'),
+  entry('comp.rf433-rx', '433 MHz receiver (ASK)', 'Communication', '-', 'gpio-device', 'simulated', ['rf', 'gpio'], ['rf-channel'], 'hardware', ['tests/rf.ook433.mts'], 'DATA follows the carrier edge for edge on the microsecond clock. Deliberately kinder than the hardware in one place: a real idle receiver produces continuous AGC noise and this one reads low. Noise floor, squelch, range and bandwidth are not modelled.'),
+  entry('comp.mcp2515', 'MCP2515 CAN controller', 'Communication', '-', 'spi-register', 'behavioral', ['spi', 'can'], ['can-bus', 'spi-register-device', 'can-filters'], 'hardware', ['tests/bus.can.mts', 'tests/bus.mcp2515.mts'], 'The SPI command set, register file, three transmit and two receive buffers, CANINTF/CANINTE and INT, a mode machine that refuses to transmit from configuration mode, and a bitrate computed from CNF1-3. Underneath is a bit-level bus with real wire arbitration. Acceptance filters and masks are stored but every frame is accepted; there are no error counters, so error-passive and bus-off never happen.'),
+  entry('comp.max485', 'MAX485 RS-485 transceiver', 'Communication', '-', 'uart-device', 'simulated', ['uart'], ['differential-bus'], 'hardware', ['tests/bus.rs485.mts'], 'A real shared bus: DE, active-low RE, self-echo, every node hearing every byte, and contention mangling traffic when two drivers are enabled at once. The pair carries bytes rather than bits because the emulator never drives the USART TX pad, so bit-banged framing on DI is not carried and a baud mismatch is not detected. Differential voltages, common-mode range, termination, cable length and slew-rate limits are not modelled.'),
+  entry('comp.w5500', 'W5500 Ethernet', 'Communication', '-', 'spi-register', 'missing', ['spi'], ['network-stack'], 'none', NONE),
+  entry('comp.usb-uart', 'USB-UART adapter', 'Communication', '-', 'uart-device', 'missing', ['uart'], ['host-serial-bridge'], 'none', NONE),
+  entry('comp.rfid-rc522', 'MFRC522 RFID reader', 'Communication', 'w', 'spi-register', 'missing', ['spi'], ['nfc-tag-model'], 'none', NONE),
 ];
 
 // ------------------------------------------------------- Port expanders / IO
@@ -377,10 +389,9 @@ const EXPANDERS: CoverageEntry[] = [
 
 // ---------------------------------------------------------- Memory & Storage
 const MEMORY: CoverageEntry[] = [
-  entry('comp.eeprom-24c', '24C256 I2C EEPROM', 'Memory & Storage', '-', 'memory', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/components.i2c.mts']),
-  entry('comp.eeprom-24c-variants', 'I2C EEPROM (24C02–24C512)', 'Memory & Storage', '-', 'memory', 'missing', ['i2c'], ['i2c-register-device'], 'none', NONE),
+  entry('comp.eeprom-24c', 'I2C EEPROM (24C02-24C512)', 'Memory & Storage', '-', 'memory', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/components.i2c.mts', 'tests/memory.eeprom.mts']),
   entry('comp.fram', 'FRAM (FM24CL64)', 'Memory & Storage', '-', 'memory', 'simulated', ['i2c'], NONE, 'hardware', ['tests/data.converters.mts']),
-  entry('comp.sram-23lc', 'SPI SRAM (23LC1024)', 'Memory & Storage', '-', 'memory', 'missing', ['spi'], ['spi-register-device'], 'none', NONE),
+  entry('comp.sram-23lc', 'SPI SRAM (23LC1024)', 'Memory & Storage', '-', 'memory', 'missing', ['spi'], ['spi-sram-command-set'], 'none', NONE),
   entry('comp.spi-flash', 'SPI NOR flash', 'Memory & Storage', '-', 'memory', 'simulated', ['spi'], ['spi-register-device'], 'hardware', ['tests/spi.devices.mts']),
   entry('comp.sd-card', 'microSD card', 'Memory & Storage', 'w', 'memory', 'simulated', ['spi'], ['spi-register-device'], 'hardware', ['tests/spi.devices.mts']),
   entry('comp.ds3231', 'DS3231 RTC', 'Memory & Storage', '-', 'i2c-register', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/components.i2c.mts']),
@@ -390,22 +401,22 @@ const MEMORY: CoverageEntry[] = [
 // --------------------------------------------------------------------- Power
 const POWER: CoverageEntry[] = [
   entry('comp.cell-15', 'Cell (1.5V)', 'Power', 'wt', 'power', 'simulated', NONE, NONE, 'hardware', ['tests/power.rails.mts']),
-  entry('comp.ldo', 'LDO regulator (3.3V)', 'Power', '-', 'power', 'behavioral', NONE, NONE, 'hardware', ['tests/power.rails.mts'], 'Low dropout: holds 3.3 V from a few hundred millivolts of headroom, with a module-pulled-up enable. Ripple, quiescent current, thermal shutdown and current limit are not modelled.'),
+  entry('comp.ldo', 'LDO regulator (3.3V)', 'Power', '-', 'power', 'behavioral', NONE, ['current-sensing'], 'hardware', ['tests/power.rails.mts'], 'Low dropout: holds 3.3 V from a few hundred millivolts of headroom, with a module-pulled-up enable. Ripple, quiescent current, thermal shutdown and current limit are not modelled.'),
   entry('comp.battery-9v', '9V battery', 'Power', 'wt', 'power', 'simulated', NONE, NONE, 'hardware', ['tests/power.rails.mts']),
   entry('comp.battery-aa', 'AA battery (1.5V)', 'Power', 'wt', 'power', 'simulated', NONE, NONE, 'hardware', ['tests/power.rails.mts']),
   entry('comp.battery-coin', 'Coin cell (CR2032)', 'Power', 't', 'power', 'simulated', NONE, NONE, 'hardware', ['tests/power.rails.mts']),
   entry('comp.dc-supply', 'Adjustable DC supply', 'Power', 't', 'power', 'simulated', NONE, NONE, 'hardware', ['tests/power.rails.mts']),
-  entry('comp.regulator', 'Linear regulator', 'Power', 't', 'power', 'behavioral', NONE, NONE, 'hardware', ['tests/power.rails.mts'], 'Imposes its nominal output when the input clears its dropout and its ground is fed. Ripple, efficiency, thermal shutdown, transient response and current limit are not modelled.'),
-  entry('comp.regulator-33', '3.3V regulator', 'Power', 't', 'power', 'behavioral', NONE, NONE, 'hardware', ['tests/power.rails.mts'], 'Imposes 3.3 V when the input clears 1.5 V of headroom and its ground is fed. Ripple, efficiency, thermal shutdown, transient response and current limit are not modelled.'),
-  entry('comp.regulator-5', '5V regulator', 'Power', 't', 'power', 'behavioral', NONE, NONE, 'hardware', ['tests/power.rails.mts'], 'Imposes 5 V when the input clears 2 V of headroom and its ground is fed. Ripple, efficiency, thermal shutdown, transient response and current limit are not modelled.'),
-  entry('comp.buck-converter', 'Buck converter', 'Power', '-', 'power', 'behavioral', NONE, NONE, 'hardware', ['tests/power.rails.mts'], 'Holds its set output from any input above it with headroom. Switching frequency, efficiency, ripple, inductor behaviour and current limit are not modelled and no efficiency is claimed.'),
-  entry('comp.boost-converter', 'Boost converter', 'Power', '-', 'power', 'behavioral', NONE, NONE, 'hardware', ['tests/power.rails.mts'], 'Holds its set output from an input below it. Switching frequency, efficiency, ripple and current limit are not modelled.'),
-  entry('comp.level-converter', 'Logic level converter', 'Power', '-', 'passive', 'behavioral', NONE, NONE, 'hardware', ['tests/sim.behaviors.mts'], 'Channels conduct; the level shift itself is not voltage-translated.'),
+  entry('comp.regulator', 'Linear regulator', 'Power', 't', 'power', 'behavioral', NONE, ['current-sensing'], 'hardware', ['tests/power.rails.mts'], 'Imposes its nominal output when the input clears its dropout and its ground is fed. Ripple, efficiency, thermal shutdown, transient response and current limit are not modelled.'),
+  entry('comp.regulator-33', '3.3V regulator', 'Power', 't', 'power', 'behavioral', NONE, ['current-sensing'], 'hardware', ['tests/power.rails.mts'], 'Imposes 3.3 V when the input clears 1.5 V of headroom and its ground is fed. Ripple, efficiency, thermal shutdown, transient response and current limit are not modelled.'),
+  entry('comp.regulator-5', '5V regulator', 'Power', 't', 'power', 'behavioral', NONE, ['current-sensing'], 'hardware', ['tests/power.rails.mts'], 'Imposes 5 V when the input clears 2 V of headroom and its ground is fed. Ripple, efficiency, thermal shutdown, transient response and current limit are not modelled.'),
+  entry('comp.buck-converter', 'Buck converter', 'Power', '-', 'power', 'behavioral', NONE, ['current-sensing'], 'hardware', ['tests/power.rails.mts'], 'Holds its set output from any input above it with headroom. Switching frequency, efficiency, ripple, inductor behaviour and current limit are not modelled and no efficiency is claimed.'),
+  entry('comp.boost-converter', 'Boost converter', 'Power', '-', 'power', 'behavioral', NONE, ['current-sensing'], 'hardware', ['tests/power.rails.mts'], 'Holds its set output from an input below it. Switching frequency, efficiency, ripple and current limit are not modelled.'),
+  entry('comp.level-converter', 'Logic level converter', 'Power', '-', 'passive', 'behavioral', NONE, ['analog-switch-model'], 'hardware', ['tests/sim.behaviors.mts'], 'Channels conduct; the level shift itself is not voltage-translated.'),
   entry('comp.transistor-npn', 'NPN transistor', 'Power', 'wt', 'passive', 'wiring', NONE, ['analog-solver'], 'hardware', NONE, 'Drawn and wired. Switching behaviour needs the analog solver.'),
   entry('comp.transistor-pnp', 'PNP transistor', 'Power', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE),
   entry('comp.mosfet', 'N-channel MOSFET', 'Power', 'wt', 'passive', 'wiring', NONE, ['analog-solver'], 'hardware', NONE, 'Drawn and wired. Switching behaviour needs the analog solver.'),
   entry('comp.mosfet-p', 'P-channel MOSFET', 'Power', 't', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE),
-  entry('comp.mosfet-driver', 'MOSFET driver', 'Power', '-', 'logic-ic', 'missing', ['gpio'], ['logic-ic'], 'none', NONE),
+  entry('comp.mosfet-driver', 'MOSFET driver', 'Power', '-', 'logic-ic', 'missing', ['gpio'], ['gate-charge-model'], 'none', NONE),
 ];
 
 // --------------------------------------------------------------- Instruments
@@ -414,14 +425,14 @@ const INSTRUMENTS: CoverageEntry[] = [
   entry('comp.oscilloscope', 'Oscilloscope', 'Instruments', 't', 'instrument', 'missing', ['analog'], ['probe-model', 'waveform-capture'], 'none', NONE, 'Must plot real net voltage against world time. A cosmetic waveform is not acceptable.'),
   entry('comp.logic-analyzer', 'Logic analyzer', 'Instruments', 'w', 'instrument', 'missing', ['gpio'], ['waveform-capture'], 'none', NONE),
   entry('comp.function-generator', 'Function generator', 'Instruments', 't', 'instrument', 'missing', ['analog'], ['waveform-source'], 'none', NONE),
-  entry('comp.variable-supply', 'Variable DC power supply', 'Instruments', 't', 'instrument', 'missing', NONE, NONE, 'none', NONE),
+  entry('comp.variable-supply', 'Variable DC power supply', 'Instruments', 't', 'instrument', 'missing', NONE, ['analog-waveform-source'], 'none', NONE),
   entry('comp.frequency-counter', 'Frequency counter', 'Instruments', '-', 'instrument', 'missing', ['gpio'], ['waveform-capture'], 'none', NONE),
 ];
 
 // -------------------------------------------------------------------- Output
 const OUTPUT: CoverageEntry[] = [
   entry('comp.buzzer', 'Piezo buzzer', 'Motors & Actuators', 'wt', 'actuator', 'simulated', ['gpio', 'pwm'], NONE, 'hardware', ['tests/sim.behaviors.mts']),
-  entry('comp.speaker', 'Speaker', 'Motors & Actuators', 't', 'actuator', 'wiring', ['gpio'], NONE, 'hardware', NONE, 'Drawn and wired; no audio is synthesised.'),
+  entry('comp.speaker', 'Speaker', 'Motors & Actuators', 't', 'actuator', 'wiring', ['gpio'], ['audio-synthesis'], 'hardware', NONE, 'Drawn and wired; no audio is synthesised.'),
 ];
 
 export const COMPONENT_COVERAGE: CoverageEntry[] = [

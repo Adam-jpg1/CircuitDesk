@@ -1673,7 +1673,7 @@ export const GENERIC_IC = def(
 export const HEADER_CONNECTOR = def(
   'comp.header-4', 'Header Connector (4-pin)', 'Connectors', 11, 6, 'header',
   [pin('p1', '1', 1.3, 3.0), pin('p2', '2', 3.8, 3.0), pin('p3', '3', 6.3, 3.0), pin('p4', '4', 8.8, 3.0)],
-  'wiring',
+  'simulated',
   { description: '2.54 mm pin header, useful for documenting off-board connections.' },
 );
 
