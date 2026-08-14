@@ -54,10 +54,12 @@ import { LOGIC_PARTS } from './devices/logicParts';
 import { Hd44780ParallelDevice, LCD_DATA_PINS_8 } from './devices/lcdParallel';
 import { Ws2812Device } from './devices/ws2812';
 import { PersistenceTracker } from './devices/persistence';
+import { Tm1637Device } from './devices/tm1637';
 import { TftDisplayDevice } from './devices/tftController';
 import { ILI9341_SPEC, ST7735_SPEC, ST7789_SPEC, GC9A01_SPEC } from './devices/tftSpecs';
 import { Ssd1331Device } from './devices/ssd1331';
 import { Pcd8544Device } from './devices/pcd8544';
+import { EpaperDevice } from './devices/epaper';
 import { LogicIcDevice, levelOf as levelOfVolts, type Logic } from './devices/logicIc';
 import { isContactClosed, contactStateKey } from './devices/contacts';
 
@@ -395,6 +397,11 @@ const SPI_DEVICE_MODELS: Record<string, SpiDeviceModel> = {
     controlPins: ['dc', 'rst'],
     create: (ctx) => new Ssd1331Device(ctx.instanceId, ctx.csPinId),
   },
+  'comp.epaper29': {
+    busPins: { sck: 'sck', mosi: 'mosi', miso: null, cs: 'cs' },
+    controlPins: ['dc', 'rst'],
+    create: (ctx) => new EpaperDevice(ctx.instanceId, ctx.csPinId, () => ctx.nowUs() / 1000),
+  },
   'comp.nokia5110': {
     busPins: { sck: 'sck', mosi: 'mosi', miso: null, cs: 'cs' },
     controlPins: ['dc', 'rst'],
@@ -540,6 +547,7 @@ export class CircuitBinding {
     this.hc165.clear();
     this.parallelLcds.clear();
     this.addressableLeds.clear();
+    this.twoWireDisplays.clear();
     const i2c: I2cDevice[] = [];
     const spi: SpiDevice[] = [];
     for (const [instanceId, owner] of this.runners) {
@@ -547,6 +555,7 @@ export class CircuitBinding {
       spi.push(...this.setupSpiDevices(owner, instanceId));
       this.setupParallelLcds(owner, instanceId);
       this.setupAddressableLeds(owner, instanceId);
+      this.setupTwoWireDisplays(owner, instanceId);
     }
     this.i2cDevices = i2c;
     this.spiDevices = spi;
@@ -733,6 +742,47 @@ export class CircuitBinding {
       this.unsubscribeLatches.push(
         runner.addPinListener((pin, high) => {
           if (pin === dinPin) device.onEdge(high, runner.timeMs * 1e6);
+        }),
+      );
+    }
+  }
+
+  /**
+   * TM1637 modules, watched as edges on their two wires.
+   *
+   * Not on the I2C bus, deliberately: the part has no address, clocks its bits
+   * least significant first, and is reached through two plain GPIOs. Attaching
+   * it to the I2C bus would make an ordinary TM1637 sketch fail and an I2C scan
+   * find a device that is not there.
+   */
+  private setupTwoWireDisplays(runner: BoardRunner, boardInstanceId: string): void {
+    const boardPinOn = (netId: string | undefined): number | null =>
+      netId === undefined
+        ? null
+        : (this.netEndpoints.get(netId) ?? []).find((e) => e.instance === boardInstanceId)?.pin ?? null;
+
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (def?.id !== 'comp.tm1637') continue;
+
+      const clk = boardPinOn(this.netOfInstancePin(inst.id, 'clk'));
+      const dio = boardPinOn(this.netOfInstancePin(inst.id, 'dio'));
+      // Both wires have to reach this board. One of the two is a module that
+      // can never be spoken to, which is a dark display rather than a fault.
+      if (clk === null || dio === null) continue;
+
+      const device = this.twoWireDeviceCache.get(inst.id) ?? new Tm1637Device(inst.id);
+      this.twoWireDeviceCache.set(inst.id, device);
+      this.twoWireDisplays.set(inst.id, device);
+
+      // Seed, then follow. A line firmware sets once produces no later edge.
+      device.onPinLevel('clk', runner.digitalPinLevel(clk) !== 'low');
+      device.onPinLevel('dio', runner.digitalPinLevel(dio) !== 'low');
+
+      this.unsubscribeLatches.push(
+        runner.addPinListener((pin, high) => {
+          if (pin === dio) device.onPinLevel('dio', high);
+          if (pin === clk) device.onPinLevel('clk', high);
         }),
       );
     }
@@ -1359,6 +1409,15 @@ export class CircuitBinding {
    */
   private addressableLeds = new Map<string, { device: Ws2812Device; runner: BoardRunner }>();
 
+  /** TM1637 modules, kept across re-binds the way the other parts are. */
+  private twoWireDeviceCache = new Map<string, Tm1637Device>();
+  private twoWireDisplays = new Map<string, Tm1637Device>();
+
+  /** A TM1637's model, for the canvas and the inspector. */
+  tm1637For(instanceId: string): Tm1637Device | undefined {
+    return this.twoWireDisplays.get(instanceId);
+  }
+
   /** A strip's model, for the canvas and the inspector. */
   addressableLedFor(instanceId: string): Ws2812Device | undefined {
     return this.addressableLeds.get(instanceId)?.device;
@@ -1776,6 +1835,18 @@ export class CircuitBinding {
       }
     }
 
+    // An e-paper drives BUSY while it is updating, and every driver library
+    // polls that pin before sending its next command. Driving it for real is
+    // what makes a sketch with a correct wait block for a plausible time and a
+    // sketch with a broken one misbehave the way it would on the bench.
+    for (const device of this.spiDevices) {
+      if (!(device instanceof EpaperDevice)) continue;
+      const netId = this.netOfInstancePin(device.instanceId, 'busy');
+      if (!netId) continue;
+      setLevel(netId, device.isBusy ? highVolts : 0, null, 0);
+      drivenNets.add(netId);
+    }
+
     // Logic ICs, settled to a fixed point.
     //
     // A gate's output is another gate's input, so one pass is not enough: a
@@ -1935,6 +2006,24 @@ export class CircuitBinding {
             }
           }
           visuals.set(inst.id, { servoAngle: angle });
+          break;
+        }
+        case 'sim.tm1637': {
+          const device = this.tm1637For(inst.id);
+          if (device) {
+            // Segment bytes as the panel shows them. The TM1637 holds a whole
+            // frame, so there is no scan to average — unlike the bare digits.
+            const brightness: Record<string, number> = {};
+            for (let d = 0; d < device.shown.length; d++) {
+              const byte = device.shown[d];
+              ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp'].forEach((seg, i) => {
+                brightness[`${d}.${seg}`] = ((byte >> i) & 1) === 1 ? 1 : 0;
+              });
+            }
+            visuals.set(inst.id, { elementBrightness: brightness, value: device.brightnessLevel });
+          } else {
+            visuals.set(inst.id, { elementBrightness: {} });
+          }
           break;
         }
         case 'sim.multiplexed': {
@@ -2165,6 +2254,22 @@ export class CircuitBinding {
           } else {
             // Not on the bus, or its chip select reaches no board pin.
             visuals.set(inst.id, { raster: null });
+          }
+          break;
+        }
+        case 'sim.epaper': {
+          const device = this.spiDeviceFor(inst.id);
+          if (device instanceof EpaperDevice) {
+            // An e-paper always shows something, so the frame is never null:
+            // a panel that has never been refreshed shows a blank sheet, which
+            // is what one out of its box looks like.
+            visuals.set(inst.id, {
+              display: { pixels: device.frame(), on: true, revision: device.revision },
+              value: device.shownPixelCount,
+              readout: device.isBusy ? ['refreshing'] : undefined,
+            });
+          } else {
+            visuals.set(inst.id, { display: { pixels: null, on: false, revision: 0 } });
           }
           break;
         }
