@@ -25,6 +25,7 @@ export interface BoardPinEndpoint {
 import { runnerPinIndex, runnerAdcChannel, boardAdcReference } from './boardRunner';
 import { avrProfileFor } from '../boards/pinMaps';
 import { Ssd1306Device, SSD1306_ADDRESSES } from './devices/ssd1306';
+import { Sh1107Device, SH1107_ADDRESSES } from './devices/sh1107';
 import { Bmp280Device, BMP280_ADDRESSES } from './devices/bmp280';
 import { Mpu6050Device, MPU6050_ADDRESSES } from './devices/mpu6050';
 import type { I2cDevice, SpiDevice } from './devices/types';
@@ -147,6 +148,10 @@ const I2C_DEVICE_MODELS: Record<string, I2cDeviceModel> = {
   'comp.oled': {
     defaultAddress: SSD1306_ADDRESSES[0],
     create: (ctx) => new Ssd1306Device(ctx.instanceId, ctx.address),
+  },
+  'comp.sh1107': {
+    defaultAddress: SH1107_ADDRESSES[0],
+    create: (ctx) => new Sh1107Device(ctx.instanceId, ctx.address),
   },
   'comp.bmp280': {
     defaultAddress: BMP280_ADDRESSES[0],
@@ -1719,6 +1724,19 @@ export class CircuitBinding {
           if (device instanceof Ssd1306Device) {
             visuals.set(inst.id, {
               display: { pixels: device.ram, on: device.isOn, revision: device.revision },
+              value: device.litPixels,
+            });
+          } else {
+            // Not wired to the bus (or no simulation running): stays dark.
+            visuals.set(inst.id, { display: { pixels: null, on: false, revision: 0 } });
+          }
+          break;
+        }
+        case 'sim.sh1107': {
+          const device = this.i2cDeviceFor(inst.id);
+          if (device instanceof Sh1107Device) {
+            visuals.set(inst.id, {
+              display: { pixels: device.frame(), on: device.isOn, revision: device.revision },
               value: device.litPixels,
             });
           } else {

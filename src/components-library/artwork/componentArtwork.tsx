@@ -450,27 +450,53 @@ function BatteryArt({ def }: ArtProps) {
  * The pixels themselves still come from the simulated SSD1306's GDDRAM. Nothing
  * here draws a picture the firmware did not put there.
  */
-function OledArt({ def, visual }: ArtProps) {
+function OledArt(props: ArtProps) {
+  return <MonoPanelArt {...props} cols={128} rows={64} idleLabel="OLED" />;
+}
+
+/** The SH1107's square 128×128 glass, drawn from the same RAM machinery. */
+function Sh1107Art(props: ArtProps) {
+  return <MonoPanelArt {...props} cols={128} rows={128} idleLabel="SH1107" />;
+}
+
+/**
+ * A monochrome dot-matrix panel of any geometry, drawn from device RAM.
+ *
+ * Split out of the SSD1306 renderer when the SH1107 arrived, because the two
+ * differ only in how many dots there are. Everything that made the OLED look
+ * right is geometry-driven rather than hard-coded: the glass takes the panel's
+ * own aspect ratio, so a 2:1 128×64 and a square 128×128 are both drawn with
+ * square pixels, and each run of adjacent lit dots becomes one rect instead of
+ * one rect per dot — 8192 nodes a frame was a lot of DOM for a part 27 mm wide,
+ * and a 128×128 panel would have been twice that.
+ */
+function MonoPanelArt({
+  def,
+  visual,
+  cols,
+  rows,
+  idleLabel,
+}: ArtProps & { cols: number; rows: number; idleLabel: string }) {
   const w = def.widthMm * MM;
   const h = def.heightMm * MM;
   const display = visual?.display;
 
-  // 128×64 at a true 2:1, as large as the module allows.
+  // As large as the module allows, at the panel's true aspect ratio.
   const glassW = w * 0.92;
-  const glassH = glassW / 2;
-  const glass = { x: (w - glassW) / 2, y: h * 0.3, w: glassW, h: glassH };
-  const px = glass.w / 128;
-  const py = glass.h / 64;
+  const glassH = (glassW * rows) / cols;
+  const glass = { x: (w - glassW) / 2, y: (h - glassH) / 2 + h * 0.04, w: glassW, h: glassH };
+  const px = glass.w / cols;
+  const py = glass.h / rows;
 
   const lit: JSX.Element[] = [];
   if (display?.on && display.pixels) {
     const ram = display.pixels;
-    for (let row = 0; row < 64; row++) {
+    for (let row = 0; row < rows; row++) {
       const page = row >> 3;
       const bit = row & 7;
       let runStart = -1;
-      for (let x = 0; x <= 128; x++) {
-        const on = x < 128 && ((ram[page * 128 + x] >> bit) & 1) === 1;
+      for (let x = 0; x <= cols; x++) {
+        const on = x < cols && ((ram[page * cols + x] >> bit) & 1) === 1;
         if (on && runStart < 0) runStart = x;
         if (!on && runStart >= 0) {
           lit.push(
@@ -495,8 +521,8 @@ function OledArt({ def, visual }: ArtProps) {
       <rect width={w} height={h} rx="4" fill="#101318" stroke="#333c46" />
       {/* Pin header, over the four pads along the top edge. */}
       <rect x={w * 0.22} y="0" width={w * 0.56} height={h * 0.1} rx="1.5" fill="#15181c" />
-      {[7.5, 11.5, 15.5, 19.5].map((mm) => (
-        <rect key={mm} x={mm * MM - 1.4} y={h * 0.02} width="2.8" height={h * 0.06} rx="1" fill="#d8b25c" />
+      {def.pins.slice(0, 4).map((p) => (
+        <rect key={p.id} x={p.x - 1.4} y={h * 0.02} width="2.8" height={h * 0.06} rx="1" fill="#d8b25c" />
       ))}
       {/* The glass sits in a slightly raised frame so the panel reads as glass. */}
       <rect
@@ -513,13 +539,13 @@ function OledArt({ def, visual }: ArtProps) {
       {!display?.on && (
         <text
           x={w / 2}
-          y={glass.y + glass.h * 0.62}
-          fontSize={glass.h * 0.3}
+          y={glass.y + glass.h * 0.56}
+          fontSize={Math.min(glass.h * 0.3, glass.w * 0.18)}
           fill="#2b333d"
           textAnchor="middle"
           fontFamily="'DejaVu Sans Mono', 'Courier New', monospace"
         >
-          OLED
+          {idleLabel}
         </text>
       )}
     </g>
@@ -1261,6 +1287,7 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   'mini-keyboard': (p) => <KeyMatrixArt {...p} />,
   lcd1602: (p) => <Lcd1602Art {...p} />,
   oled: (p) => <OledArt {...p} />,
+  sh1107: (p) => <Sh1107Art {...p} />,
   led: (p) => <LedArt {...p} />,
   'rgb-led': (p) => <RgbLedArt {...p} />,
   resistor: (p) => <ResistorArt {...p} />,
