@@ -343,6 +343,55 @@ const WS2812_DEFAULT_PIXELS: Record<string, number> = {
  * module fed 3.3 V from a board whose coil wants 5 V famously does not click,
  * and that is a wiring answer rather than a code one — so it is modelled.
  */
+/**
+ * Regulators and converters, as behavioural models.
+ *
+ * Each takes an input and imposes a nominal output, subject to the constraints
+ * that actually decide whether one works on a breadboard: it needs a ground, it
+ * needs enough headroom above its output (a linear part cannot make 5 V from
+ * 5 V), and a module with an enable pin has to be enabled. A boost converter is
+ * the same shape with the headroom rule inverted — it needs its input BELOW its
+ * output, and above its own minimum.
+ *
+ * NOT modelled anywhere here, and the descriptions say so: ripple, efficiency,
+ * thermal shutdown, transient response, switching frequency and current limit.
+ */
+const REGULATOR_PARTS: Record<
+  string,
+  {
+    vin: string;
+    gnd: string;
+    vout: string;
+    nominal: number;
+    /** Minimum input above the output for a linear part to regulate. */
+    dropout: number;
+    /** True for a boost: the input must be below the output instead. */
+    stepUp?: boolean;
+    /** Lowest input it will start from at all. */
+    minInput?: number;
+    enable?: string;
+  }
+> = {
+  'comp.regulator': { vin: 'vin', gnd: 'gnd', vout: 'vout', nominal: 5, dropout: 2 },
+  'comp.regulator-5': { vin: 'vin', gnd: 'gnd', vout: 'vout', nominal: 5, dropout: 2 },
+  'comp.regulator-33': { vin: 'vin', gnd: 'gnd', vout: 'vout', nominal: 3.3, dropout: 1.5 },
+  // An LDO is defined by its low dropout — that is the whole reason to choose
+  // one, and modelling it with the same headroom as a 7805 would erase the
+  // difference.
+  'comp.ldo': { vin: 'vin', gnd: 'gnd', vout: 'vout', nominal: 3.3, dropout: 0.3, enable: 'en' },
+  'comp.buck-converter': { vin: 'vin', gnd: 'gnd', vout: 'vout', nominal: 5, dropout: 1, minInput: 6 },
+  'comp.boost-converter': {
+    vin: 'vin', gnd: 'gnd', vout: 'vout', nominal: 5, dropout: 0, stepUp: true, minInput: 2,
+  },
+};
+
+/**
+ * Series resistance given to a rail that only exists because a module declared
+ * it. Large enough that it cannot drive anything and loses to every real
+ * source, small enough to still be a readable voltage on the part itself.
+ */
+const DECLARED_RAIL_OHMS = 1_000_000;
+
 const RELAY_PARTS: Record<string, { coil: string; coilReturn: string; pullInVolts: number }> = {
   'comp.relay': { coil: 'in', coilReturn: 'gnd', pullInVolts: 2.5 },
   'comp.relay-dpdt': { coil: 'in', coilReturn: 'gnd', pullInVolts: 2.5 },
@@ -548,6 +597,28 @@ export class CircuitBinding {
   private netAdcChannels = new Map<string, number[]>();
   private groundNets = new Set<string>();
   private supplyNets = new Map<string, number>();
+
+  /**
+   * Every individual source contribution, before any of them is merged.
+   *
+   * `supplyNets` is a map, so two sources on one net collapse into whichever
+   * was indexed last — and a 5 V supply wired to a 3.3 V one would quietly
+   * become one of the two rather than the fault it is. Keeping the
+   * contributions separately and pushing each through `setLevel` is what lets
+   * the existing contention rule see both.
+   */
+  private sourceContributions: { netId: string; volts: number }[] = [];
+
+  /**
+   * Rails that exist only because a module said what it expects.
+   *
+   * Kept apart from real ones so the declaration can do the one job it is for —
+   * showing an unwired module at the voltage it wants rather than as dead —
+   * without doing the job it must never do, which is powering something. They
+   * are applied through a large series resistance, so anything real beats them
+   * and nothing downstream can draw from them.
+   */
+  private declaredOnlyNets = new Set<string>();
   private ultrasonic = new Map<string, UltrasonicState>();
   private netOfInstancePin = (instanceId: string, pinId: string): string | undefined =>
     this.graph.netOf.get(`${instanceId}:${pinId}`);
@@ -1083,6 +1154,8 @@ export class CircuitBinding {
   }
 
   private indexNets(): void {
+    this.sourceContributions = [];
+    this.declaredOnlyNets.clear();
     // Rails a module *claims* but does not source. Applied only where nothing
     // real is feeding the net, so a part wired to nothing still shows the
     // voltage it expects rather than reading as dead.
@@ -1129,24 +1202,53 @@ export class CircuitBinding {
         // 3V3 made the whole net read 5V, and everything downstream of it —
         // ADC readings, logic thresholds — was then wrong by a third.
         const sources = def?.isBoard === true;
+        // A regulator's output is not a declaration. It is produced, or it is
+        // not — an unpowered 7805 does not put 5 V on anything, and letting its
+        // output pin claim a rail would make "no input" look identical to
+        // "regulating", which is the whole thing the model has to get right.
+        const regulated = def ? REGULATOR_PARTS[def.id] : undefined;
+        if (regulated && pinId === regulated.vout) continue;
         if (pin.type === 'power-5v') {
-          if (sources) this.supplyNets.set(net.id, 5);
+          if (sources) this.addSource(net.id, 5);
           else declaredByModules.set(net.id, Math.max(declaredByModules.get(net.id) ?? 0, 5));
         }
         if (pin.type === 'power-3v3') {
-          if (sources) this.supplyNets.set(net.id, 3.3);
+          if (sources) this.addSource(net.id, 3.3);
           else declaredByModules.set(net.id, Math.max(declaredByModules.get(net.id) ?? 0, 3.3));
         }
-        if (pin.type === 'power-vin' && !this.supplyNets.has(net.id)) {
+        if (pin.type === 'power-vin') {
           const inst = this.graph.instances.find((i) => i.id === instId);
-          const v = typeof inst?.properties.voltage === 'number' ? (inst.properties.voltage as number) : 9;
-          if (def && !def.isBoard && def.simulationAdapterId === 'sim.supply') this.supplyNets.set(net.id, v);
+          // The part's own declared voltage is the fallback, not a fixed 9 —
+          // that constant was fine when the only VIN source was a 9 V battery
+          // and turned a 1.5 V cell into a 9 V one the moment there was more
+          // than one kind of source.
+          const v =
+            typeof inst?.properties.voltage === 'number'
+              ? (inst.properties.voltage as number)
+              : pin.voltage ?? 9;
+          if (def && !def.isBoard && def.simulationAdapterId === 'sim.supply') this.addSource(net.id, v);
         }
       }
     }
     for (const [netId, volts] of declaredByModules) {
-      if (!this.supplyNets.has(netId)) this.supplyNets.set(netId, volts);
+      if (!this.supplyNets.has(netId)) {
+        this.supplyNets.set(netId, volts);
+        this.declaredOnlyNets.add(netId);
+      }
     }
+  }
+
+  /**
+   * Records one source driving one net.
+   *
+   * Kept as a list as well as folded into `supplyNets`, because the map is what
+   * everything downstream reads for "what is this rail" and the list is what
+   * makes two disagreeing sources visible as a conflict rather than as a
+   * silently chosen winner.
+   */
+  private addSource(netId: string, volts: number): void {
+    this.sourceContributions.push({ netId, volts });
+    if (!this.supplyNets.has(netId)) this.supplyNets.set(netId, volts);
   }
 
   private buildEdges(): void {
@@ -1886,6 +1988,14 @@ export class CircuitBinding {
       const existing = levels.get(netId);
       if (!existing || existing.volts === null) {
         levels.set(netId, { volts, sourcePin, seriesOhms, conflict: false });
+      } else if (seriesOhms < existing.seriesOhms) {
+        // A stiffer source wins over a weaker one, which is what a real
+        // divider does. This is how a regulator's output beats the ground it
+        // is already connected to through its load: a 0-ohm driver against a
+        // one-kilohm path is not a contest. Without it, whichever reached the
+        // net first would stick, and a regulator feeding anything at all would
+        // read as whatever its load was tied to.
+        levels.set(netId, { volts, sourcePin, seriesOhms, conflict: existing.conflict });
       } else if (existing.volts !== volts && existing.seriesOhms === 0 && seriesOhms === 0) {
         existing.conflict = true;
         if (volts < existing.volts) existing.volts = volts; // ground wins, like real shorts (roughly)
@@ -1893,7 +2003,17 @@ export class CircuitBinding {
     };
 
     for (const netId of this.groundNets) setLevel(netId, 0, null, 0);
-    for (const [netId, v] of this.supplyNets) if (!this.groundNets.has(netId)) setLevel(netId, v, null, 0);
+    // Every contribution separately, so two sources that disagree collide here
+    // rather than being reduced to one value before anything can notice.
+    for (const { netId, volts } of this.sourceContributions) {
+      if (!this.groundNets.has(netId)) setLevel(netId, volts, null, 0);
+    }
+    for (const [netId, v] of this.supplyNets) {
+      if (this.groundNets.has(netId)) continue;
+      // A declared-only rail is deliberately weak: it shows the module at the
+      // voltage it expects and loses to anything that actually sources.
+      setLevel(netId, v, null, this.declaredOnlyNets.has(netId) ? DECLARED_RAIL_OHMS : 0);
+    }
 
     // MCU-driven nets, from every running board's real pin state.
     //
@@ -2099,6 +2219,46 @@ export class CircuitBinding {
           drivenNets.add(outNet);
         }
       }
+    }
+
+    // Regulators and converters. Done before everything that reads a rail, so a
+    // sensor on a regulated 3.3 V line sees 3.3 V this frame rather than last.
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      const reg = def ? REGULATOR_PARTS[def.id] : undefined;
+      if (!reg) continue;
+
+      const outNet = this.netOfInstancePin(inst.id, reg.vout);
+      if (!outNet) continue;
+      // A regulator with no ground reference is not a regulator. Fed from
+      // outside the part, for the same reason a relay coil's return is.
+      const gndNet = this.netOfInstancePin(inst.id, reg.gnd);
+      if (!this.netFedByOther(gndNet, inst.id, ['ground'])) continue;
+
+      const inNet = this.netOfInstancePin(inst.id, reg.vin);
+      const vin = inNet ? (levels.get(inNet)?.volts ?? null) : null;
+      if (vin === null) continue;
+
+      if (reg.enable) {
+        // An enable pin left unwired is pulled up on every module that has
+        // one, so absent means enabled; driven low means off.
+        const enNet = this.netOfInstancePin(inst.id, reg.enable);
+        const en = enNet ? (levels.get(enNet)?.volts ?? null) : null;
+        if (en !== null && en < 1.0) continue;
+      }
+
+      const nominal = Number(inst.properties.outputVoltage ?? reg.nominal);
+      if (vin < (reg.minInput ?? 0)) continue;
+      // The headroom rule, which is the difference between a part that works
+      // on a bench and one that does not: a linear regulator cannot make 5 V
+      // from 5 V, and a boost cannot step down.
+      if (reg.stepUp) {
+        if (vin >= nominal) continue;
+      } else if (vin < nominal + reg.dropout) {
+        continue;
+      }
+      setLevel(outNet, nominal, null, 0);
+      drivenNets.add(outNet);
     }
 
     // Relay coils. Read before the contacts are next solved, so the armature
