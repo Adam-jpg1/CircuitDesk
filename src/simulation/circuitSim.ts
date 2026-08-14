@@ -53,6 +53,7 @@ import { contactsOf } from './devices/contactRegistry';
 import { LOGIC_PARTS } from './devices/logicParts';
 import { Hd44780ParallelDevice, LCD_DATA_PINS_8 } from './devices/lcdParallel';
 import { Ws2812Device } from './devices/ws2812';
+import { PersistenceTracker } from './devices/persistence';
 import { TftDisplayDevice } from './devices/tftController';
 import { ILI9341_SPEC, ST7735_SPEC, ST7789_SPEC, GC9A01_SPEC } from './devices/tftSpecs';
 import { Ssd1331Device } from './devices/ssd1331';
@@ -111,6 +112,14 @@ export interface ComponentVisualState {
    * a dark strip rather than a missing one.
    */
   pixelColors?: { r: number; g: number; b: number }[];
+  /**
+   * Apparent brightness of each element of a multiplexed part, 0..1.
+   *
+   * Keyed `<commonIndex>.<elementId>` — "2.a" is segment A of the third digit.
+   * These are perceived levels, not electrical ones: a scanned digit is dark
+   * three quarters of the time and reads here as the average an eye would see.
+   */
+  elementBrightness?: Record<string, number>;
   /**
    * A colour framebuffer, handed to the canvas as raw RGB565 words.
    *
@@ -294,6 +303,42 @@ const WS2812_DEFAULT_PIXELS: Record<string, number> = {
   'comp.neopixel-matrix': 64,
 };
 
+/**
+ * Multiplexed parts, and how they are wired.
+ *
+ * `commons` are the pins that enable one digit or row at a time; `elements`
+ * are the shared lines. Which of the two is driven low is the part's polarity:
+ * a common-cathode digit lights a segment when the segment is high and the
+ * common is low, and a common-anode one is the other way round.
+ */
+const MULTIPLEXED_PARTS: Record<
+  string,
+  { commons: string[]; elements: string[]; commonCathode: boolean }
+> = {
+  'comp.seven-segment-ca': {
+    commons: ['com1'],
+    elements: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp'],
+    commonCathode: false,
+  },
+  'comp.seven-segment-2': {
+    commons: ['d1', 'd2'],
+    elements: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp'],
+    commonCathode: true,
+  },
+  'comp.seven-segment-4': {
+    commons: ['d1', 'd2', 'd3', 'd4'],
+    elements: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp'],
+    commonCathode: true,
+  },
+  'comp.led-matrix': {
+    // Rows are the commons, columns the shared lines — the usual bare-matrix
+    // wiring, and the one every scanning example assumes.
+    commons: ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8'],
+    elements: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'],
+    commonCathode: true,
+  },
+};
+
 const PARALLEL_LCD_GEOMETRY: Record<string, { columns: number; rows: number }> = {
   'comp.lcd1602-parallel': { columns: 16, rows: 2 },
   'comp.lcd2004-parallel': { columns: 20, rows: 4 },
@@ -472,6 +517,7 @@ export class CircuitBinding {
     this.indexNets();
     this.buildEdges();
     this.setupLogicDevices();
+    this.markMultiplexedNets();
     if (runner) this.setupUltrasonic(runner);
     this.rebindBuses();
   }
@@ -1329,6 +1375,35 @@ export class CircuitBinding {
   /** Nets a logic part reports as oscillating, so the UI can say so. */
   readonly unstableNets = new Set<string>();
 
+  /**
+   * Apparent brightness of every multiplexed element on the canvas.
+   *
+   * Lives on the binding rather than on a device because these parts have no
+   * device model at all — they are LEDs and wire, and what makes them a display
+   * is the firmware scanning them.
+   */
+  private readonly persistence = new PersistenceTracker();
+
+  /**
+   * Puts every multiplexed part's pins on the switched-net list.
+   *
+   * A scan drives a common low, sets the segment lines, and moves on inside a
+   * few hundred microseconds. Settling once per millisecond slice would sample
+   * whichever digit happened to be enabled at the boundary and miss the rest,
+   * so these nets get the same edge subscriptions a keypad's rows get.
+   */
+  private markMultiplexedNets(): void {
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      const spec = def ? MULTIPLEXED_PARTS[def.id] : undefined;
+      if (!spec) continue;
+      for (const pinId of [...spec.commons, ...spec.elements]) {
+        const netId = this.netOfInstancePin(inst.id, pinId);
+        if (netId) this.switchedNets.add(netId);
+      }
+    }
+  }
+
   /** Creates a device per logic-part instance on the canvas. */
   private setupLogicDevices(): void {
     this.logicDevices.clear();
@@ -1860,6 +1935,48 @@ export class CircuitBinding {
             }
           }
           visuals.set(inst.id, { servoAngle: angle });
+          break;
+        }
+        case 'sim.multiplexed': {
+          const spec = MULTIPLEXED_PARTS[def.id];
+          if (!spec) {
+            visuals.set(inst.id, {});
+            break;
+          }
+          const nowMs = runner?.timeMs ?? 0;
+          // Which commons are enabled: a common-cathode digit is selected when
+          // its common is pulled low, a common-anode one when it is driven
+          // high. Undriven means not selected — a scan that forgot a pinMode
+          // lights nothing, as on a breadboard.
+          const enabled = spec.commons.map((pinId) => {
+            const level = levelOf(net(pinId));
+            if (level?.volts == null) return false;
+            return spec.commonCathode ? level.volts < 0.8 : level.volts >= 1.6;
+          });
+          // And which element lines are asserted, on the opposite polarity.
+          const asserted = spec.elements.map((pinId) => {
+            const level = levelOf(net(pinId));
+            if (level?.volts == null) return false;
+            return spec.commonCathode ? level.volts >= 1.6 : level.volts < 0.8;
+          });
+
+          const litNow: Record<string, boolean> = {};
+          for (let c = 0; c < spec.commons.length; c++) {
+            for (let e = 0; e < spec.elements.length; e++) {
+              const key = `${inst.id}#${c}.${spec.elements[e]}`;
+              const on = enabled[c] && asserted[e];
+              litNow[key] = on;
+              this.persistence.set(key, on, nowMs);
+            }
+          }
+
+          // What the eye would see. Reported per common and per element so a
+          // renderer can draw four digits from one part.
+          const brightness: Record<string, number> = {};
+          for (const key of Object.keys(litNow)) {
+            brightness[key.slice(inst.id.length + 1)] = this.persistence.level(key, nowMs);
+          }
+          visuals.set(inst.id, { elementBrightness: brightness });
           break;
         }
         case 'sim.seven-segment': {
