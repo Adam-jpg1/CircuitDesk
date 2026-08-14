@@ -28,7 +28,7 @@ import { Ssd1306Device, SSD1306_ADDRESSES } from './devices/ssd1306';
 import { Sh1107Device, SH1107_ADDRESSES } from './devices/sh1107';
 import { Bmp280Device, BMP280_ADDRESSES } from './devices/bmp280';
 import { Mpu6050Device, MPU6050_ADDRESSES } from './devices/mpu6050';
-import type { I2cDevice, SpiDevice } from './devices/types';
+import type { ControlPinReader, I2cDevice, SpiDevice } from './devices/types';
 import { Sn74hc595Device, HC595_OUTPUT_PINS } from './devices/sn74hc595';
 import { SdCardDevice, type SdCardSnapshotData } from './devices/sdCard';
 import { SpiFlashDevice, type SpiFlashSnapshotData } from './devices/spiFlash';
@@ -53,6 +53,10 @@ import { contactsOf } from './devices/contactRegistry';
 import { LOGIC_PARTS } from './devices/logicParts';
 import { Hd44780ParallelDevice, LCD_DATA_PINS_8 } from './devices/lcdParallel';
 import { Ws2812Device } from './devices/ws2812';
+import { TftDisplayDevice } from './devices/tftController';
+import { ILI9341_SPEC, ST7735_SPEC, ST7789_SPEC, GC9A01_SPEC } from './devices/tftSpecs';
+import { Ssd1331Device } from './devices/ssd1331';
+import { Pcd8544Device } from './devices/pcd8544';
 import { LogicIcDevice, levelOf as levelOfVolts, type Logic } from './devices/logicIc';
 import { isContactClosed, contactStateKey } from './devices/contacts';
 
@@ -107,6 +111,23 @@ export interface ComponentVisualState {
    * a dark strip rather than a missing one.
    */
   pixelColors?: { r: number; g: number; b: number }[];
+  /**
+   * A colour framebuffer, handed to the canvas as raw RGB565 words.
+   *
+   * Deliberately not converted to nodes or to a data URL here: a 240x320 panel
+   * is 76,800 pixels, and anything per-pixel on this path would run on every
+   * publish. The renderer rasterises it once per revision instead.
+   *
+   * Null means the panel is not showing anything — asleep, display off, or not
+   * reachable from a board at all.
+   */
+  raster?: {
+    width: number;
+    height: number;
+    pixels: Uint16Array;
+    inverted: boolean;
+    revision: number;
+  } | null;
 }
 
 export interface SimControls {
@@ -228,11 +249,30 @@ const I2C_DEVICE_MODELS: Record<string, I2cDeviceModel> = {
  */
 interface SpiDeviceModel {
   busPins: { sck: string; mosi: string; miso: string | null; cs: string | null };
+  /**
+   * Component pins that are not part of the bus but that the part reads.
+   *
+   * A TFT's data/command line is the reason this exists. It is a plain GPIO
+   * that decides whether the byte on MOSI is a command or a pixel, and it
+   * cannot live in the bus: the bus carries bytes, and D/C is not a byte. So
+   * the binding resolves each named pin to a board pad and hands the device a
+   * live reader, and the device samples it when it matters — which is what the
+   * silicon does, and what keeps a driver that sets D/C mid-transaction honest.
+   *
+   * Optional per pin: a part whose RESET is not wired simply never sees a
+   * reset, exactly as on a breadboard where that line is often tied high.
+   */
+  controlPins?: readonly string[];
   create: (ctx: SpiCreateContext) => SpiDevice;
 }
 
 interface SpiCreateContext extends DeviceCreateContext {
   csPinId: string | null;
+  /**
+   * Live level of a control pin, resolved against the board that owns this
+   * device. Two identical displays on two boards each read their own wiring.
+   */
+  readControl: ControlPinReader;
 }
 
 /**
@@ -282,6 +322,38 @@ const SPI_DEVICE_MODELS: Record<string, SpiDeviceModel> = {
     // the chain output, which the next device's DIN listens to.
     busPins: { sck: 'clk', mosi: 'din', miso: null, cs: 'cs' },
     create: (ctx) => new Max7219Device(ctx.instanceId, ctx.csPinId),
+  },
+  // Colour TFTs. All four share one device class and differ only by spec —
+  // and the spec is what stops one controller accepting another's commands.
+  'comp.ili9341': {
+    busPins: { sck: 'sck', mosi: 'mosi', miso: null, cs: 'cs' },
+    controlPins: ['dc', 'rst'],
+    create: (ctx) => new TftDisplayDevice(ctx.instanceId, ctx.csPinId, ILI9341_SPEC),
+  },
+  'comp.st7735': {
+    busPins: { sck: 'sck', mosi: 'mosi', miso: null, cs: 'cs' },
+    controlPins: ['dc', 'rst'],
+    create: (ctx) => new TftDisplayDevice(ctx.instanceId, ctx.csPinId, ST7735_SPEC),
+  },
+  'comp.st7789': {
+    busPins: { sck: 'sck', mosi: 'mosi', miso: null, cs: 'cs' },
+    controlPins: ['dc', 'rst'],
+    create: (ctx) => new TftDisplayDevice(ctx.instanceId, ctx.csPinId, ST7789_SPEC),
+  },
+  'comp.gc9a01': {
+    busPins: { sck: 'sck', mosi: 'mosi', miso: null, cs: 'cs' },
+    controlPins: ['dc', 'rst'],
+    create: (ctx) => new TftDisplayDevice(ctx.instanceId, ctx.csPinId, GC9A01_SPEC),
+  },
+  'comp.ssd1331': {
+    busPins: { sck: 'sck', mosi: 'mosi', miso: null, cs: 'cs' },
+    controlPins: ['dc', 'rst'],
+    create: (ctx) => new Ssd1331Device(ctx.instanceId, ctx.csPinId),
+  },
+  'comp.nokia5110': {
+    busPins: { sck: 'sck', mosi: 'mosi', miso: null, cs: 'cs' },
+    controlPins: ['dc', 'rst'],
+    create: (ctx) => new Pcd8544Device(ctx.instanceId, ctx.csPinId),
   },
   'comp.spi-flash': {
     busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'cs' },
@@ -721,6 +793,8 @@ export class CircuitBinding {
     };
 
     const wanted: { instanceId: string; csPin: number | null; create: () => SpiDevice }[] = [];
+    /** Control readers by instance, applied after sync so cached devices update too. */
+    const controlReaders = new Map<string, ControlPinReader>();
     for (const inst of this.graph.instances) {
       const def = this.graph.definitions.get(inst.id);
       const model = def ? SPI_DEVICE_MODELS[def.id] : undefined;
@@ -745,7 +819,24 @@ export class CircuitBinding {
         if (csPin === null) continue;
       }
 
+      // Control lines resolved against THIS board's pads. A display's D/C
+      // wired to another board's GPIO is not one this board can assert, so it
+      // reads as unwired rather than being borrowed — the same rule the chip
+      // select already follows.
+      const controlPads = new Map<string, number>();
+      for (const pinId of model.controlPins ?? []) {
+        const pad = boardPinOn(this.netOfInstancePin(inst.id, pinId));
+        if (pad !== null) controlPads.set(pinId, pad);
+      }
+      const readControl: ControlPinReader = (pinId) => {
+        const pad = controlPads.get(pinId);
+        if (pad === undefined) return undefined;
+        const level = runner.digitalPinLevel(pad);
+        return level === undefined ? undefined : level === 'high';
+      };
+
       const csPinId = model.busPins.cs;
+      controlReaders.set(inst.id, readControl);
       wanted.push({
         instanceId: inst.id,
         csPin,
@@ -754,6 +845,7 @@ export class CircuitBinding {
             instanceId: inst.id,
             address: 0, // SPI parts are selected by CS, not by address
             csPinId,
+            readControl,
             logicVolts,
             nowUs: () => runner.timeMs * 1000,
             saved: inst.simulationState,
@@ -762,6 +854,13 @@ export class CircuitBinding {
     }
 
     const devices = spiBus.sync(wanted);
+
+    // sync() reuses a device that already exists, so a freshly built reader
+    // would otherwise only reach parts that were new this bind.
+    for (const device of devices) {
+      const read = controlReaders.get(device.instanceId);
+      if (read && device.attachControls) device.attachControls(read);
+    }
 
     // Chip select changes between transactions, when no byte is being clocked,
     // so it has to be watched as a pin edge. Polling once per frame would let a
@@ -1443,6 +1542,14 @@ export class CircuitBinding {
       device.settle(owner.timeMs * 1e6);
     }
 
+    // RESET is a level, not a byte, so a display only learns about it when
+    // something asks. Sampling once per slice is enough: a reset pulse is held
+    // for milliseconds, not microseconds, by every driver that issues one.
+    for (const device of this.spiDevices) {
+      const resettable = device as { settle?: () => void };
+      if (typeof resettable.settle === 'function') resettable.settle();
+    }
+
     const highVolts = Number(this.boardDef?.metadata.logicVoltage ?? 5);
     // A CMOS input switches around half the supply, so the threshold comes
     // from the board rather than being fixed at an AVR's 2.5 V.
@@ -1908,6 +2015,50 @@ export class CircuitBinding {
             });
           } else {
             // Not wired to the bus (or no simulation running): stays dark.
+            visuals.set(inst.id, { display: { pixels: null, on: false, revision: 0 } });
+          }
+          break;
+        }
+        case 'sim.tft': {
+          const device = this.spiDeviceFor(inst.id);
+          if (device instanceof TftDisplayDevice) {
+            visuals.set(inst.id, {
+              raster: device.isVisible
+                ? {
+                    width: device.fb.width,
+                    height: device.fb.height,
+                    pixels: device.fb.pixels,
+                    inverted: device.isInverted,
+                    revision: device.revision,
+                  }
+                : null,
+            });
+          } else if (device instanceof Ssd1331Device) {
+            visuals.set(inst.id, {
+              raster: device.isVisible
+                ? {
+                    width: device.fb.width,
+                    height: device.fb.height,
+                    pixels: device.fb.pixels,
+                    inverted: device.displayMode === 'inverse',
+                    revision: device.revision,
+                  }
+                : null,
+            });
+          } else {
+            // Not on the bus, or its chip select reaches no board pin.
+            visuals.set(inst.id, { raster: null });
+          }
+          break;
+        }
+        case 'sim.pcd8544': {
+          const device = this.spiDeviceFor(inst.id);
+          if (device instanceof Pcd8544Device) {
+            visuals.set(inst.id, {
+              display: { pixels: device.frame(), on: device.isOn, revision: device.revision },
+              value: device.litPixels,
+            });
+          } else {
             visuals.set(inst.id, { display: { pixels: null, on: false, revision: 0 } });
           }
           break;
