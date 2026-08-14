@@ -1344,7 +1344,26 @@ export const WIFI_ESP01 = def(
     pin('vcc', 'VCC', 11.0, 21.2, { type: 'power-3v3', caps: ['power'], voltage: 3.3 }),
   ],
   'validation',
-  { validationRules: ['voltage-level'], description: 'ESP-01 Wi-Fi module — strictly 3.3 V. The validator flags any 5 V connection to its pins.' },
+  {
+    simulationAdapterId: 'sim.esp01',
+    validationRules: ['voltage-level', 'uart-pins'],
+    properties: [
+      prop('ssid', 'Simulated AP SSID', 'text', 'SimulatedAP'),
+      prop('password', 'Simulated AP password', 'text', 'simulated'),
+      prop('baud', 'Baud', 'number', 115200),
+    ],
+    description:
+      'ESP-01 Wi-Fi module — strictly 3.3 V, and the validator flags any 5 V connection to its pins. The AT ' +
+      'modem is simulated: the command parser, the echo real firmware sends back before each response, ' +
+      'AT+GMR, AT+CWMODE, AT+CWLAP, AT+CWJAP with the simulated SSID and password set on this part, ' +
+      'AT+CWQAP, AT+CIFSR, AT+CIPMUX, AT+CIPSTATUS and ERROR for anything else. CH_PD must be high and RST ' +
+      'released or the module answers nothing at all, which is the fault most ESP-01 wiring actually has. ' +
+      'There is NO network: no TCP, no UDP, no DNS, no HTTP, no packets and no host to reach, so AT+CIPSTART ' +
+      'FAILS with ERROR and CLOSED instead of reporting a connection that does not exist — a canned success ' +
+      'would make a sketch look like it had posted to a server when it had done nothing. AT+CWLAP lists only ' +
+      'the one simulated access point; nothing scans a real radio or a host network. Needs a board with a ' +
+      'modelled UART: the ESP32-C3 and C6 have none yet.',
+  },
 );
 
 // ---------- Power ----------
