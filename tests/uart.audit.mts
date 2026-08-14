@@ -22,6 +22,9 @@
 
 import { BOARD_DEFINITIONS } from '../src/boards/definitions';
 import { COMPONENT_COVERAGE } from '../src/components-library/componentCoverage';
+import { validateProject } from '../src/validation/validator';
+import { emptyProject } from '../src/project/templates';
+import type { CircuitProject } from '../src/types';
 
 let failures = 0;
 function check(cond: boolean, msg: string) {
@@ -121,6 +124,67 @@ section('4. the boards that do have a UART have both directions');
   }
   const withUart = Object.entries(UART_SUPPORT).filter(([, c]) => c.tx && c.rx);
   check(withUart.length === 6, `six boards carry a real UART today (${withUart.length})`);
+}
+
+
+// =========== 5. the message names the board, not the part it is blaming =====
+section('5. a UART part on a board without one blames the board');
+{
+  // The wrong message here would be "NEO-6M unsupported": the GPS is fully
+  // simulated and the identical wiring works on an Uno. What is missing is the
+  // board's UART, and the notice has to say so — a user who reads that the
+  // part is unsupported goes looking for a different part.
+  let n = 0;
+  const uid2 = (p: string) => `${p}${++n}`;
+  const mk = (definitionId: string) => ({
+    id: uid2('c'), definitionId, x: 0, y: 0, rotation: 0, properties: {}, simulationState: {},
+  });
+  const link = (p: CircuitProject, a: string, ap: string, b: string, bp: string) => {
+    p.connections.push({
+      id: uid2('w'), sourceComponentId: a, sourcePinId: ap, targetComponentId: b, targetPinId: bp,
+      netId: '', color: '#000', points: [], routing: 'smooth',
+    } as CircuitProject['connections'][number]);
+  };
+
+  const boardDef = BOARD_DEFINITIONS.find((b) => b.id === 'board.esp32-c6-devkitc-1');
+  const txPad = boardDef?.pins.find((p) => p.capabilities.includes('uart-tx'));
+  const rxPad = boardDef?.pins.find((p) => p.capabilities.includes('uart-rx'));
+
+  const project = emptyProject('c6-gps');
+  const board = mk('board.esp32-c6-devkitc-1');
+  const gps = mk('comp.gps');
+  project.boardInstances.push(board);
+  project.componentInstances.push(gps);
+  if (txPad && rxPad) {
+    link(project, board.id, rxPad.id, gps.id, 'tx');
+    link(project, board.id, txPad.id, gps.id, 'rx');
+  }
+
+  const found = validateProject(project).find((i) => i.ruleId === 'board-uart-unsupported');
+  check(found !== undefined, 'the project raises the board-capability notice');
+  if (found) {
+    console.log(`   title: ${found.title}`);
+    check(
+      found.title === 'ESP32-C6-DevKitC-1 physical UART simulation is not yet supported.',
+      'and the title names the board and the capability',
+    );
+    check(!/NEO-6M unsupported/.test(found.title), 'rather than calling the part unsupported');
+    check(/Uno/.test(found.description), 'and says where the same wiring does work');
+    check((found.affectedComponentIds ?? []).includes(board.id), 'pointing at the board');
+  }
+
+  // The same parts on a board that does have a UART must NOT raise it.
+  const ok = emptyProject('uno-gps');
+  const unoBoard = mk('board.arduino-uno');
+  const unoGps = mk('comp.gps');
+  ok.boardInstances.push(unoBoard);
+  ok.componentInstances.push(unoGps);
+  link(ok, unoBoard.id, 'D0', unoGps.id, 'tx');
+  link(ok, unoBoard.id, 'D1', unoGps.id, 'rx');
+  check(
+    validateProject(ok).every((i) => i.ruleId !== 'board-uart-unsupported'),
+    'and an Uno with the same wiring raises nothing',
+  );
 }
 
 console.log(failures === 0 ? '\nUART audit passed.' : `\n${failures} check(s) FAILED`);

@@ -56,6 +56,7 @@ import { Ws2812Device } from './devices/ws2812';
 import { UartLink, type UartPeripheral } from './devices/uartEndpoint';
 import { GpsNeo6mDevice } from './devices/gpsNeo6m';
 import { Hc05Device } from './devices/hc05';
+import { Esp01Device, DEFAULT_ACCESS_POINT } from './devices/esp01';
 import { DfPlayerDevice } from './devices/dfplayer';
 import { Ads1115Device, ADS1115_ADDRESSES } from './devices/ads1115';
 import { Mcp3008Device, MCP3008_CHANNELS } from './devices/mcp3008';
@@ -418,7 +419,7 @@ const REGULATOR_PARTS: Record<
  * working. The ESP parts are absent because their UART is a register file that
  * swallows writes — blocker `esp32-uart`.
  */
-const BOARDS_WITH_UART = new Set([
+export const BOARDS_WITH_UART = new Set([
   'board.arduino-uno',
   'board.arduino-nano',
   'board.arduino-mega2560',
@@ -428,7 +429,7 @@ const BOARDS_WITH_UART = new Set([
 ]);
 
 /** UART devices, and which of their pins carry which direction. */
-const UART_DEVICE_PARTS: Record<
+export const UART_DEVICE_PARTS: Record<
   string,
   {
     /** Device pin that DRIVES the board's RX. */
@@ -441,6 +442,7 @@ const UART_DEVICE_PARTS: Record<
   'comp.gps': { tx: 'tx', rx: 'rx', create: (id, baud) => new GpsNeo6mDevice(id, baud) },
   'comp.hc05': { tx: 'txd', rx: 'rxd', create: (id, baud) => new Hc05Device(id, baud) },
   'comp.dfplayer': { tx: 'tx', rx: 'rx', create: (id, baud) => new DfPlayerDevice(id, baud) },
+  'comp.esp01': { tx: 'tx', rx: 'rx', create: (id, baud) => new Esp01Device(id, baud) },
 };
 
 const RELAY_PARTS: Record<string, { coil: string; coilReturn: string; pullInVolts: number }> = {
@@ -2523,6 +2525,23 @@ export class CircuitBinding {
         }
       } else if (device instanceof DfPlayerDevice) {
         device.setTrackCount(Number(inst.properties.trackCount ?? 10));
+      } else if (device instanceof Esp01Device) {
+        // CH_PD high and RST released, both read from the solved circuit. A
+        // floating CH_PD is the classic ESP-01 fault and it behaves like one.
+        const chpdNet = this.netOfInstancePin(inst.id, 'ch_pd');
+        const rstNet = this.netOfInstancePin(inst.id, 'rst');
+        const chpd = chpdNet ? (levels.get(chpdNet)?.volts ?? null) : null;
+        const rst = rstNet ? (levels.get(rstNet)?.volts ?? null) : null;
+        device.setChipEnable(chpd !== null && chpd >= 1.6 && !(rst !== null && rst < 1.6));
+        device.setAccessPoint({
+          ssid: String(inst.properties.ssid ?? DEFAULT_ACCESS_POINT.ssid),
+          password: String(inst.properties.password ?? DEFAULT_ACCESS_POINT.password),
+        });
+        const wanted = Number(inst.properties.baud ?? 115200);
+        if (this.appliedUartBaud.get(inst.id) !== wanted) {
+          this.appliedUartBaud.set(inst.id, wanted);
+          device.setBaud(wanted);
+        }
       }
     }
 

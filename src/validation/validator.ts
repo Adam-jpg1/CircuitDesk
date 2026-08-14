@@ -16,6 +16,7 @@ import {
   type BusLine,
   type BoardBusProfile,
 } from '../boards/busProfile';
+import { BOARDS_WITH_UART, UART_DEVICE_PARTS } from '../simulation/circuitSim';
 
 /**
  * The line the board's pad must carry, given the line the module's pin is.
@@ -543,6 +544,49 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
         `${names.slice(0, 5).join(', ')}${names.length > 5 ? '…' : ''} — these parts are validated for wiring but do not react during simulation. Their support badges say so.`, {
           affectedComponentIds: unsupported.map((i) => i.id),
         }),
+    );
+  }
+
+  // --- a simulated part on a board that cannot carry it ---
+  //
+  // The part is not the problem here, and saying "NEO-6M unsupported" would
+  // blame the wrong thing: the GPS is fully simulated, and the same wiring on
+  // an Uno works. What is missing is the board's UART, so that is what the
+  // notice names — the board, and the capability it lacks.
+  for (const boardInstance of project.boardInstances) {
+    const bDef = graph.definitions.get(boardInstance.id);
+    if (!bDef?.isBoard || BOARDS_WITH_UART.has(bDef.id)) continue;
+
+    const stranded = project.componentInstances.filter((i) => {
+      const def = graph.definitions.get(i.id);
+      if (!def || UART_DEVICE_PARTS[def.id] === undefined) return false;
+      // Only if it is actually wired to THIS board, on either UART line.
+      return def.pins.some((p) => {
+        const net = netOf(i.id, p.id);
+        if (!net) return false;
+        return bDef.pins.some(
+          (bp) =>
+            (bp.capabilities.includes('uart-tx') || bp.capabilities.includes('uart-rx')) &&
+            netOf(boardInstance.id, bp.id) === net,
+        );
+      });
+    });
+    if (stranded.length === 0) continue;
+
+    const names = [...new Set(stranded.map((i) => graph.definitions.get(i.id)?.name ?? '?'))];
+    issues.push(
+      issue(
+        'board-uart-unsupported',
+        'warning',
+        `${bDef.name} physical UART simulation is not yet supported.`,
+        `${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} wired to this board's UART pins and ${
+          names.length === 1 ? 'is' : 'are'
+        } simulated, but ${bDef.name} has no UART peripheral connected to its runner yet, so no bytes move. ` +
+          'The same wiring works on a board that does: Uno, Nano, Mega, Leonardo, Pico or Pico W.',
+        {
+          affectedComponentIds: [boardInstance.id, ...stranded.map((i) => i.id)],
+        },
+      ),
     );
   }
 
