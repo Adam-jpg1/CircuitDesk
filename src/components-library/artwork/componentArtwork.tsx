@@ -2366,6 +2366,273 @@ function DfPlayerArt({ def }: ArtProps) {
   );
 }
 
+
+// ============================== sensors, actuators, power: the last boxes ==
+//
+// Checkpoints C, E and H. The eight parts still falling through to the generic
+// renderer, each drawn from the thing that makes it recognisable in the hand.
+
+/**
+ * BMP280: a small breakout whose whole identity is the metal sensor can.
+ *
+ * The pressure sensor has a vent hole in a shiny lid, and that lid is the one
+ * feature separating it from every other four-pin I2C board on the shelf.
+ */
+function Bmp280Art({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  return (
+    <g>
+      <Breakout W={W} H={H} fill="#2a1a45" stroke="#150c26" />
+      {/* The metal-lidded sensor, with its vent. */}
+      <rect x={W * 0.3} y={H * 0.26} width={W * 0.28} height={H * 0.32} rx="1.2" fill="#b8c0c8" stroke="#6f7982" strokeWidth="0.6" />
+      <rect x={W * 0.3} y={H * 0.26} width={W * 0.28} height={H * 0.12} rx="1.2" fill="rgba(255,255,255,0.5)" />
+      <circle cx={W * 0.44} cy={H * 0.44} r={Math.min(W, H) * 0.045} fill="#2b3138" />
+      {/* Regulator and the decoupling that every one of these carries. */}
+      <SmdBody x={W * 0.66} y={H * 0.28} w={W * 0.16} h={H * 0.16} />
+      <rect x={W * 0.66} y={H * 0.5} width={W * 0.1} height={H * 0.08} rx="0.8" fill="#3a3020" />
+      <PinPads def={def} />
+    </g>
+  );
+}
+
+/**
+ * MPU-6050: deliberately unlike the BMP280 beside it.
+ *
+ * Wider board, one big square QFN in the middle instead of a small can, and
+ * the crystal and pull-ups around it. The proportions do most of the work.
+ */
+function Mpu6050Art({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const chip = { x: W * 0.36, y: H * 0.28, w: W * 0.3, h: H * 0.38 };
+  return (
+    <g>
+      <Breakout W={W} H={H} fill="#12354a" />
+      {/* The IMU itself: a square package with its corner dot. */}
+      <rect x={chip.x + 0.6} y={chip.y + 0.8} width={chip.w} height={chip.h} rx="1.2" fill="rgba(0,0,0,0.3)" />
+      <rect x={chip.x} y={chip.y} width={chip.w} height={chip.h} rx="1.2" fill="#1a1e23" stroke="#080a0d" strokeWidth="0.6" />
+      <rect x={chip.x} y={chip.y} width={chip.w} height={chip.h * 0.3} rx="1.2" fill="rgba(255,255,255,0.06)" />
+      <circle cx={chip.x + chip.w * 0.18} cy={chip.y + chip.h * 0.22} r={Math.min(chip.w, chip.h) * 0.1} fill="#39424c" />
+      {/* Lead frame down two edges, which a QFN shows. */}
+      {[0, 1, 2, 3].map((i) => (
+        <g key={i}>
+          <rect x={chip.x - 1.2} y={chip.y + chip.h * (0.16 + i * 0.22)} width="1.2" height={chip.h * 0.1} fill="#8b9199" />
+          <rect x={chip.x + chip.w} y={chip.y + chip.h * (0.16 + i * 0.22)} width="1.2" height={chip.h * 0.1} fill="#8b9199" />
+        </g>
+      ))}
+      <SmdBody x={W * 0.1} y={H * 0.3} w={W * 0.14} h={H * 0.12} />
+      <rect x={W * 0.76} y={H * 0.32} width={W * 0.1} height={H * 0.1} rx="0.8" fill="#3a3020" />
+      <PinPads def={def} />
+    </g>
+  );
+}
+
+/**
+ * Pulse sensor: a round pad you put a finger on, not a rectangle.
+ *
+ * The green LED and the photodiode sit side by side under a clear dome on the
+ * sensing face, with the heart silkscreen around them. The round outline is
+ * the whole point — this is the one part in the library you press against
+ * skin, and it should not look like another breakout.
+ *
+ * No waveform is drawn. The model does not expose a beat, and an animated
+ * pulse would be inventing a reading.
+ */
+function PulseSensorArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const cx = W / 2;
+  const cy = H * 0.46;
+  const r = Math.min(W, H) * 0.38;
+  return (
+    <g>
+      <circle cx={cx + 1} cy={cy + 1.5} r={r} fill="rgba(0,0,0,0.32)" />
+      <circle cx={cx} cy={cy} r={r} fill="#0f3a2a" stroke="#08241a" />
+      <circle cx={cx} cy={cy} r={r * 0.86} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
+      {/* Heart outline, as it is silkscreened on the real board. */}
+      <path
+        d={`M ${cx} ${cy + r * 0.42}
+            C ${cx - r * 0.62} ${cy - r * 0.02} ${cx - r * 0.3} ${cy - r * 0.6} ${cx} ${cy - r * 0.22}
+            C ${cx + r * 0.3} ${cy - r * 0.6} ${cx + r * 0.62} ${cy - r * 0.02} ${cx} ${cy + r * 0.42} Z`}
+        fill="none"
+        stroke="rgba(255,255,255,0.24)"
+        strokeWidth="1.2"
+      />
+      {/* Emitter and detector under the dome, side by side as on the part. */}
+      <circle cx={cx - r * 0.2} cy={cy} r={r * 0.16} fill="#5fd08a" stroke="#2a6b45" strokeWidth="0.6" />
+      <circle cx={cx + r * 0.2} cy={cy} r={r * 0.14} fill="#1a1e23" stroke="#0a0d11" strokeWidth="0.6" />
+      <circle cx={cx} cy={cy} r={r * 0.42} fill="rgba(255,255,255,0.10)" />
+      <PinPads def={def} />
+    </g>
+  );
+}
+
+/**
+ * Solenoid: a coil bobbin with a plunger sticking out of it.
+ *
+ * The plunger position follows the coil state the binding computes from the
+ * voltage across the terminals — pulled in when energised, extended when not.
+ * It does not oscillate and it does not move on a timer.
+ */
+function SolenoidArt({ def, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const energised = Boolean(visual?.coilOn);
+  const body = { x: W * 0.16, y: H * 0.2, w: W * 0.68, h: H * 0.5 };
+  // Two positions, both real: in when the coil is driven, out when it is not.
+  const travel = energised ? H * 0.1 : H * 0.24;
+  return (
+    <g>
+      {/* Frame and end plates. */}
+      <rect x={W * 0.1} y={body.y - H * 0.05} width={W * 0.8} height={H * 0.06} rx="1.5" fill="#5b646c" />
+      <rect x={W * 0.1} y={body.y + body.h} width={W * 0.8} height={H * 0.06} rx="1.5" fill="#5b646c" />
+      {/* Coil: a wound bobbin, drawn as windings rather than a filled block. */}
+      <MouldedBody x={body.x} y={body.y} w={body.w} h={body.h} r={2} fill="#3a2a1e" stroke="#1b1310" />
+      {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+        <line
+          key={i}
+          x1={body.x + 1}
+          y1={body.y + body.h * (0.1 + i * 0.13)}
+          x2={body.x + body.w - 1}
+          y2={body.y + body.h * (0.1 + i * 0.13)}
+          stroke="rgba(198,140,80,0.5)"
+          strokeWidth="1.3"
+        />
+      ))}
+      {/* Plunger, at the position the coil state puts it. */}
+      <rect x={W / 2 - W * 0.09} y={travel} width={W * 0.18} height={body.y - travel + body.h * 0.5} rx={W * 0.05}
+        fill="#b8c0c8" stroke="#6f7982" />
+      <rect x={W / 2 - W * 0.13} y={travel} width={W * 0.26} height={H * 0.05} rx={H * 0.02} fill="#8d959d" stroke="#5b646c" />
+      {energised && <circle cx={W * 0.84} cy={body.y + body.h * 0.5} r={H * 0.035} fill="#ffb454" />}
+      <PinPads def={def} />
+    </g>
+  );
+}
+
+/** A CR2032 in its holder: round, thick, and obviously a coin. */
+function CoinCellArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const cx = W / 2;
+  const cy = H * 0.48;
+  const r = Math.min(W, H) * 0.4;
+  return (
+    <g>
+      {/* Retaining clip behind the cell. */}
+      <path d={`M ${cx - r * 1.24} ${cy + r * 0.2} a ${r * 1.24} ${r * 1.24} 0 0 1 ${r * 2.48} 0`}
+        fill="none" stroke="#6f7982" strokeWidth={r * 0.28} strokeLinecap="round" />
+      <circle cx={cx + 1} cy={cy + 1.5} r={r} fill="rgba(0,0,0,0.32)" />
+      <circle cx={cx} cy={cy} r={r} fill="#c3cbd3" stroke="#7b848c" />
+      {/* The rim a button cell has, and the lit upper edge. */}
+      <circle cx={cx} cy={cy} r={r * 0.82} fill="#d8dee4" stroke="#a8b0b8" strokeWidth="0.8" />
+      <path d={`M ${cx - r * 0.82} ${cy} a ${r * 0.82} ${r * 0.82} 0 0 1 ${r * 1.64} 0`}
+        fill="rgba(255,255,255,0.45)" />
+      <text x={cx} y={cy + r * 0.16} textAnchor="middle" fontSize={r * 0.42} fill="#5b646c" fontFamily="sans-serif">CR2032</text>
+      <text x={cx} y={cy + r * 0.6} textAnchor="middle" fontSize={r * 0.4} fill="#7b848c" fontFamily="sans-serif">3V</text>
+      <PinPads def={def} />
+    </g>
+  );
+}
+
+/**
+ * The adjustable supply: a small bench instrument.
+ *
+ * The readout shows the voltage the source is actually CONFIGURED for, read
+ * off the instance property that the simulation imposes on the terminals. It
+ * is not animated and it does not drift — if the digits change it is because
+ * somebody changed the setting.
+ */
+function DcSupplyArt({ def, instance }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const volts = Number(instance?.properties?.voltage ?? 5);
+  const shown = `${volts.toFixed(volts % 1 === 0 ? 1 : 2)}V`;
+  return (
+    <g>
+      <rect x="1" y="1.5" width={W} height={H} rx="4" fill="rgba(0,0,0,0.34)" />
+      <rect width={W} height={H} rx="4" fill="#2b3138" stroke="#12161a" />
+      <rect x={W * 0.03} y={H * 0.04} width={W * 0.94} height={H * 0.2} rx="3" fill="rgba(255,255,255,0.07)" />
+      {/* Readout: dark glass with the configured value on it. */}
+      <rect x={W * 0.08} y={H * 0.14} width={W * 0.54} height={H * 0.36} rx="2" fill="#0a1410" stroke="#050a08" />
+      <text
+        x={W * 0.35}
+        y={H * 0.41}
+        textAnchor="middle"
+        fontSize={H * 0.26}
+        fill="#5fd08a"
+        fontFamily="'DejaVu Sans Mono', monospace"
+      >
+        {shown}
+      </text>
+      {/* Coarse and fine knobs. */}
+      <circle cx={W * 0.78} cy={H * 0.3} r={H * 0.13} fill="#4a525a" stroke="#20262d" />
+      <line x1={W * 0.78} y1={H * 0.3} x2={W * 0.78} y2={H * 0.19} stroke="#c3cbd3" strokeWidth="1.4" />
+      <circle cx={W * 0.78} cy={H * 0.62} r={H * 0.09} fill="#4a525a" stroke="#20262d" />
+      {/* Binding posts under the pins the definition declares. */}
+      {def.pins.map((p, i) => (
+        <g key={p.id}>
+          <circle cx={p.x} cy={p.y} r="3.2" fill={i === 0 ? '#a33232' : '#20262d'} stroke="#0d1114" />
+          <circle cx={p.x} cy={p.y} r="1.3" fill="#c8a53f" />
+        </g>
+      ))}
+    </g>
+  );
+}
+
+/**
+ * Buck and boost, which must not be the same board with a different label.
+ *
+ * They differ in the way the real modules do: a buck has its inductor after
+ * the controller with the input capacitor dominating one end, and a boost has
+ * the inductor first with the big output capacitor at the other. The trim pot
+ * sits opposite in each. Both come off one renderer because they ARE the same
+ * class of module — what changes is the layout, which is the thing you would
+ * actually use to tell them apart on a bench.
+ */
+function ConverterArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const boost = def.id === 'comp.boost-converter';
+  // The inductor is early on a boost and late on a buck.
+  const coilX = boost ? W * 0.24 : W * 0.56;
+  const bigCapX = boost ? W * 0.66 : W * 0.1;
+  const potX = boost ? W * 0.1 : W * 0.82;
+  return (
+    <g>
+      <Breakout W={W} H={H} fill={boost ? '#123a2c' : '#12354a'} stroke={boost ? '#0a241b' : '#081726'} />
+      {/* Toroid or drum inductor: the biggest thing on either board. */}
+      <circle cx={coilX} cy={H * 0.44} r={H * 0.2} fill="#2b2119" stroke="#12100c" />
+      <circle cx={coilX} cy={H * 0.44} r={H * 0.09} fill="#0d0b08" />
+      {[0, 1, 2, 3, 4].map((i) => {
+        const a = (i / 5) * Math.PI * 2;
+        return (
+          <line
+            key={i}
+            x1={coilX + Math.cos(a) * H * 0.08}
+            y1={H * 0.44 + Math.sin(a) * H * 0.08}
+            x2={coilX + Math.cos(a) * H * 0.21}
+            y2={H * 0.44 + Math.sin(a) * H * 0.21}
+            stroke="#b07a3a"
+            strokeWidth="1.6"
+          />
+        );
+      })}
+      {/* Electrolytic can, at the end the topology puts it. */}
+      <circle cx={bigCapX + W * 0.07} cy={H * 0.42} r={H * 0.17} fill="#1a2a3a" stroke="#0a1420" />
+      <path d={`M ${bigCapX + W * 0.07 - H * 0.17} ${H * 0.42} a ${H * 0.17} ${H * 0.17} 0 0 1 ${H * 0.34} 0`}
+        fill="rgba(255,255,255,0.12)" />
+      <line x1={bigCapX + W * 0.07} y1={H * 0.28} x2={bigCapX + W * 0.07} y2={H * 0.56} stroke="#7b848c" strokeWidth="1.2" />
+      {/* Controller, and the multiturn trim pot that sets the output. */}
+      <SmdBody x={W * 0.4} y={H * 0.68} w={W * 0.2} h={H * 0.14} label={boost ? 'XL6009' : 'LM2596'} size={3} />
+      <rect x={potX} y={H * 0.64} width={W * 0.13} height={H * 0.2} rx="1.4" fill="#1a4a8a" stroke="#0b2648" />
+      <circle cx={potX + W * 0.065} cy={H * 0.74} r={H * 0.05} fill="#c8a53f" />
+      <line x1={potX + W * 0.065} y1={H * 0.7} x2={potX + W * 0.065} y2={H * 0.78} stroke="#2b3138" strokeWidth="1" />
+      <PinPads def={def} />
+    </g>
+  );
+}
+
 // ---------- Batch 2: logic ----------
 
 /**
@@ -2656,6 +2923,13 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   rtc: (p) => <RtcModuleArt {...p} />,
   dac: (p) => <DacModuleArt {...p} />,
   header: (p) => <HeaderArt {...p} />,
+  bmp280: (p) => <Bmp280Art {...p} />,
+  mpu6050: (p) => <Mpu6050Art {...p} />,
+  'pulse-sensor': (p) => <PulseSensorArt {...p} />,
+  solenoid: (p) => <SolenoidArt {...p} />,
+  'battery-coin': (p) => <CoinCellArt {...p} />,
+  'dc-supply': (p) => <DcSupplyArt {...p} />,
+  converter: (p) => <ConverterArt {...p} />,
   gps: (p) => <GpsArt {...p} />,
   hc05: (p) => <Hc05Art {...p} />,
   esp01: (p) => <Esp01Art {...p} />,
