@@ -51,6 +51,7 @@ import { Sht31Device, SHT31_ADDRESSES } from './devices/sht31';
 import { ANALOG_SENSORS, GPIO_SENSORS } from './devices/analogSensors';
 import { contactsOf } from './devices/contactRegistry';
 import { LOGIC_PARTS } from './devices/logicParts';
+import { Hd44780ParallelDevice, LCD_DATA_PINS_8 } from './devices/lcdParallel';
 import { LogicIcDevice, levelOf as levelOfVolts, type Logic } from './devices/logicIc';
 import { isContactClosed, contactStateKey } from './devices/contacts';
 
@@ -225,6 +226,17 @@ interface SpiCreateContext extends DeviceCreateContext {
   csPinId: string | null;
 }
 
+/**
+ * Character LCDs driven from plain GPIOs, and the glass each one has.
+ *
+ * The controller is identical across them — this table is only how many
+ * characters are in front of it.
+ */
+const PARALLEL_LCD_GEOMETRY: Record<string, { columns: number; rows: number }> = {
+  'comp.lcd1602-parallel': { columns: 16, rows: 2 },
+  'comp.lcd2004-parallel': { columns: 20, rows: 4 },
+};
+
 const SPI_DEVICE_MODELS: Record<string, SpiDeviceModel> = {
   'comp.hc595': {
     busPins: { sck: 'srclk', mosi: 'ser', miso: null, cs: null },
@@ -386,11 +398,13 @@ export class CircuitBinding {
     this.releaseListeners();
     this.hc595.clear();
     this.hc165.clear();
+    this.parallelLcds.clear();
     const i2c: I2cDevice[] = [];
     const spi: SpiDevice[] = [];
     for (const [instanceId, owner] of this.runners) {
       i2c.push(...this.setupI2cDevices(owner, instanceId));
       spi.push(...this.setupSpiDevices(owner, instanceId));
+      this.setupParallelLcds(owner, instanceId);
     }
     this.i2cDevices = i2c;
     this.spiDevices = spi;
@@ -529,6 +543,68 @@ export class CircuitBinding {
    * attached at all, so firmware talking to it reads back an idle bus rather
    * than a fabricated reply.
    */
+  /**
+   * Character LCDs wired straight to GPIOs, rather than through a bus.
+   *
+   * There is nothing to decode here: the panel latches on the falling edge of
+   * E and reads whatever RS and the data lines are holding at that instant. So
+   * the binding subscribes to those pins as edges — the same treatment the
+   * 74HC595's latch gets, and for the same reason: an E pulse is microseconds
+   * long and polling once a frame would miss every one of them.
+   *
+   * Levels are seeded from the emulator at bind time as well as tracked from
+   * edges. A data line that firmware sets once and leaves alone produces no
+   * further edges, and a panel that only knew about changes would read it as
+   * low forever.
+   */
+  private setupParallelLcds(runner: BoardRunner, boardInstanceId: string): void {
+    const boardPinOn = (netId: string | undefined): number | null =>
+      netId === undefined
+        ? null
+        : (this.netEndpoints.get(netId) ?? []).find((e) => e.instance === boardInstanceId)?.pin ?? null;
+
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (!def || !PARALLEL_LCD_GEOMETRY[def.id]) continue;
+
+      const enPin = boardPinOn(this.netOfInstancePin(inst.id, 'e'));
+      // No enable line reaching this board means this board cannot drive it.
+      // Another board might, so this is a skip rather than a fault.
+      if (enPin === null) continue;
+
+      const watched = new Map<string, number>();
+      for (const pinId of ['rs', ...LCD_DATA_PINS_8]) {
+        const pin = boardPinOn(this.netOfInstancePin(inst.id, pinId));
+        if (pin !== null) watched.set(pinId, pin);
+      }
+
+      const device =
+        this.parallelLcdDevices.get(inst.id) ??
+        new Hd44780ParallelDevice(inst.id, PARALLEL_LCD_GEOMETRY[def.id]);
+      this.parallelLcdDevices.set(inst.id, device);
+      // Eight-bit only when all eight data lines actually reach the board. A
+      // four-wire build is the common one and must not be guessed into eight.
+      device.setBusWidth(LCD_DATA_PINS_8.every((pinId) => watched.has(pinId)));
+
+      // Seed from the live pins, then follow the edges.
+      for (const [pinId, pin] of watched) {
+        device.onPinLevel(pinId, runner.digitalPinLevel(pin) === 'high');
+      }
+      this.parallelLcds.set(inst.id, device);
+
+      const byPin = new Map<number, string>();
+      for (const [pinId, pin] of watched) byPin.set(pin, pinId);
+      this.unsubscribeLatches.push(
+        runner.addPinListener((pin, high) => {
+          const pinId = byPin.get(pin);
+          if (pinId !== undefined) device.onPinLevel(pinId, high);
+          // E last, so RS and the data lines are already current when it falls.
+          if (pin === enPin) device.onPinLevel('e', high);
+        }),
+      );
+    }
+  }
+
   private setupSpiDevices(runner: BoardRunner, boardInstanceId: string): SpiDevice[] {
     const board = this.boardDefinitionOf(boardInstanceId);
     // Engines whose hardware SPI controller is not yet bridged to the shared
@@ -1052,6 +1128,21 @@ export class CircuitBinding {
 
   /** Running logic parts, by component instance id. */
   private logicDevices = new Map<string, LogicIcDevice>();
+
+  /**
+   * Directly-wired character LCDs, live for this binding.
+   *
+   * Two maps because a re-bind is a wiring edit, not a power cycle: the device
+   * (and the text on it) survives in `parallelLcdDevices`, while
+   * `parallelLcds` holds only the ones currently reachable from a board.
+   */
+  private parallelLcdDevices = new Map<string, Hd44780ParallelDevice>();
+  private parallelLcds = new Map<string, Hd44780ParallelDevice>();
+
+  /** A directly-wired LCD's model, for the canvas and the inspector. */
+  parallelLcdFor(instanceId: string): Hd44780ParallelDevice | undefined {
+    return this.parallelLcds.get(instanceId);
+  }
 
   /** Last resolved level of each logic clock net, for edge detection. */
   private logicClockLevels = new Map<string, Logic>();
@@ -1729,6 +1820,20 @@ export class CircuitBinding {
           } else {
             // Not wired to the bus (or no simulation running): stays dark.
             visuals.set(inst.id, { display: { pixels: null, on: false, revision: 0 } });
+          }
+          break;
+        }
+        case 'sim.lcd-parallel': {
+          const device = this.parallelLcdFor(inst.id);
+          if (device) {
+            visuals.set(inst.id, {
+              readout: device.isInitialised
+                ? device.lines
+                : Array.from({ length: device.rows }, (_, i) => (i === 0 ? 'not initialised' : '')),
+            });
+          } else {
+            // Its enable line reaches no board, so nothing can ever latch.
+            visuals.set(inst.id, {});
           }
           break;
         }

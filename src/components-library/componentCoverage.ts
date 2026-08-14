@@ -234,7 +234,8 @@ const SENSORS: CoverageEntry[] = [
 // ------------------------------------------------------------------ Displays
 const DISPLAYS: CoverageEntry[] = [
   entry('comp.lcd1602', 'LCD 1602 (I2C)', 'Displays', 'wt', 'display-controller', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/artwork.displays.mts', 'tests/components.i2c.mts']),
-  entry('comp.lcd1602-parallel', 'LCD 1602 (parallel)', 'Displays', 'wt', 'display-controller', 'missing', ['gpio'], ['hd44780-parallel'], 'none', NONE),
+  entry('comp.lcd1602-parallel', 'LCD 1602 (parallel)', 'Displays', 'wt', 'display-controller', 'simulated', ['gpio'], NONE, 'hardware', ['tests/displays.parallel.mts']),
+  entry('comp.lcd2004-parallel', 'LCD 2004 (parallel)', 'Displays', 'wt', 'display-controller', 'simulated', ['gpio'], NONE, 'hardware', ['tests/displays.parallel.mts']),
   entry('comp.lcd2004', 'LCD 2004 (I2C)', 'Displays', 'wt', 'display-controller', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/displays.batch4.mts']),
   entry('comp.oled', 'OLED 128×64 (SSD1306)', 'Displays', 'wt', 'display-controller', 'simulated', ['i2c'], ['i2c-register-device'], 'hardware', ['tests/artwork.displays.mts', 'tests/components.i2c.mts']),
   entry('comp.sh1107', 'OLED 128×128 (SH1107)', 'Displays', 'w', 'display-controller', 'simulated', ['i2c'], NONE, 'hardware', ['tests/displays.mono.mts']),
