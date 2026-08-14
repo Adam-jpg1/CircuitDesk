@@ -722,10 +722,12 @@ function segmentShapes(x: number, y: number, w: number, h: number): Record<strin
  * brightness each — which is what the hardware looks like — and a digit that is
  * never enabled stays black.
  */
-function SevenSegMultiArt({ def, visual }: ArtProps) {
+function SevenSegMultiArt({ def, visual, digits: fixedDigits }: ArtProps & { digits?: number }) {
   const w = def.widthMm * MM;
   const h = def.heightMm * MM;
-  const digits = def.pins.filter((p) => /^d\d+$/.test(p.id)).length;
+  // A bare module has one common pin per digit; a driven one (TM1637) has two
+  // wires and its digit count is a property of the chip, so it is passed in.
+  const digits = fixedDigits ?? def.pins.filter((p) => /^d\d+$/.test(p.id)).length;
   const brightness = visual?.elementBrightness ?? {};
 
   const pad = w * 0.05;
@@ -837,7 +839,9 @@ function MonoPanelArt({
   cols,
   rows,
   idleLabel,
-}: ArtProps & { cols: number; rows: number; idleLabel: string }) {
+  ink = '#a9e6ff',
+  glass: glassFill = '#04060a',
+}: ArtProps & { cols: number; rows: number; idleLabel: string; ink?: string; glass?: string }) {
   const w = def.widthMm * MM;
   const h = def.heightMm * MM;
   const display = visual?.display;
@@ -867,7 +871,7 @@ function MonoPanelArt({
               y={glass.y + row * py}
               width={(x - runStart) * px}
               height={Math.max(py, 0.5)}
-              fill="#a9e6ff"
+              fill={ink}
             />,
           );
           runStart = -1;
@@ -895,7 +899,7 @@ function MonoPanelArt({
         fill="#1b2028"
         stroke="#39424c"
       />
-      <rect x={glass.x} y={glass.y} width={glass.w} height={glass.h} fill="#04060a" />
+      <rect x={glass.x} y={glass.y} width={glass.w} height={glass.h} fill={glassFill} />
       {lit}
       {!display?.on && (
         <text
@@ -1658,8 +1662,12 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   oled: (p) => <OledArt {...p} />,
   sh1107: (p) => <Sh1107Art {...p} />,
   'seven-segment-multi': (p) => <SevenSegMultiArt {...p} />,
+  tm1637: (p) => <SevenSegMultiArt {...p} digits={4} />,
   'led-matrix': (p) => <BareLedMatrixArt {...p} />,
   nokia5110: (p) => <Nokia5110Art {...p} />,
+  // The e-paper's glass is white paper with dark ink, not a lit panel — the
+  // one display in the library that is legible with the power off.
+  epaper: (p) => <MonoPanelArt {...p} cols={128} rows={296} idleLabel="E-Paper" ink="#1b1f24" glass="#e9e6df" />,
   tft: (p) => <RasterPanelArt {...p} />,
   'tft-round': (p) => <RasterPanelArt {...p} round />,
   neopixel: (p) => <NeoPixelArt {...p} layout="single" />,

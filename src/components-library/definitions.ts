@@ -447,7 +447,11 @@ function spiDisplay(
     ['cs', 'CS', { type: 'digital', caps: ['digital-in'] }],
     ['dc', 'DC', { type: 'digital', caps: ['digital-in'] }],
     ['rst', 'RST', { type: 'digital', caps: ['digital-in'] }],
-    ...extraPins.map(([pid, label]) => [pid, label, { type: 'digital', caps: ['digital-in'] }] as [string, string, Partial<PinSpec>]),
+    // Extra lines are outputs FROM the module — an e-paper's BUSY is the only
+    // one so far, and it is driven by the panel rather than by the board.
+    ...extraPins.map(
+      ([pid, label]) => [pid, label, { type: 'digital', caps: ['digital-out'] }] as [string, string, Partial<PinSpec>],
+    ),
   ];
   const pitch = 2.54;
   const originX = (widthMm - (header.length - 1) * pitch) / 2;
@@ -458,6 +462,19 @@ function spiDisplay(
     { simulationAdapterId: adapterId, description },
   );
 }
+
+export const EPAPER29 = spiDisplay(
+  'comp.epaper29', 'E-Paper 2.9" 128×296', 48, 76, 'epaper', 'sim.epaper',
+  'A 2.9-inch monochrome e-paper on an SSD1680-family controller. The behaviour that makes it an e-paper is ' +
+    'modelled and is the thing people trip over: the panel does not follow its RAM. Writing display RAM changes ' +
+    'nothing visible; the image only changes when a refresh is commanded, and then it stays — through further ' +
+    'RAM writes, through deep sleep, and through a reset. BUSY is a real output driven for the duration of an ' +
+    'update, so a driver that waits on it blocks for a plausible time and one that does not misbehaves as it ' +
+    'would on a bench. Refusing to refresh while in deep sleep is modelled too. NOT modelled and not claimed: ' +
+    'ghosting, LUT waveforms, partial-refresh artefacts, refresh current, temperature compensation, and the ' +
+    'red channel of three-colour panels — a refresh here is clean at the end of its BUSY period.',
+  [['busy', 'BUSY']],
+);
 
 export const NOKIA5110 = spiDisplay(
   'comp.nokia5110', 'Nokia 5110 LCD (PCD8544)', 45, 45, 'nokia5110', 'sim.pcd8544',
@@ -649,6 +666,29 @@ export const LED_MATRIX_8X8 = def(
       'firmware to scan the rows fast enough that the eye joins them up — which is exactly what the canvas ' +
       'shows, averaged over the last few milliseconds. Stop scanning and it fades. Per-LED current and the ' +
       'brightness drop from lighting many LEDs in one row are not modelled.',
+  },
+);
+
+/** The TM1637 four-digit module: two wires, a driver chip, no address. */
+export const TM1637 = def(
+  'comp.tm1637', 'TM1637 4-Digit Display', 'Displays', 42, 24, 'tm1637',
+  [
+    pin('gnd', 'GND', 8, 23.4, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', 'VCC', 14, 23.4, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('dio', 'DIO', 20, 23.4, { type: 'digital', caps: ['digital-in', 'digital-out'] }),
+    pin('clk', 'CLK', 26, 23.4, { type: 'digital', caps: ['digital-in'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.tm1637',
+    description:
+      'Four digits behind a TM1637, on two wires that look like I2C and are not. There is no address — the ' +
+      'chip is the only thing on those pins — and bits go out least significant first, which is the opposite ' +
+      'of I2C and would scramble every glyph if decoded the other way. The model watches the two pins ' +
+      'directly, so an ordinary Arduino TM1637 sketch drives it with nothing simulator-specific. The chip ' +
+      'holds a whole frame, so unlike a bare multiplexed display there is no scan to average. Its keypad ' +
+      'scanning half is not modelled (no common breakout wires it), nor is display-test mode, and brightness ' +
+      'is stored and reported rather than shown as luminance.',
   },
 );
 
@@ -1193,8 +1233,8 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   BUZZER, SPEAKER, RELAY,
   SERVO, DC_MOTOR, STEPPER, MOTOR_DRIVER,
   LCD1602, LCD1602_PARALLEL, LCD2004_PARALLEL, OLED, SH1107_OLED, SEVEN_SEGMENT,
-  SEVEN_SEGMENT_CA, SEVEN_SEGMENT_2, SEVEN_SEGMENT_4, LED_MATRIX_8X8,
-  NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331,
+  SEVEN_SEGMENT_CA, SEVEN_SEGMENT_2, SEVEN_SEGMENT_4, LED_MATRIX_8X8, TM1637,
+  NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331, EPAPER29,
   NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
   GPS, BLUETOOTH, WIFI_ESP01,

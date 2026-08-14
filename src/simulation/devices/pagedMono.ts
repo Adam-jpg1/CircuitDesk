@@ -101,6 +101,12 @@ export class PagedMonoRam {
     }
   }
 
+  /** Puts the write cursor back at the top-left of the window. */
+  rewindCursor(): void {
+    this.col = this.colStart;
+    this.page = this.pageStart;
+  }
+
   /**
    * The pixel at a panel coordinate, after orientation.
    *
