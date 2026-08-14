@@ -59,6 +59,21 @@ RUN if [ "$ESP32_CORE" = "0" ]; then \
  # all — Render cancels a build whose disk use passes 16 GB.
  && rm -rf /root/.arduino15/staging /root/.cache/arduino
 
+# The Arduino libraries this service promises, pinned the same way. Without
+# these, `#include <Servo.h>` does not compile — which is not a missing feature
+# a user can work around, it is the normal way every servo sketch is written.
+#
+# --verify here is a version check and costs about a second. The manifest also
+# records which headers build for which target, and that claim is checked by
+# compiling every one of them (`installLibraries.mjs --probe`, exercised by
+# tests/compiler.libraries.mts). That takes minutes and is deliberately not in
+# the image build.
+COPY server/compiler/libraries.json server/compiler/installLibraries.mjs /bootstrap/compiler/
+RUN node /bootstrap/compiler/installLibraries.mjs \
+ && node /bootstrap/compiler/installLibraries.mjs --verify \
+ && arduino-cli lib list \
+ && rm -rf /root/.arduino15/staging /root/.cache/arduino
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./

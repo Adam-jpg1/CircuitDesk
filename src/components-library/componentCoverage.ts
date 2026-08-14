@@ -334,7 +334,7 @@ const MOTORS: CoverageEntry[] = [
   entry('comp.dc-motor-encoder', 'DC motor with encoder', 'Motors & Actuators', '-', 'actuator', 'missing', ['gpio', 'pwm'], ['motor-state'], 'none', NONE),
   entry('comp.gearmotor', 'Gearmotor', 'Motors & Actuators', 't', 'actuator', 'missing', ['gpio', 'pwm'], ['motor-state'], 'none', NONE),
   entry('comp.vibration-motor', 'Vibration motor', 'Motors & Actuators', 't', 'actuator', 'missing', ['gpio', 'pwm'], ['motor-state'], 'none', NONE),
-  entry('comp.servo', 'Micro servo (SG90)', 'Motors & Actuators', 'wt', 'actuator', 'simulated', ['pwm'], NONE, 'hardware', ['tests/motors.batch5.mts', 'tests/sim.behaviors.mts']),
+  entry('comp.servo', 'Micro servo (SG90)', 'Motors & Actuators', 'wt', 'actuator', 'simulated', ['pwm'], NONE, 'hardware', ['tests/motors.batch5.mts', 'tests/compiler.libraries.mts', 'tests/sim.behaviors.mts'], 'The angle is decoded from the pulse on the signal wire. Driven by hand or by the Servo library on AVR; on RP2040 and ESP32 the stock libraries reach for PIO and LEDC, which are not modelled, so a build there is flagged as having no effect and the pulse must be written directly.'),
   entry('comp.stepper', 'Bipolar stepper', 'Motors & Actuators', 'wt', 'actuator', 'wiring', ['gpio'], ['motor-state'], 'hardware', NONE, 'Drawn and wired; step position is not tracked yet.'),
   entry('comp.stepper-28byj', '28BYJ-48 stepper', 'Motors & Actuators', 'w', 'actuator', 'missing', ['gpio'], ['motor-state'], 'none', NONE),
   entry('comp.a4988', 'A4988 stepper driver', 'Motors & Actuators', 'w', 'actuator', 'missing', ['gpio'], ['motor-state'], 'none', NONE),

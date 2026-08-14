@@ -8,6 +8,7 @@ import { SUPPORTED_TARGETS, findTarget, type CompileRequest } from './compiler/t
 import { detectGccToolchain, ensureCoreArchive } from './compiler/gccToolchain.js';
 import { detectArduinoCli } from './compiler/arduinoCli.js';
 import { PINNED_CORES, pinnedCore } from './compiler/cores.js';
+import { PINNED_LIBRARIES, headersForTarget } from './compiler/libraries.js';
 import { rateLimit } from './rateLimit.js';
 import { CompileGate, CompilerBusyError } from './compileGate.js';
 
@@ -122,6 +123,9 @@ app.get('/api/compiler/capabilities', async (_req, res) => {
         expectedCoreVersion: pin?.version ?? null,
         installed,
         toolchain,
+        // Which library headers this target can actually build. Measured, not
+        // inferred from library metadata — see server/compiler/libraries.json.
+        headers: headersForTarget(t.fqbn),
         reason: installed
           ? undefined
           : `The ${t.core} core is not installed on this compiler service (arduino-cli ${cli.available ? 'present' : 'missing'}).`,
@@ -132,17 +136,47 @@ app.get('/api/compiler/capabilities', async (_req, res) => {
     // rather than being reported as simply healthy.
     const missingRequired = cores.filter((c) => c.required && !c.installed).map((c) => c.id);
     const drifted = cores.filter((c) => c.installed && !c.matchesPin).map((c) => c.id);
+
+    const libraries = PINNED_LIBRARIES.map((lib) => {
+      const installedVersion = cli.libraryVersions[lib.id];
+      const installed = Boolean(installedVersion);
+      return {
+        id: lib.id,
+        expectedVersion: lib.version,
+        installedVersion: installedVersion ?? null,
+        installed,
+        matchesPin: installed && installedVersion === lib.version,
+        required: lib.required,
+        provides: lib.provides,
+        reason: installed
+          ? installedVersion === lib.version
+            ? undefined
+            : `Installed ${lib.id} is ${installedVersion}, but this service is validated against ${lib.version}.`
+          : `The ${lib.id} library is not installed on this compiler service.`,
+      };
+    });
+    const missingLibraries = libraries.filter((l) => l.required && !l.installed).map((l) => l.id);
+    const driftedLibraries = libraries.filter((l) => l.installed && !l.matchesPin).map((l) => l.id);
+
+    // A missing library degrades the service in exactly the way a missing core
+    // does — sketches that are supposed to build stop building — so it is
+    // reported the same way rather than left for the user to discover.
+    const degraded = missingRequired.length > 0 || missingLibraries.length > 0;
+    const hasDrift = drifted.length > 0 || driftedLibraries.length > 0;
     res.json({
-      status: missingRequired.length > 0 ? 'degraded' : drifted.length > 0 ? 'drifted' : 'healthy',
+      status: degraded ? 'degraded' : hasDrift ? 'drifted' : 'healthy',
       arduinoCli: { available: cli.available, version: cli.version },
       missingRequiredCores: missingRequired,
       driftedCores: drifted,
+      missingRequiredLibraries: missingLibraries,
+      driftedLibraries,
       cores,
+      libraries,
       targets,
     });
   } catch (err) {
     console.error('[CircuitDesk] capabilities check failed:', err);
-    res.status(500).json({ status: 'error', cores: [], targets: [] });
+    res.status(500).json({ status: 'error', cores: [], libraries: [], targets: [] });
   }
 });
 

@@ -1,0 +1,200 @@
+{
+  "_comment": [
+    "The Arduino libraries CircuitDesk's compiler service installs, at the versions it",
+    "is validated against, and the record of which headers actually build for which",
+    "target.",
+    "",
+    "Why this file exists: until now the service installed no libraries at all, so a",
+    "sketch with `#include <Servo.h>` did not compile. That is why the servo model is",
+    "tested by hand-writing a pulse loop. Every part that follows \u2014 steppers, matrix",
+    "displays, radios \u2014 is normally driven through a library, and a component library",
+    "whose parts can only be driven by hand-written register banging is not usable.",
+    "",
+    "Versions are PINNED for the same reason the cores are: a library upgrade nobody",
+    "chose changes the firmware the emulator is asked to execute.",
+    "",
+    "AVAILABILITY IS MEASURED, NOT DECLARED. 'headers' below does not say what the",
+    "library index claims; it says what was observed to compile. The Servo library's",
+    "own metadata claims no esp32 support, yet it ships an esp32 backend and",
+    "arduino-cli will happily resolve it for an ESP32 board \u2014 and then the build fails",
+    "inside the library on a SoC macro that Arduino-ESP32 renamed. So Servo.h is",
+    "recorded as unavailable for the ESP targets, with the reason and the alternative,",
+    "and `installLibraries.mjs --probe` compiles every claim in this file to keep it",
+    "true.",
+    "",
+    "COMPILING IS NOT WORKING. A header that builds for a target can still do nothing",
+    "when the firmware runs, because the library reaches for a peripheral the emulator",
+    "does not model. Every `via` entry therefore carries an `effect`, measured by",
+    "tests/compiler.libraries.mts running the firmware and watching the wire:",
+    "",
+    "  works         the pulse/edges actually appear, and the part responds",
+    "  compiles-only the build succeeds and the pin never moves",
+    "",
+    "Servo.h on a Pico is the case that made this necessary. It compiles, and the",
+    "shaft never turns, because Arduino-Pico drives the pin from a PIO program."
+  ],
+  "libraries": [
+    {
+      "id": "Servo",
+      "version": "1.3.0",
+      "provides": [
+        "Servo.h"
+      ],
+      "maintainer": "Arduino",
+      "license": "LGPL-2.1",
+      "required": true,
+      "note": "The official Arduino servo library. Drives the pin from a timer interrupt, so the emulator has to run the timer for the shaft to move \u2014 nothing about installing it makes a servo work on its own."
+    },
+    {
+      "id": "ESP32Servo",
+      "version": "3.2.1",
+      "provides": [
+        "ESP32Servo.h",
+        "ESP32PWM.h",
+        "analogWrite.h"
+      ],
+      "maintainer": "Kevin Harrington",
+      "license": "LGPL-2.1",
+      "required": true,
+      "note": "What an ESP32 sketch uses instead of Servo.h. Generates the pulse with the LEDC peripheral rather than a timer ISR."
+    }
+  ],
+  "headers": [
+    {
+      "header": "Servo.h",
+      "probe": "#include <Servo.h>\nServo probeServo;\nvoid setup() { probeServo.attach(9); probeServo.write(90); }\nvoid loop() { probeServo.read(); }\n",
+      "via": [
+        {
+          "source": "library:Servo",
+          "targets": [
+            "arduino:avr:uno",
+            "arduino:avr:nano",
+            "arduino:avr:mega",
+            "arduino:avr:leonardo"
+          ],
+          "effect": "works",
+          "note": "Drives the pin from a Timer1 compare interrupt, which the AVR emulator runs, so the pulse is real and the modelled shaft follows write()."
+        },
+        {
+          "source": "core:rp2040:rp2040",
+          "targets": [
+            "rp2040:rp2040:rpipico",
+            "rp2040:rp2040:rpipicow"
+          ],
+          "effect": "compiles-only",
+          "effectReason": "Arduino-Pico's Servo emits the pulse from a PIO program. rp2040js models PIO, but runs its state machines from a wall-clock setTimeout loop that is detached from CircuitDesk's simulated timeline, so the program never advances with simulated time and the pin never moves. Driving PIO from the simulated clock is an emulator change, not a library one.",
+          "workaround": "Write the pulse directly (digitalWrite / delayMicroseconds), which works on the Pico today, or use an AVR board.",
+          "note": "Arduino-Pico bundles its own Servo. Installing the Arduino one would be shadowed by it, and is not needed."
+        }
+      ],
+      "unavailable": [
+        {
+          "targets": [
+            "esp32:esp32:esp32c3",
+            "esp32:esp32:esp32c6"
+          ],
+          "alternative": "ESP32Servo.h",
+          "reason": "The Servo library's esp32 backend does not build against Arduino-ESP32 3.3.11: src/esp32/ServoTimers.h reads SOC_LEDC_TIMER_BIT_WIDE_NUM, which that core renamed to SOC_LEDC_TIMER_BIT_WIDTH. arduino-cli resolves the include anyway and the build then fails inside the library."
+        }
+      ]
+    },
+    {
+      "header": "ESP32Servo.h",
+      "probe": "#include <ESP32Servo.h>\nServo probeServo;\nvoid setup() { probeServo.attach(4); probeServo.write(90); }\nvoid loop() { probeServo.read(); }\n",
+      "via": [
+        {
+          "source": "library:ESP32Servo",
+          "targets": [
+            "esp32:esp32:esp32c3",
+            "esp32:esp32:esp32c6"
+          ],
+          "effect": "compiles-only",
+          "effectReason": "ESP32Servo generates the pulse with the LEDC peripheral, which is not in the C3/C6 peripheral map (server-side: src/simulation/esp32c3/peripherals.ts). The writes land in unmodelled address space and no edge reaches the pin.",
+          "workaround": "Write the pulse directly (digitalWrite / delayMicroseconds), or use an AVR board."
+        }
+      ],
+      "unavailable": [
+        {
+          "targets": [
+            "arduino:avr:uno",
+            "arduino:avr:nano",
+            "arduino:avr:mega",
+            "arduino:avr:leonardo",
+            "rp2040:rp2040:rpipico",
+            "rp2040:rp2040:rpipicow"
+          ],
+          "alternative": "Servo.h",
+          "reason": "ESP32Servo is written against the ESP32 LEDC peripheral and does not apply to other architectures."
+        }
+      ]
+    },
+    {
+      "header": "Wire.h",
+      "probe": "#include <Wire.h>\nvoid setup() { Wire.begin(); Wire.beginTransmission(0x27); Wire.write(0); Wire.endTransmission(); }\nvoid loop() {}\n",
+      "via": [
+        {
+          "source": "core:arduino:avr",
+          "targets": [
+            "arduino:avr:uno",
+            "arduino:avr:nano",
+            "arduino:avr:mega",
+            "arduino:avr:leonardo"
+          ],
+          "effect": "works"
+        },
+        {
+          "source": "core:rp2040:rp2040",
+          "targets": [
+            "rp2040:rp2040:rpipico",
+            "rp2040:rp2040:rpipicow"
+          ],
+          "effect": "works"
+        },
+        {
+          "source": "core:esp32:esp32",
+          "targets": [
+            "esp32:esp32:esp32c3",
+            "esp32:esp32:esp32c6"
+          ],
+          "effect": "works"
+        }
+      ],
+      "unavailable": [],
+      "note": "Core-bundled everywhere. Recorded because the I2C parts depend on it, so a core change that dropped it should fail the probe rather than be discovered by a user. Both buses are read off the wire by the runners, which is what the device tests exercise."
+    },
+    {
+      "header": "SPI.h",
+      "probe": "#include <SPI.h>\nvoid setup() { SPI.begin(); SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0)); SPI.transfer(0); SPI.endTransaction(); }\nvoid loop() {}\n",
+      "via": [
+        {
+          "source": "core:arduino:avr",
+          "targets": [
+            "arduino:avr:uno",
+            "arduino:avr:nano",
+            "arduino:avr:mega",
+            "arduino:avr:leonardo"
+          ],
+          "effect": "works"
+        },
+        {
+          "source": "core:rp2040:rp2040",
+          "targets": [
+            "rp2040:rp2040:rpipico",
+            "rp2040:rp2040:rpipicow"
+          ],
+          "effect": "works"
+        },
+        {
+          "source": "core:esp32:esp32",
+          "targets": [
+            "esp32:esp32:esp32c3",
+            "esp32:esp32:esp32c6"
+          ],
+          "effect": "works"
+        }
+      ],
+      "unavailable": [],
+      "note": ""
+    }
+  ]
+}

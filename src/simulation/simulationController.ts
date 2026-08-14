@@ -34,7 +34,7 @@ import { compileProjectCode } from '../compiler/compilerClient';
 import { resolveDefinition } from '../project/partsRegistry';
 import { filesForBoard, sketchIdFor } from '../project/sketches';
 import { useSimulationStore } from './simulationStore';
-import type { BoardDefinition, CircuitProject, CompileResult } from '../types';
+import type { BoardDefinition, CircuitProject, CompileResult, SimulationNote } from '../types';
 
 const TICK_MS = 12;
 /**
@@ -60,6 +60,14 @@ export interface BoardBuild {
   status: 'built' | 'compile-failed' | 'not-simulated' | 'artifact-mismatch' | 'no-toolchain' | 'needs-build';
   /** One line a person can act on. Always names the board, never just "failed". */
   detail: string;
+  /**
+   * Includes that compile for this target and then do nothing.
+   *
+   * Carried on the build rather than only inside `result`, because it survives
+   * the artifact cache: the second build of an unchanged sketch reports "up to
+   * date" without asking the compiler, and the warning has to still be there.
+   */
+  notes?: SimulationNote[];
   durationMs?: number;
   result?: CompileResult;
 }
@@ -97,6 +105,14 @@ class SimulationController {
    * same bytes. Runtime state is never in here; this holds files.
    */
   private artifacts = new Map<string, FirmwareArtifact>();
+  /**
+   * Include warnings, keyed the same way the artifacts are.
+   *
+   * They belong to the same thing an artifact does — a target plus exact
+   * source text — so a cache hit that skips the compiler still knows that this
+   * sketch's Servo.h does nothing on this board.
+   */
+  private artifactNotes = new Map<string, SimulationNote[]>();
   private builds: BoardBuild[] = [];
 
   private transcript = new SerialTranscript();
@@ -252,7 +268,13 @@ class SimulationController {
 
     const cached = this.artifacts.get(cacheKey);
     if (cached) {
-      return { ...base, status: 'built', detail: `${describe(target)} — up to date` };
+      const notes = this.artifactNotes.get(cacheKey);
+      return {
+        ...base,
+        status: 'built',
+        detail: `${describe(target)} — up to date${noteSuffix(notes)}`,
+        notes,
+      };
     }
 
     const result = await this.compileFn(project, {
@@ -265,6 +287,7 @@ class SimulationController {
         ...base,
         status: 'compile-failed',
         detail: `${describe(target)} — build failed${result.error ? `: ${firstLine(result.error)}` : ''}`,
+        notes: result.simulationNotes,
         durationMs: result.durationMs,
         result,
       };
@@ -289,10 +312,14 @@ class SimulationController {
       };
     }
     this.artifacts.set(cacheKey, result.firmware);
+    const notes = result.simulationNotes;
+    if (notes && notes.length > 0) this.artifactNotes.set(cacheKey, notes);
+    else this.artifactNotes.delete(cacheKey);
     return {
       ...base,
       status: 'built',
-      detail: `${describe(target)} — build succeeded`,
+      detail: `${describe(target)} — build succeeded${noteSuffix(notes)}`,
+      notes,
       durationMs: result.durationMs,
       result,
     };
@@ -803,6 +830,20 @@ function buildKey(fqbn: string, files: readonly { name: string; content: string 
 /** "receiver.ino — Raspberry Pi Pico", which is what a build report needs. */
 function describe(target: WorkspaceTarget): string {
   return `${target.sketchName} — ${target.board.name}`;
+}
+
+/**
+ * The tail of a build line when an include compiles and then does nothing.
+ *
+ * Kept to one clause, because it sits on a line that already says which sketch
+ * and which board; the full reason and the workaround are on the note itself
+ * for whatever wants to show them.
+ */
+function noteSuffix(notes: SimulationNote[] | undefined): string {
+  const dead = (notes ?? []).filter((n) => n.kind === 'no-effect');
+  if (dead.length === 0) return '';
+  const names = dead.map((n) => n.header).join(', ');
+  return ` — but ${names} ${dead.length === 1 ? 'does' : 'do'} nothing on this board here`;
 }
 
 function firstLine(text: string): string {
