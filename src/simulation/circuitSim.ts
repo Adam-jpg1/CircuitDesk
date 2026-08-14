@@ -54,6 +54,8 @@ import { LOGIC_PARTS } from './devices/logicParts';
 import { Hd44780ParallelDevice, LCD_DATA_PINS_8 } from './devices/lcdParallel';
 import { Ws2812Device } from './devices/ws2812';
 import { PersistenceTracker } from './devices/persistence';
+import { MotorModel, QuadratureEncoder } from './devices/motorState';
+import { CoilStepper, StepDirDriver } from './devices/steppers';
 import { Tm1637Device } from './devices/tm1637';
 import { TftDisplayDevice } from './devices/tftController';
 import { ILI9341_SPEC, ST7735_SPEC, ST7789_SPEC, GC9A01_SPEC } from './devices/tftSpecs';
@@ -122,6 +124,19 @@ export interface ComponentVisualState {
    * three quarters of the time and reads here as the average an eye would see.
    */
   elementBrightness?: Record<string, number>;
+  /**
+   * What a motor or stepper is doing, derived from its terminals.
+   *
+   * `angleDegrees` is an integrated shaft position, not a commanded one — a
+   * motor with a lead disconnected reports `connected: false` and does not
+   * move, whatever the firmware asked for.
+   */
+  motor?: {
+    direction: 'stopped' | 'forward' | 'reverse';
+    magnitude: number;
+    angleDegrees: number;
+    connected: boolean;
+  };
   /**
    * A colour framebuffer, handed to the canvas as raw RGB565 words.
    *
@@ -313,6 +328,38 @@ const WS2812_DEFAULT_PIXELS: Record<string, number> = {
  * a common-cathode digit lights a segment when the segment is high and the
  * common is low, and a common-anode one is the other way round.
  */
+/**
+ * Parts whose behaviour is a motor turning, and the terminals it turns from.
+ *
+ * `ratedVolts` is the nameplate: the drive magnitude is relative to it, so a
+ * 3 V vibration motor on 5 V is at full tilt and a 12 V motor on 5 V is not.
+ * `ratedRpm` sets how fast the modelled shaft integrates, which is what an
+ * encoder counts.
+ */
+const MOTOR_PARTS: Record<
+  string,
+  { plus: string; minus: string; ratedVolts: number; ratedRpm: number; encoderPpr?: number }
+> = {
+  'comp.dc-motor': { plus: 'm1', minus: 'm2', ratedVolts: 6, ratedRpm: 300 },
+  'comp.gearmotor': { plus: 'm1', minus: 'm2', ratedVolts: 6, ratedRpm: 90 },
+  'comp.vibration-motor': { plus: 'm1', minus: 'm2', ratedVolts: 3, ratedRpm: 12000 },
+  'comp.dc-motor-encoder': { plus: 'm1', minus: 'm2', ratedVolts: 6, ratedRpm: 200, encoderPpr: 11 },
+  'comp.solenoid': { plus: 'p1', minus: 'p2', ratedVolts: 12, ratedRpm: 0 },
+};
+
+/** Steppers whose four coils firmware drives directly. */
+const COIL_STEPPER_PARTS: Record<string, { coils: string[]; stepsPerRevolution: number }> = {
+  // Counted in half-steps: a 200-full-step bipolar motor is 400, and a
+  // 28BYJ-48's gearbox gives the familiar 4096 per output revolution.
+  'comp.stepper': { coils: ['in1', 'in2', 'in3', 'in4'], stepsPerRevolution: 400 },
+  'comp.stepper-28byj': { coils: ['in1', 'in2', 'in3', 'in4'], stepsPerRevolution: 4096 },
+};
+
+/** Step/direction drivers, which sequence the coils on the far side themselves. */
+const STEP_DIR_PARTS: Record<string, { fullStepsPerRevolution: number }> = {
+  'comp.a4988': { fullStepsPerRevolution: 200 },
+};
+
 const MULTIPLEXED_PARTS: Record<
   string,
   { commons: string[]; elements: string[]; commonCathode: boolean }
@@ -1444,6 +1491,30 @@ export class CircuitBinding {
   private readonly persistence = new PersistenceTracker();
 
   /**
+   * Motors, steppers and drivers, kept across re-binds.
+   *
+   * A wiring edit rebinds the circuit; it does not unwind a shaft. Keeping the
+   * models means a stepper that has taken four hundred steps still has taken
+   * four hundred steps after a wire is moved, which is what the hardware would
+   * do and what makes the position meaningful at all.
+   */
+  private readonly motors = new Map<string, MotorModel>();
+  private readonly encoders = new Map<string, QuadratureEncoder>();
+  private readonly coilSteppers = new Map<string, CoilStepper>();
+  private readonly stepDrivers = new Map<string, StepDirDriver>();
+
+  /** A motor's model, for the canvas and the inspector. */
+  motorFor(instanceId: string): MotorModel | undefined {
+    return this.motors.get(instanceId);
+  }
+  coilStepperFor(instanceId: string): CoilStepper | undefined {
+    return this.coilSteppers.get(instanceId);
+  }
+  stepDriverFor(instanceId: string): StepDirDriver | undefined {
+    return this.stepDrivers.get(instanceId);
+  }
+
+  /**
    * Puts every multiplexed part's pins on the switched-net list.
    *
    * A scan drives a common low, sets the segment lines, and moves on inside a
@@ -1454,11 +1525,103 @@ export class CircuitBinding {
   private markMultiplexedNets(): void {
     for (const inst of this.graph.instances) {
       const def = this.graph.definitions.get(inst.id);
-      const spec = def ? MULTIPLEXED_PARTS[def.id] : undefined;
-      if (!spec) continue;
-      for (const pinId of [...spec.commons, ...spec.elements]) {
-        const netId = this.netOfInstancePin(inst.id, pinId);
-        if (netId) this.switchedNets.add(netId);
+      if (!def) continue;
+
+      const spec = MULTIPLEXED_PARTS[def.id];
+      if (spec) {
+        for (const pinId of [...spec.commons, ...spec.elements]) {
+          const netId = this.netOfInstancePin(inst.id, pinId);
+          if (netId) this.switchedNets.add(netId);
+        }
+      }
+
+      // A stepper's coil lines and an A4988's STEP pin move far faster than a
+      // slice: a sketch stepping at 1 kHz changes them every 500 us, and
+      // settling once a millisecond would see a fraction of the transitions
+      // and count a fraction of the steps.
+      const coils = COIL_STEPPER_PARTS[def.id];
+      if (coils) {
+        for (const pinId of coils.coils) {
+          const netId = this.netOfInstancePin(inst.id, pinId);
+          if (netId) this.switchedNets.add(netId);
+        }
+      }
+      if (STEP_DIR_PARTS[def.id]) {
+        for (const pinId of ['step', 'dir', 'en']) {
+          const netId = this.netOfInstancePin(inst.id, pinId);
+          if (netId) this.switchedNets.add(netId);
+        }
+      }
+    }
+  }
+
+  /**
+   * Advances every motor, stepper and driver from the settled net levels.
+   *
+   * Everything here reads voltages and pin levels; nothing reads firmware
+   * intent. A motor turns because there is a difference across its terminals, a
+   * stepper moves because the coil pattern changed to an adjacent one, and an
+   * A4988 steps because an edge arrived on STEP while ENABLE was low. That is
+   * the whole point: a missing ground, a backwards bridge or an unwired enable
+   * pin all produce a part that does nothing, exactly as on a bench.
+   */
+  private updateMotors(levels: Map<string, NetLevel>, nowMs: number): void {
+    const voltsOn = (instanceId: string, pinId: string): number | null => {
+      const netId = this.netOfInstancePin(instanceId, pinId);
+      if (!netId) return null; // not wired: floating, which is not zero
+      const v = levels.get(netId)?.volts;
+      return v == null ? null : v;
+    };
+    const isHigh = (instanceId: string, pinId: string): boolean => {
+      const v = voltsOn(instanceId, pinId);
+      return v != null && v >= 1.6;
+    };
+
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (!def) continue;
+
+      const motorSpec = MOTOR_PARTS[def.id];
+      if (motorSpec) {
+        let motor = this.motors.get(inst.id);
+        if (!motor) {
+          motor = new MotorModel(inst.id, motorSpec.ratedVolts, motorSpec.ratedRpm);
+          this.motors.set(inst.id, motor);
+          if (motorSpec.encoderPpr) {
+            this.encoders.set(inst.id, new QuadratureEncoder(motorSpec.encoderPpr));
+          }
+        }
+        motor.update(voltsOn(inst.id, motorSpec.plus), voltsOn(inst.id, motorSpec.minus), nowMs);
+        continue;
+      }
+
+      const coilSpec = COIL_STEPPER_PARTS[def.id];
+      if (coilSpec) {
+        let stepper = this.coilSteppers.get(inst.id);
+        if (!stepper) {
+          stepper = new CoilStepper(inst.id, coilSpec.stepsPerRevolution);
+          this.coilSteppers.set(inst.id, stepper);
+        }
+        const [a, b, c, d] = coilSpec.coils.map((pinId) => isHigh(inst.id, pinId));
+        stepper.setCoils(a, b, c, d, nowMs);
+        continue;
+      }
+
+      if (STEP_DIR_PARTS[def.id]) {
+        let driver = this.stepDrivers.get(inst.id);
+        if (!driver) {
+          driver = new StepDirDriver(inst.id, STEP_DIR_PARTS[def.id].fullStepsPerRevolution);
+          this.stepDrivers.set(inst.id, driver);
+        }
+        // ENABLE is active low, and an unwired pin is NOT low — a floating
+        // enable on an A4988 board is pulled low by its own resistor, so the
+        // part is enabled when nothing drives it, which is what the hardware
+        // does and why most sketches never touch the pin.
+        const enableVolts = voltsOn(inst.id, 'en');
+        driver.setEnable(enableVolts == null || enableVolts < 1.6);
+        driver.setMicrostepping(isHigh(inst.id, 'ms1'), isHigh(inst.id, 'ms2'), isHigh(inst.id, 'ms3'));
+        driver.setDirection(isHigh(inst.id, 'dir'));
+        driver.setStep(isHigh(inst.id, 'step'));
       }
     }
   }
@@ -1847,6 +2010,92 @@ export class CircuitBinding {
       drivenNets.add(netId);
     }
 
+    // H-bridges drive their outputs from their inputs.
+    //
+    // Done before the motors so a motor on the far side sees this frame's
+    // bridge state rather than last frame's. The rules are the L298N's own: an
+    // output follows its input only while that half's enable is high, and with
+    // the enable low the output is off — which is why a sketch that forgets
+    // ENA gets a motor that never turns however it drives IN1 and IN2.
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (def?.id !== 'comp.motor-driver') continue;
+      const supplyNet = this.netOfInstancePin(inst.id, 'vcc');
+      const supply = supplyNet ? (levels.get(supplyNet)?.volts ?? null) : null;
+      // No motor supply means no output, whatever the logic side is doing.
+      if (supply == null || supply < 1) continue;
+
+      const inputHigh = (pinId: string): boolean => {
+        const netId = this.netOfInstancePin(inst.id, pinId);
+        const v = netId ? levels.get(netId)?.volts : undefined;
+        return v != null && v >= highVolts / 2;
+      };
+      const halves: [string, string, string, string, string][] = [
+        ['ena', 'in1', 'in2', 'out1', 'out2'],
+        ['enb', 'in3', 'in4', 'out3', 'out4'],
+      ];
+      for (const [en, inA, inB, outA, outB] of halves) {
+        // An unwired enable on an L298N board is jumpered high, which is how
+        // these modules ship and why most sketches never touch the pin.
+        const enNet = this.netOfInstancePin(inst.id, en);
+        const enabled = enNet === undefined ? true : inputHigh(en);
+        for (const [outPin, inPin] of [
+          [outA, inA],
+          [outB, inB],
+        ]) {
+          const outNet = this.netOfInstancePin(inst.id, outPin);
+          if (!outNet) continue;
+          if (!enabled) continue; // coasting: the output is not driven at all
+          setLevel(outNet, inputHigh(inPin) ? supply : 0, null, 0);
+          drivenNets.add(outNet);
+        }
+      }
+    }
+
+    // A ULN2003 is seven Darlington sinks: a high on an input pulls the
+    // matching output to ground, and a low leaves it floating. It cannot
+    // source, which is exactly why a 28BYJ-48 wired to one has its common on
+    // the supply rather than on ground.
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (def?.id !== 'comp.uln2003') continue;
+      for (let i = 1; i <= 7; i++) {
+        const inNet = this.netOfInstancePin(inst.id, `in${i}`);
+        const outNet = this.netOfInstancePin(inst.id, `out${i}`);
+        if (!outNet) continue;
+        const v = inNet ? levels.get(inNet)?.volts : undefined;
+        if (v != null && v >= highVolts / 2) {
+          setLevel(outNet, 0, null, 0);
+          drivenNets.add(outNet);
+        }
+      }
+    }
+
+    // Motors and steppers, driven from what is actually on their terminals.
+    //
+    // Deliberately after the logic settle and the expanders: a motor wired to
+    // an H-bridge that is wired to a shift register has to see the voltage the
+    // whole chain produced, not the one it had before the chain resolved.
+    this.updateMotors(levels, this.runner?.timeMs ?? 0);
+
+    // An encoder motor drives its two channels from the shaft the motor model
+    // integrated. Ninety degrees apart, so firmware can tell direction from the
+    // order the edges arrive in — which it cannot do from a pulse count.
+    for (const [instanceId, encoder] of this.encoders) {
+      const motor = this.motors.get(instanceId);
+      if (!motor) continue;
+      const position = motor.position;
+      for (const [pinId, level] of [
+        ['enca', encoder.channelA(position)],
+        ['encb', encoder.channelB(position)],
+      ] as [string, boolean][]) {
+        const netId = this.netOfInstancePin(instanceId, pinId);
+        if (!netId) continue;
+        setLevel(netId, level ? highVolts : 0, null, 0);
+        drivenNets.add(netId);
+      }
+    }
+
     // Logic ICs, settled to a fixed point.
     //
     // A gate's output is another gate's input, so one pass is not enough: a
@@ -2023,6 +2272,52 @@ export class CircuitBinding {
             visuals.set(inst.id, { elementBrightness: brightness, value: device.brightnessLevel });
           } else {
             visuals.set(inst.id, { elementBrightness: {} });
+          }
+          break;
+        }
+        case 'sim.motor': {
+          const motor = this.motorFor(inst.id);
+          if (motor) {
+            const state = motor.current;
+            visuals.set(inst.id, {
+              motor: {
+                direction: state.direction,
+                magnitude: state.magnitude,
+                angleDegrees: motor.angleDegrees,
+                connected: state.connected,
+              },
+              value: state.magnitude,
+            });
+          } else {
+            visuals.set(inst.id, {});
+          }
+          break;
+        }
+        case 'sim.stepper': {
+          const stepper = this.coilStepperFor(inst.id);
+          const driver = this.stepDriverFor(inst.id);
+          if (stepper) {
+            visuals.set(inst.id, {
+              motor: {
+                direction: 'stopped',
+                magnitude: stepper.isHolding ? 1 : 0,
+                angleDegrees: stepper.angleDegrees,
+                connected: stepper.isHolding,
+              },
+              value: stepper.stepCount,
+            });
+          } else if (driver) {
+            visuals.set(inst.id, {
+              motor: {
+                direction: 'stopped',
+                magnitude: driver.isEnabled ? 1 : 0,
+                angleDegrees: driver.angleDegrees,
+                connected: driver.isEnabled,
+              },
+              value: driver.microstepCount,
+            });
+          } else {
+            visuals.set(inst.id, {});
           }
           break;
         }

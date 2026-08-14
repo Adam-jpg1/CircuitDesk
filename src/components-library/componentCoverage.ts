@@ -332,19 +332,19 @@ const ICS: CoverageEntry[] = [
 
 // --------------------------------------------------------- Motors & Actuators
 const MOTORS: CoverageEntry[] = [
-  entry('comp.dc-motor', 'DC motor', 'Motors & Actuators', 'wt', 'actuator', 'wiring', ['gpio', 'pwm'], ['motor-state'], 'hardware', NONE, 'Drawn and wired; speed and direction are not modelled yet.'),
-  entry('comp.dc-motor-encoder', 'DC motor with encoder', 'Motors & Actuators', '-', 'actuator', 'missing', ['gpio', 'pwm'], ['motor-state'], 'none', NONE),
-  entry('comp.gearmotor', 'Gearmotor', 'Motors & Actuators', 't', 'actuator', 'missing', ['gpio', 'pwm'], ['motor-state'], 'none', NONE),
-  entry('comp.vibration-motor', 'Vibration motor', 'Motors & Actuators', 't', 'actuator', 'missing', ['gpio', 'pwm'], ['motor-state'], 'none', NONE),
+  entry('comp.dc-motor', 'DC motor', 'Motors & Actuators', 'wt', 'actuator', 'behavioral', ['gpio', 'pwm'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Direction and magnitude come from the terminal voltages; the shaft position is integrated from them. No inertia, back-EMF, torque or load — those need the analog solver.'),
+  entry('comp.dc-motor-encoder', 'DC motor with encoder', 'Motors & Actuators', '-', 'actuator', 'behavioral', ['gpio', 'pwm'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Both encoder channels are derived from the integrated shaft position, so direction is readable from the edge order. No inertia or load.'),
+  entry('comp.gearmotor', 'Gearmotor', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio', 'pwm'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Same terminal-derived model at a geared rating. No inertia, torque or load.'),
+  entry('comp.vibration-motor', 'Vibration motor', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio', 'pwm'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Same terminal-derived model at a 3 V rating. No inertia or torque.'),
   entry('comp.servo', 'Micro servo (SG90)', 'Motors & Actuators', 'wt', 'actuator', 'simulated', ['pwm'], NONE, 'hardware', ['tests/motors.batch5.mts', 'tests/compiler.libraries.mts', 'tests/sim.behaviors.mts'], 'The angle is decoded from the pulse on the signal wire. Driven by hand or by the Servo library on AVR; on RP2040 and ESP32 the stock libraries reach for PIO and LEDC, which are not modelled, so a build there is flagged as having no effect and the pulse must be written directly.'),
-  entry('comp.stepper', 'Bipolar stepper', 'Motors & Actuators', 'wt', 'actuator', 'wiring', ['gpio'], ['motor-state'], 'hardware', NONE, 'Drawn and wired; step position is not tracked yet.'),
-  entry('comp.stepper-28byj', '28BYJ-48 stepper', 'Motors & Actuators', 'w', 'actuator', 'missing', ['gpio'], ['motor-state'], 'none', NONE),
-  entry('comp.a4988', 'A4988 stepper driver', 'Motors & Actuators', 'w', 'actuator', 'missing', ['gpio'], ['motor-state'], 'none', NONE),
-  entry('comp.uln2003', 'ULN2003 driver', 'Motors & Actuators', 'w', 'logic-ic', 'missing', ['gpio'], ['logic-ic'], 'none', NONE),
-  entry('comp.motor-driver', 'H-bridge motor driver (L298N)', 'Motors & Actuators', 't', 'actuator', 'wiring', ['gpio', 'pwm'], ['motor-state'], 'hardware', NONE, 'Drawn and wired; the bridge outputs are not driven yet.'),
+  entry('comp.stepper', 'Bipolar stepper', 'Motors & Actuators', 'wt', 'actuator', 'behavioral', ['gpio'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Position is the coil pattern walked around a recognised sequence. No torque, missed steps under load, or coil current.'),
+  entry('comp.stepper-28byj', '28BYJ-48 stepper', 'Motors & Actuators', 'w', 'actuator', 'behavioral', ['gpio'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Position is the coil pattern walked around a recognised sequence, geared 4096 steps per output revolution. No torque or load.'),
+  entry('comp.a4988', 'A4988 stepper driver', 'Motors & Actuators', 'w', 'actuator', 'behavioral', ['gpio'], NONE, 'hardware', ['tests/motors.drive.mts'], 'One microstep per rising STEP edge, in the DIR direction, gated by an active-low ENABLE and scaled by the MS1-MS3 divisor. No current limit, torque or thermal shutdown.'),
+  entry('comp.uln2003', 'ULN2003 driver', 'Motors & Actuators', 'w', 'logic-ic', 'simulated', ['gpio'], NONE, 'hardware', ['tests/motors.drive.mts']),
+  entry('comp.motor-driver', 'H-bridge motor driver (L298N)', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio', 'pwm'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Each half drives its outputs from its inputs while its enable is high, from the motor supply. No bridge drop, shoot-through, current limit or thermal shutdown.'),
   entry('comp.relay', 'Relay (SPDT)', 'Motors & Actuators', 'wt', 'contact', 'behavioral', ['gpio'], ['contacts'], 'hardware', ['tests/inputs.contacts.mts'], 'Coil current switches modelled contacts. Coil inductance and flyback are not modelled.'),
   entry('comp.relay-dpdt', 'Relay (DPDT)', 'Motors & Actuators', 't', 'contact', 'missing', ['gpio'], ['contacts'], 'none', NONE),
-  entry('comp.solenoid', 'Solenoid', 'Motors & Actuators', '-', 'actuator', 'missing', ['gpio'], ['motor-state'], 'none', NONE),
+  entry('comp.solenoid', 'Solenoid', 'Motors & Actuators', '-', 'actuator', 'behavioral', ['gpio'], NONE, 'hardware', ['tests/motors.drive.mts'], 'Energised or released from the voltage across it. No stroke, force, inductance or flyback.'),
 ];
 
 // ------------------------------------------------------------- Communication
