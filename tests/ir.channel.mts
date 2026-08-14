@@ -318,6 +318,107 @@ section('5b. two boards with their own receivers both hear one press');
   simulationController.stop();
 }
 
+// ============== 5c. firmware generating its own carrier on an IR LED ========
+section('5c. a board bit-banging NEC into an LED, decoded by another board');
+{
+  // Board A has no IR protocol help of any kind. It toggles a pin at about
+  // 38 kHz for each mark and holds it low for each space — that is the whole
+  // transmitter. Board B decodes what comes off its receiver. Nothing passes a
+  // command between them; the only shared thing is the air.
+  const SOURCE = [
+    '#define TX 3',
+    '#define RX 2',
+    'bool isTx;',
+    // 13 us of carrier half-period plus the digitalWrite cost lands close
+    // enough to 38 kHz for a 38 kHz receiver's passband.
+    'void mark(uint16_t us) {',
+    '  uint32_t end = micros() + us;',
+    '  while ((int32_t)(micros() - end) < 0) {',
+    '    digitalWrite(TX, HIGH); delayMicroseconds(8);',
+    '    digitalWrite(TX, LOW); delayMicroseconds(8);',
+    '  }',
+    '}',
+    'void sendNec(uint8_t addr, uint8_t cmd) {',
+    '  uint32_t data = (uint32_t)addr | ((uint32_t)(uint8_t)~addr << 8)',
+    '                | ((uint32_t)cmd << 16) | ((uint32_t)(uint8_t)~cmd << 24);',
+    '  mark(9000); delayMicroseconds(4500);',
+    '  for (uint8_t i = 0; i < 32; i++) {',
+    '    mark(560);',
+    '    delayMicroseconds((data >> i) & 1 ? 1690 : 560);',
+    '  }',
+    '  mark(560);',
+    '}',
+    'volatile uint8_t idx = 0;',
+    'volatile uint32_t bits = 0, code = 0, lastUs = 0;',
+    'volatile bool ready = false;',
+    'void onEdge() {',
+    '  uint32_t now = micros();',
+    '  uint32_t gap = now - lastUs;',
+    '  lastUs = now;',
+    '  if (gap > 12000) { idx = 0; bits = 0; return; }',
+    '  if (idx < 32) { if (gap > 1600) bits |= (1UL << idx); idx++; if (idx == 32) { code = bits; ready = true; } }',
+    '}',
+    'void setup() {',
+    '  Serial.begin(9600);',
+    '  pinMode(4, INPUT_PULLUP);',
+    // The strap is read after a moment, so the pull-up and the wire to ground
+    // have both settled — reading a pad in the same instruction that
+    // configured it is a real bug in real sketches too.
+    '  delay(5);',
+    '  isTx = digitalRead(4) == LOW;',   // a strap decides which role this board plays
+    '  if (isTx) { pinMode(TX, OUTPUT); digitalWrite(TX, LOW); delay(20); sendNec(0x00, 0x45); }',
+    '  else { pinMode(RX, INPUT); attachInterrupt(digitalPinToInterrupt(RX), onEdge, FALLING); }',
+    '}',
+    'void loop() {',
+    '  if (!isTx && ready) { ready = false; Serial.print("RX="); Serial.println((uint8_t)((code >> 16) & 0xFF), HEX); }',
+    '}',
+  ].join('\n');
+
+  const p = emptyProject('ir-led');
+  const tx = inst('board.arduino-uno');
+  const rxBoard = inst('board.arduino-uno');
+  const led = inst('comp.ir-led');
+  const rx = inst('comp.ir-receiver');
+  p.boardInstances.push(tx, rxBoard);
+  p.componentInstances.push(led, rx);
+  p.codeFiles = [{ id: 'c', name: 'sketch.ino', content: SOURCE, language: 'cpp' }];
+  // The transmitter straps D4 low; the receiver leaves it on its pull-up.
+  wire(p, tx.id, 'D4', tx.id, 'GND_TOP');
+  wire(p, tx.id, 'D3', led.id, 'anode');
+  wire(p, tx.id, 'GND_PWR1', led.id, 'cathode');
+  wire(p, rxBoard.id, '5V', rx.id, 'vcc');
+  wire(p, rxBoard.id, 'GND_TOP', rx.id, 'gnd');
+  wire(p, rxBoard.id, 'D2', rx.id, 'out');
+
+  simulationController.stop();
+  const report = await simulationController.build(p);
+  for (const b of report.builds) console.log(`   build: ${b.detail}`);
+  if (!report.anyRunnable || !(await simulationController.start())) {
+    skip('the AVR toolchain is unavailable — the LED transmitter test cannot run');
+  } else {
+    simulationController.pause();
+    simulationController.advance(250);
+    simulationController.publishNow();
+
+    const binding = (simulationController as unknown as {
+      binding: { irDeviceFor(id: string): unknown; infrared: IrMedium } | null;
+    }).binding;
+    const model = binding?.irDeviceFor(rx.id);
+    if (model instanceof IrReceiverDevice) {
+      console.log(`   module: ${model.snapshot().status}`);
+      check(binding !== null && binding.infrared.burstCount > 0, 'the LED put light in the medium');
+      check(model.frameCount >= 1, `the other board's receiver demodulated a frame (${model.frameCount})`);
+      check(model.command === 0x45, `carrying the command board A sent (0x${(model.command ?? 0).toString(16)})`);
+    } else {
+      check(false, 'the receiver model was reachable from the binding');
+    }
+    const serial = useSimulationStore.getState().serialText;
+    console.log(`   serial: ${JSON.stringify(serial.trim().split('\n').slice(-2))}`);
+    check(/RX=45/i.test(serial), 'and the receiving sketch decoded it from its own pin');
+  }
+  simulationController.stop();
+}
+
 // ================================================ 6. the parts as shipped ====
 section('6. the IR parts in the library');
 {

@@ -1392,6 +1392,26 @@ export const IR_RECEIVER = def(
   },
 );
 
+export const IR_LED = def(
+  'comp.ir-led', 'IR LED (transmitter)', 'Modules', 6, 11, 'ir-led',
+  [
+    pin('anode', 'A', 2.0, 10.6, { type: 'digital', caps: ['digital-in'] }),
+    pin('cathode', 'K', 4.0, 10.6, { type: 'ground', caps: ['ground'] }),
+  ],
+  'simulated',
+  {
+    description:
+      'An infrared emitter driven by your own firmware. It has no protocol of its own: light exists only while ' +
+      'the pin is genuinely toggling, and the carrier frequency is MEASURED from the edges rather than assumed, ' +
+      'so a sketch generating 56 kHz emits 56 kHz and a 38 kHz receiver will not hear it. The burst goes into ' +
+      'the same shared medium a virtual remote uses, so a receiver on another board picks it up if it can see ' +
+      'it, and two emitters at once interfere. The cathode has to reach a real ground or nothing lights. ' +
+      'Brightness, current, forward voltage, beam angle and range are not modelled — this is a light switch, ' +
+      'not a photometric model.',
+    simulationAdapterId: 'sim.ir-led',
+  },
+);
+
 export const IR_REMOTE = def(
   'comp.ir-remote', 'Virtual IR Remote', 'Modules', 46, 108, 'ir-remote',
   [],
@@ -1820,7 +1840,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331, EPAPER29,
   NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
-  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_REMOTE,
+  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_LED, IR_REMOTE,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
   CELL_15, COIN_CELL, DC_SUPPLY, REGULATOR_5, REGULATOR_33, LDO_33, BUCK_CONVERTER, BOOST_CONVERTER,
   HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,

@@ -53,6 +53,15 @@ export function carrierHeard(centreHz: number, carrierHz: number): boolean {
 
 export class IrMedium {
   private marks: IrMark[] = [];
+  /**
+   * Marks that have started but whose end is not known yet.
+   *
+   * A remote's frame is generated whole, so its marks arrive with both ends.
+   * An LED driven by firmware is different: the carrier exists because a pin
+   * is toggling, and nothing can say when the sketch will stop. So it opens a
+   * mark on the first pair of edges and closes it when the toggling stops.
+   */
+  private open = new Map<string, { startUs: number; carrierHz: number }>();
   private collisions = 0;
   private emitted = 0;
 
@@ -71,6 +80,44 @@ export class IrMedium {
     this.emitted++;
   }
 
+  /** Opens a mark whose end is not known yet. See `open`. */
+  beginLive(emitterId: string, carrierHz: number, startUs: number): void {
+    if (this.open.has(emitterId)) return;
+    this.open.set(emitterId, { startUs, carrierHz });
+    this.emitted++;
+  }
+
+  /** Closes an open mark, turning it into an ordinary one. */
+  endLive(emitterId: string, endUs: number): void {
+    const live = this.open.get(emitterId);
+    if (!live) return;
+    this.open.delete(emitterId);
+    if (endUs > live.startUs) {
+      this.marks.push({ emitterId, carrierHz: live.carrierHz, startUs: live.startUs, endUs });
+    }
+    this.emitted++;
+  }
+
+  isLive(emitterId: string): boolean {
+    return this.open.has(emitterId);
+  }
+
+  /**
+   * Refines an open mark's carrier as more cycles of it arrive.
+   *
+   * A receiver's bandpass does not judge a burst on one cycle — it responds to
+   * the frequency present over the whole thing, and a real TSOP needs about
+   * ten cycles before its output moves at all. So an emitter that has measured
+   * more of its own carrier says so, and the single-cycle estimate the mark
+   * opened with stops deciding whether the mark is heard. Without this, one
+   * long gap caused by a loop boundary in the sketch would throw a whole mark
+   * out of band.
+   */
+  setLiveCarrier(emitterId: string, carrierHz: number): void {
+    const live = this.open.get(emitterId);
+    if (live) live.carrierHz = carrierHz;
+  }
+
   /** How many distinct emitters a receiver at `centreHz` can hear right now. */
   litBy(centreHz: number, us: number): string[] {
     const lit = new Set<string>();
@@ -78,6 +125,11 @@ export class IrMedium {
       if (us < m.startUs || us >= m.endUs) continue;
       if (!carrierHeard(centreHz, m.carrierHz)) continue;
       lit.add(m.emitterId);
+    }
+    for (const [emitterId, live] of this.open) {
+      if (us < live.startUs) continue;
+      if (!carrierHeard(centreHz, live.carrierHz)) continue;
+      lit.add(emitterId);
     }
     return [...lit];
   }
@@ -119,6 +171,23 @@ export class IrMedium {
     return [...points].sort((a, b) => a - b);
   }
 
+  /**
+   * When each open mark started, for a receiver that has not reached it yet.
+   *
+   * Boards take turns on the shared timeline, so an LED on board A can light
+   * at a moment board B has not run up to. The start is a real transition in
+   * B's future and has to be scheduled like any other — without this, B would
+   * only ever sample the medium at whatever ragged moments A happened to
+   * change something, and would demodulate nonsense.
+   */
+  openStarts(centreHz: number): number[] {
+    const starts: number[] = [];
+    for (const live of this.open.values()) {
+      if (carrierHeard(centreHz, live.carrierHz)) starts.push(live.startUs);
+    }
+    return starts;
+  }
+
   /** The last moment any pending mark ends, for bounding a schedule. */
   latestEnd(): number {
     let last = 0;
@@ -144,6 +213,7 @@ export class IrMedium {
 
   reset(): void {
     this.marks = [];
+    this.open.clear();
     this.collisions = 0;
     this.emitted = 0;
   }
