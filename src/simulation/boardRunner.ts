@@ -63,6 +63,16 @@ export interface BoardRunner {
   onSerialByte: ((byte: number) => void) | null;
   queueSerialInput(text: string): void;
 
+  /**
+   * The baud the firmware configured its UART for, when the engine knows it.
+   *
+   * Optional because not every runner has a UART peripheral to ask — the ESP
+   * parts have none at all, and a device must not be attached to a board that
+   * cannot carry a byte. Absent means "this engine cannot tell you", which the
+   * UART link treats as the default rather than as a mismatch.
+   */
+  readonly uartBaudRate?: number;
+
   addMicrosecondEvent(us: number, callback: () => void): () => void;
   snapshot(): PinSnapshot;
 

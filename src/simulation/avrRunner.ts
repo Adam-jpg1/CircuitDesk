@@ -288,6 +288,17 @@ export class AVRRunner {
     this.pumpSerialRx();
   }
 
+  /**
+   * The baud the firmware programmed into UBRR.
+   *
+   * Read from the peripheral rather than remembered, so a sketch that calls
+   * Serial.begin twice reports the rate it is actually running at — which is
+   * what decides whether a device on the other end of the wire understands it.
+   */
+  get uartBaudRate(): number {
+    return this.usart.baudRate;
+  }
+
   private pumpSerialRx(): void {
     while (this.serialRxQueue.length > 0 && !this.usart.rxBusy) {
       const byte = this.serialRxQueue.shift()!;
