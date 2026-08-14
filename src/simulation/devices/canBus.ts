@@ -230,6 +230,43 @@ export class CanBus {
   nodeState(id: string): CanNodeState | undefined {
     return this.nodes.get(id);
   }
+
+  /**
+   * A node's bit timing, once its controller has been configured.
+   *
+   * Zero means "not on the bus": a controller still in configuration mode has
+   * no meaningful bit clock and must not be counted as one.
+   */
+  noteBitrate(node: CanNodeState, bitrate: number): void {
+    node.bitrate = bitrate;
+  }
+
+  /** The bitrate every operational node agrees on, or 0 if they do not. */
+  get agreedBitrate(): number {
+    let rate = 0;
+    for (const node of this.nodes.values()) {
+      if (node.bitrate <= 0) continue;
+      if (rate === 0) rate = node.bitrate;
+      else if (rate !== node.bitrate) return 0;
+    }
+    return rate;
+  }
+  /**
+   * True when this node's bit clock disagrees with another node's.
+   *
+   * Deliberately symmetric: nobody is nominated as correct. Two controllers
+   * with different bit timing cannot both be right about where a bit ends, so
+   * neither samples the other's frames and both wreck the wire — which is what
+   * a bench does, without needing an arbitrary winner.
+   */
+  desynced(node: CanNodeState): boolean {
+    if (node.bitrate <= 0) return false;
+    for (const other of this.nodes.values()) {
+      if (other === node || other.bitrate <= 0) continue;
+      if (other.bitrate !== node.bitrate) return true;
+    }
+    return false;
+  }
   get nodeCount(): number {
     return this.nodes.size;
   }
@@ -317,6 +354,19 @@ export class CanBus {
     let bus: number = RECESSIVE;
     for (const bit of presented.values()) if (bit === DOMINANT) bus = DOMINANT;
 
+    // A node on the wrong bitrate puts its dominant bits in the wrong places,
+    // so nothing on the wire decodes while it is talking.
+    for (const node of this.nodes.values()) {
+      if (node.phase === 'transmitting' && this.desynced(node)) {
+        for (const other of this.nodes.values()) {
+          if (other === node) continue;
+          other.decoder.active = false;
+          other.decoder.bits = [];
+        }
+        node.bitErrors++;
+      }
+    }
+
     // --- observe
     for (const node of this.nodes.values()) {
       this.observe(node, presented.get(node.id) ?? RECESSIVE, bus);
@@ -393,6 +443,7 @@ export class CanBus {
 
     if (!d.active) {
       if (bit !== DOMINANT) return; // waiting for a start of frame
+      if (this.desynced(node)) return; // sampling in the wrong places
       d.active = true;
       d.bits = [DOMINANT];
       d.run = 1;
