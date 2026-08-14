@@ -336,6 +336,18 @@ const WS2812_DEFAULT_PIXELS: Record<string, number> = {
  * `ratedRpm` sets how fast the modelled shaft integrates, which is what an
  * encoder counts.
  */
+/**
+ * Relays, and where their coils are.
+ *
+ * `pullInVolts` is what the coil needs before the armature moves. A relay
+ * module fed 3.3 V from a board whose coil wants 5 V famously does not click,
+ * and that is a wiring answer rather than a code one — so it is modelled.
+ */
+const RELAY_PARTS: Record<string, { coil: string; coilReturn: string; pullInVolts: number }> = {
+  'comp.relay': { coil: 'in', coilReturn: 'gnd', pullInVolts: 2.5 },
+  'comp.relay-dpdt': { coil: 'in', coilReturn: 'gnd', pullInVolts: 2.5 },
+};
+
 const MOTOR_PARTS: Record<
   string,
   { plus: string; minus: string; ratedVolts: number; ratedRpm: number; encoderPpr?: number }
@@ -1155,7 +1167,12 @@ export class CircuitBinding {
           b,
           ohms: contact.ohms ?? 0,
           kind: 'switch',
-          enabled: (c) => isContactClosed(c.pressedButtons, inst.id, contact),
+          // A relay's contacts are moved by its coil rather than by a finger,
+          // so they read the energised set instead of the pressed one. Same
+          // contact model, different actuator — which is what a relay is.
+          enabled: RELAY_PARTS[def.id]
+            ? () => isContactClosed(this.energisedRelays, inst.id, contact)
+            : (c) => isContactClosed(c.pressedButtons, inst.id, contact),
         });
         // Both ends are switched nets: a level driven onto one of them can
         // reach the other within a single instruction, so they cannot wait for
@@ -1489,6 +1506,19 @@ export class CircuitBinding {
    * is the firmware scanning them.
    */
   private readonly persistence = new PersistenceTracker();
+
+  /**
+   * Contact keys held closed by an energised relay coil.
+   *
+   * Updated once per settle from the coil voltage, which means the contacts
+   * follow the coil by one slice. That is not a shortcut — a real relay takes
+   * five to ten milliseconds to pull in, and one simulation slice is one
+   * millisecond, so the modelled armature is if anything faster than the metal
+   * one. It also breaks the loop cleanly: a relay whose contacts feed its own
+   * coil oscillates at a bounded rate here, as a buzzer made from a relay
+   * genuinely does.
+   */
+  private energisedRelays = new Set<string>();
 
   /**
    * Motors, steppers and drivers, kept across re-binds.
@@ -2068,6 +2098,33 @@ export class CircuitBinding {
           setLevel(outNet, 0, null, 0);
           drivenNets.add(outNet);
         }
+      }
+    }
+
+    // Relay coils. Read before the contacts are next solved, so the armature
+    // follows the coil by one slice — see `energisedRelays`.
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      const relay = def ? RELAY_PARTS[def.id] : undefined;
+      if (!relay) continue;
+      const coilNet = this.netOfInstancePin(inst.id, relay.coil);
+      const returnNet = this.netOfInstancePin(inst.id, relay.coilReturn);
+      // The return has to be fed from OUTSIDE the relay. A module's own ground
+      // pin declares 0 V on whatever net it sits on, so without this rule a
+      // relay with its ground never wired would happily energise against its
+      // own declaration — and "I forgot the ground" is exactly the bug worth
+      // reproducing. Same rule the bus devices use for their supplies.
+      const returnFed = this.netFedByOther(returnNet, inst.id, ['ground']);
+      const coilVolts = coilNet ? (levels.get(coilNet)?.volts ?? null) : null;
+      const returnVolts = returnNet ? (levels.get(returnNet)?.volts ?? null) : null;
+      const across =
+        returnFed && coilVolts !== null && returnVolts !== null ? coilVolts - returnVolts : null;
+      // A coil needs most of its rated voltage to pull in.
+      const energised = across !== null && Math.abs(across) >= relay.pullInVolts;
+      for (const contact of contactsOf(def!.id, inst)) {
+        const key = contactStateKey(inst.id, contact.key);
+        if (energised) this.energisedRelays.add(key);
+        else this.energisedRelays.delete(key);
       }
     }
 

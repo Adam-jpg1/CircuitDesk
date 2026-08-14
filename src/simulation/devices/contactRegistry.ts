@@ -55,6 +55,22 @@ function defaultCap(r: number, c: number, cols: number): string {
 }
 
 export const CONTACT_PARTS: Record<string, ContactPart> = {
+  // Relays. A relay's contacts are a changeover like a switch's — the
+  // difference is only what moves them, which is the coil rather than a finger.
+  // Modelling them as contacts rather than as a special case is what makes a
+  // relay switching a real load behave like a switch switching one.
+  'comp.relay': { contacts: () => changeover('com', 'no', 'nc') },
+  'comp.relay-dpdt': {
+    contacts: () => [
+      // Two mechanically linked sections: one armature, four contacts. They
+      // are keyed per section but driven together, which is the whole point of
+      // a DPDT — you cannot switch one pole without the other.
+      { key: 'a-no', a: 'com1', b: 'no1', label: 'A: COM-NO' },
+      { key: 'a-nc', a: 'com1', b: 'nc1', normallyClosed: true, label: 'A: COM-NC' },
+      { key: 'b-no', a: 'com2', b: 'no2', label: 'B: COM-NO' },
+      { key: 'b-nc', a: 'com2', b: 'nc2', normallyClosed: true, label: 'B: COM-NC' },
+    ],
+  },
   // Existing parts, moved here from hand-written cases so they share one model.
   'comp.push-button': { contacts: () => singleContact('1a', '2a') },
   'comp.push-button-6mm': { contacts: () => singleContact('1a', '2a') },
