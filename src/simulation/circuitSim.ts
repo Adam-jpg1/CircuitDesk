@@ -53,6 +53,8 @@ import { contactsOf } from './devices/contactRegistry';
 import { LOGIC_PARTS } from './devices/logicParts';
 import { Hd44780ParallelDevice, LCD_DATA_PINS_8 } from './devices/lcdParallel';
 import { Ws2812Device } from './devices/ws2812';
+import { UartLink, type UartPeripheral } from './devices/uartEndpoint';
+import { GpsNeo6mDevice } from './devices/gpsNeo6m';
 import { Ads1115Device, ADS1115_ADDRESSES } from './devices/ads1115';
 import { Mcp3008Device, MCP3008_CHANNELS } from './devices/mcp3008';
 import { Ds1307Device, DS1307_ADDRESS } from './devices/ds1307';
@@ -405,6 +407,32 @@ const REGULATOR_PARTS: Record<
   },
 };
 
+/**
+ * Boards whose UART peripheral is genuinely wired to a runner.
+ *
+ * From tests/uart.audit.mts, which measures this rather than assuming it. A
+ * board that is not here has no UART a device can attach to, so no link is
+ * created and the part reports a board capability mismatch instead of quietly
+ * working. The ESP parts are absent because their UART is a register file that
+ * swallows writes — blocker `esp32-uart`.
+ */
+const BOARDS_WITH_UART = new Set([
+  'board.arduino-uno',
+  'board.arduino-nano',
+  'board.arduino-mega2560',
+  'board.arduino-leonardo',
+  'board.raspberry-pi-pico',
+  'board.raspberry-pi-pico-w',
+]);
+
+/** UART devices, and which of their pins carry which direction. */
+const UART_DEVICE_PARTS: Record<
+  string,
+  { /** Device pin that DRIVES the board's RX. */ tx: string; /** Device pin the board's TX drives. */ rx: string }
+> = {
+  'comp.gps': { tx: 'tx', rx: 'rx' },
+};
+
 const RELAY_PARTS: Record<string, { coil: string; coilReturn: string; pullInVolts: number }> = {
   'comp.relay': { coil: 'in', coilReturn: 'gnd', pullInVolts: 2.5 },
   'comp.relay-dpdt': { coil: 'in', coilReturn: 'gnd', pullInVolts: 2.5 },
@@ -704,6 +732,7 @@ export class CircuitBinding {
     this.parallelLcds.clear();
     this.addressableLeds.clear();
     this.twoWireDisplays.clear();
+    this.uartLinks.clear();
     const i2c: I2cDevice[] = [];
     const spi: SpiDevice[] = [];
     for (const [instanceId, owner] of this.runners) {
@@ -712,6 +741,7 @@ export class CircuitBinding {
       this.setupParallelLcds(owner, instanceId);
       this.setupAddressableLeds(owner, instanceId);
       this.setupTwoWireDisplays(owner, instanceId);
+      this.setupUartLinks(owner, instanceId);
     }
     this.i2cDevices = i2c;
     this.spiDevices = spi;
@@ -911,6 +941,61 @@ export class CircuitBinding {
    * it to the I2C bus would make an ordinary TM1637 sketch fail and an I2C scan
    * find a device that is not there.
    */
+  /**
+   * UART devices, linked to a board only when the wires genuinely reach it.
+   *
+   * Three conditions, all necessary. The board has to have a UART peripheral at
+   * all — the audit says which do. The device's TX has to sit on a net that
+   * reaches that board's RX pad, and its RX on the board's TX pad. And the
+   * board must be THIS board instance: two Picos with a GPS each, wired
+   * identically, get one link apiece and never see each other's sentences.
+   *
+   * A device that fails any of them gets no link, and therefore no traffic —
+   * which is what a GPS wired to the wrong pins does on a bench.
+   */
+  private setupUartLinks(runner: BoardRunner, boardInstanceId: string): void {
+    const board = this.boardDefinitionOf(boardInstanceId);
+    if (!board || !BOARDS_WITH_UART.has(board.id)) return;
+
+    // The board's own UART pads, by capability rather than by pin name — a
+    // Pico's are GP0/GP1 and an Uno's are D0/D1.
+    const padWithCap = (cap: string): string | undefined =>
+      board.pins.find((p) => p.capabilities.includes(cap as never))?.id;
+    const boardRxPin = padWithCap('uart-rx');
+    const boardTxPin = padWithCap('uart-tx');
+    if (!boardRxPin || !boardTxPin) return;
+
+    const boardRxNet = this.netOfInstancePin(boardInstanceId, boardRxPin);
+    const boardTxNet = this.netOfInstancePin(boardInstanceId, boardTxPin);
+
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      const spec = def ? UART_DEVICE_PARTS[def.id] : undefined;
+      if (!spec) continue;
+
+      // The device drives the board's RX, and the board's TX drives the
+      // device's RX. Crossed, as the wires are on a bench.
+      const deviceTxNet = this.netOfInstancePin(inst.id, spec.tx);
+      const deviceRxNet = this.netOfInstancePin(inst.id, spec.rx);
+      if (!deviceTxNet || deviceTxNet !== boardRxNet) continue;
+
+      const powered = this.netFedByOther(this.netOfInstancePin(inst.id, 'vcc'), inst.id, POWER_PIN_TYPES);
+      const grounded = this.netFedByOther(this.netOfInstancePin(inst.id, 'gnd'), inst.id, ['ground']);
+      if (!powered || !grounded) continue;
+
+      const existing = this.uartDeviceCache.get(inst.id);
+      const device: UartPeripheral =
+        existing ?? new GpsNeo6mDevice(inst.id, Number(inst.properties.baud ?? 9600));
+      this.uartDeviceCache.set(inst.id, device);
+
+      const link = new UartLink(boardInstanceId, device);
+      // A device whose RX is not wired still transmits — that is a perfectly
+      // normal GPS install — but the board cannot configure it.
+      if (deviceRxNet !== boardTxNet) link.noteContention(0);
+      this.uartLinks.set(inst.id, { link, runner });
+    }
+  }
+
   private setupTwoWireDisplays(runner: BoardRunner, boardInstanceId: string): void {
     const boardPinOn = (netId: string | undefined): number | null =>
       netId === undefined
@@ -1610,6 +1695,18 @@ export class CircuitBinding {
   private twoWireDeviceCache = new Map<string, Tm1637Device>();
   private twoWireDisplays = new Map<string, Tm1637Device>();
 
+  /** UART devices, kept across re-binds so a GPS does not lose its fix. */
+  private uartDeviceCache = new Map<string, UartPeripheral>();
+  private uartLinks = new Map<string, { link: UartLink; runner: BoardRunner }>();
+
+  /** A UART device's link, for the canvas and the inspector. */
+  uartLinkFor(instanceId: string): UartLink | undefined {
+    return this.uartLinks.get(instanceId)?.link;
+  }
+  uartDeviceFor(instanceId: string): UartPeripheral | undefined {
+    return this.uartDeviceCache.get(instanceId);
+  }
+
   /** A TM1637's model, for the canvas and the inspector. */
   tm1637For(instanceId: string): Tm1637Device | undefined {
     return this.twoWireDisplays.get(instanceId);
@@ -2000,6 +2097,40 @@ export class CircuitBinding {
     // once per slice is what closes that.
     for (const { device, runner: owner } of this.addressableLeds.values()) {
       device.settle(owner.timeMs * 1e6);
+    }
+
+    // UART links: let each device produce, then hand the board whatever the
+    // wire has had time to deliver. Bytes go through the runner's real serial
+    // input, so they arrive at the firmware's UART peripheral rather than
+    // being handed to a sketch by some side channel.
+    // The GPS's simulated position comes from the part's properties, applied
+    // every settle so moving the sliders moves the sentences. Never from a
+    // host location.
+    for (const inst of this.graph.instances) {
+      const device = this.uartDeviceCache.get(inst.id);
+      if (!(device instanceof GpsNeo6mDevice)) continue;
+      const num = (key: string, fallback: number): number => {
+        const v = Number(inst.properties[key]);
+        return Number.isFinite(v) ? v : fallback;
+      };
+      device.fix.latitude = num('latitude', device.fix.latitude);
+      device.fix.longitude = num('longitude', device.fix.longitude);
+      device.fix.altitudeMetres = num('altitude', device.fix.altitudeMetres);
+      device.fix.speedKnots = num('speedKnots', device.fix.speedKnots);
+      device.fix.headingDegrees = num('heading', device.fix.headingDegrees);
+      device.fix.satellites = Math.round(num('satellites', device.fix.satellites));
+      device.fix.hasFix = inst.properties.hasFix !== false;
+      device.setBaud(num('baud', 9600));
+    }
+
+    for (const { link, runner: owner } of this.uartLinks.values()) {
+      const nowUs = owner.timeMs * 1000;
+      link.setBoardConfig({ baud: owner.uartBaudRate ?? 9600 });
+      link.poll(nowUs);
+      const bytes = link.drainToBoard(nowUs);
+      if (bytes.length > 0) {
+        owner.queueSerialInput(String.fromCharCode(...bytes));
+      }
     }
 
     // RESET is a level, not a byte, so a display only learns about it when

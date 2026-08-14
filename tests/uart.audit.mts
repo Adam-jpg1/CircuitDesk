@@ -85,19 +85,23 @@ section('3. the ESP boards say they have no UART');
     check(!claim.tx && !claim.rx, `${id} claims no UART`);
     check(/esp32-uart/.test(claim.note), `${id} names the blocker rather than shrugging`);
   }
-  // The one thing that must never happen: a UART part badged as working on a
-  // board that cannot carry a byte. Every UART device in the matrix has to
-  // carry the blocker until the peripheral exists.
+  // The endpoint exists now, so a UART part may be simulated — but only if it
+  // is genuinely tested. The rule that must never break is the other one: a
+  // part that is NOT simulated has to name the primitive it is waiting on,
+  // rather than sitting in the matrix with no reason.
   const uartParts = COMPONENT_COVERAGE.filter((c) => c.protocols.includes('uart'));
   console.log(`   UART parts in the matrix: ${uartParts.length}`);
   for (const part of uartParts) {
     if (part.status === 'simulated') {
-      check(false, `${part.id} claims to be simulated while the UART endpoint does not exist`);
+      check(
+        part.tests.length > 0,
+        `${part.id} is simulated and names the tests that prove it (${part.tests.join(', ') || 'none'})`,
+      );
       continue;
     }
     check(
-      part.dependencies.includes('uart-endpoint') || part.status === 'missing',
-      `${part.id} depends on the UART endpoint that has not been built yet`,
+      part.dependencies.length > 0 || part.status === 'missing',
+      `${part.id} names what it is waiting on`,
     );
   }
 }

@@ -1247,8 +1247,31 @@ export const GPS = def(
     pin('tx', 'TX', 14.0, 34.6, { type: 'digital', caps: ['uart-tx'] }),
     pin('gnd', 'GND', 19.0, 34.6, { type: 'ground', caps: ['ground'] }),
   ],
-  'validation',
-  { validationRules: ['uart-pins'], description: 'Serial GPS. Wiring/validation-level: NMEA sentence emission is not simulated yet.' },
+  'simulated',
+  {
+    simulationAdapterId: 'sim.gps',
+    validationRules: ['uart-pins'],
+    properties: [
+      prop('latitude', 'Latitude', 'number', 51.4779, { min: -90, max: 90 }),
+      prop('longitude', 'Longitude', 'number', -0.0015, { min: -180, max: 180 }),
+      prop('altitude', 'Altitude', 'number', 45, { unit: 'm' }),
+      prop('speedKnots', 'Speed', 'number', 0, { unit: 'kn', min: 0 }),
+      prop('heading', 'Heading', 'number', 0, { unit: 'deg', min: 0, max: 360 }),
+      prop('satellites', 'Satellites', 'number', 9, { min: 0, max: 24 }),
+      prop('hasFix', 'Has fix', 'boolean', true),
+      prop('baud', 'Baud', 'number', 9600),
+    ],
+    description:
+      'A NEO-6M emitting real NMEA over a real UART. The position is always the simulated one set on this part ' +
+      '— nothing reads a host location, a geolocation service or a timezone, which would be both a privacy ' +
+      'problem and useless, since you cannot test a route by standing still. GGA and RMC are emitted once a ' +
+      'second with correctly computed checksums, so a parser that validates them accepts them. The sentences ' +
+      'go out one byte at a time at the configured baud through the board UART, so a sketch with the wrong ' +
+      'Serial.begin rate gets rubbish rather than clean text, and a module wired to the wrong pins gets ' +
+      'nothing. Needs a board with a modelled UART: the ESP32-C3 and C6 have none yet. NOT modelled: the UBX ' +
+      'binary protocol and configuration through it, almanac and ephemeris, per-satellite detail beyond the ' +
+      'count, DOP, and cold-start timing.',
+  },
 );
 
 export const BLUETOOTH = def(

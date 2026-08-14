@@ -353,7 +353,7 @@ const COMMUNICATION: CoverageEntry[] = [
   entry('comp.ir-led', 'IR LED / transmitter', 'Communication', 'w', 'gpio-device', 'missing', ['ir', 'gpio'], ['ir-channel'], 'none', NONE),
   entry('comp.ir-remote', 'Virtual IR remote', 'Communication', 'w', 'gpio-device', 'missing', ['ir'], ['ir-channel'], 'none', NONE),
   entry('comp.hc05', 'HC-05 Bluetooth module', 'Communication', '-', 'uart-device', 'wiring', ['uart'], ['uart-endpoint'], 'hardware', NONE, 'Drawn and wired. AT command handling needs a real board UART endpoint first.'),
-  entry('comp.gps', 'GPS NEO-6M', 'Communication', '-', 'uart-device', 'wiring', ['uart'], ['uart-endpoint'], 'hardware', NONE, 'Drawn and wired. NMEA output needs a real board UART endpoint first.'),
+  entry('comp.gps', 'GPS NEO-6M', 'Communication', '-', 'uart-device', 'simulated', ['uart'], NONE, 'hardware', ['tests/uart.link.mts']),
   entry('comp.esp01', 'ESP-01 AT modem', 'Communication', '-', 'uart-device', 'wiring', ['uart'], ['uart-endpoint'], 'hardware', NONE, 'Drawn and wired. AT command handling needs a real board UART endpoint first.'),
   entry('comp.dfplayer', 'DFPlayer Mini', 'Communication', '-', 'uart-device', 'missing', ['uart'], ['uart-endpoint'], 'none', NONE),
   entry('comp.sim800l', 'SIM800L GSM modem', 'Communication', '-', 'uart-device', 'missing', ['uart'], ['uart-endpoint'], 'none', NONE),
