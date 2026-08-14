@@ -74,39 +74,72 @@ section('1. a source puts its voltage on the wire');
   check(values.includes(0), 'and its negative terminal is the reference');
 }
 
-// ================================= 2. a label is not a supply ================
-section('2. a module VCC pin does not make voltage');
+// ================================= 2. a declaration is not electricity =======
+section('2. a module declaration contributes nothing to any net');
 {
-  // An OLED on its own: it has a VCC pin typed as a supply so wiring rules can
-  // check it is fed, and it generates nothing. Wire nothing to it and the rail
-  // it expects is not there.
+  // An OLED on its own. Its VCC pin is typed as a supply so wiring rules can
+  // check it is fed, and its GND pin says where the part expects a reference.
+  // Neither is a source. A megohm would not do either: a CMOS or ADC input
+  // draws essentially nothing, so it would read a fake rail as a real voltage
+  // and an unpowered sensor would appear to work.
   const p = emptyProject('unpowered');
   const oled = inst('comp.oled');
   const load = inst('comp.resistor', { resistance: 1000 });
   p.componentInstances.push(oled, load);
   wire(p, oled.id, 'vcc', load.id, 'p1');
+  wire(p, oled.id, 'gnd', load.id, 'p2');
 
   const { netLevels } = solve(p);
-  // The declaration is allowed to show the part at the voltage it expects —
-  // that is what it is for. What it must never do is act as a source, so it
-  // carries a large series resistance and anything real beats it.
-  const declared = [...netLevels.values()].filter((l) => l.volts !== null && l.volts > 0);
-  check(declared.length > 0, 'the unpowered module still reads at the voltage it expects');
-  check(
-    declared.every((l) => l.seriesOhms >= 1_000_000),
-    'but only through a resistance that cannot drive anything',
-  );
+  const anyVolts = [...netLevels.values()].filter((l) => l.volts !== null);
+  console.log(`   nets with a voltage: ${anyVolts.length} (${anyVolts.map((l) => l.volts).join(', ')})`);
+  check(anyVolts.length === 0, 'an unpowered module puts no voltage on anything, at any impedance');
 
-  // And a real source on the same net wins outright.
-  const q = emptyProject('declared-vs-real');
-  const oled2 = inst('comp.oled');
+  // The declaration is still recorded, because validation and the inspector
+  // need to know what the part wants — it simply never reaches the solver.
+  const binding = new CircuitBinding(p, null as never);
+  binding.update(emptyControls());
+  check(typeof binding.declaredRailVolts === 'function', 'the expected rail is still available as metadata');
+
+  // A high-impedance input is the case that would have been fooled. An ADC
+  // wired to an unpowered module's VCC must not read that module's nominal.
+  const q = emptyProject('fake-rail-into-adc');
+  const sensor = inst('comp.oled');
+  const adc = inst('comp.ads1115');
   const supply = inst('comp.dc-supply', { voltage: 5 });
-  q.componentInstances.push(oled2, supply);
-  wire(q, supply.id, 'plus', oled2.id, 'vcc');
-  wire(q, supply.id, 'minus', oled2.id, 'gnd');
-  const real = [...solve(q).netLevels.values()].map((l) => l.volts);
-  check(real.includes(5), `a real source overrides the module's declaration (${real.join(', ')})`);
-  check(!real.includes(3.3), 'so the part runs at what it is actually fed, not what it hoped for');
+  q.componentInstances.push(sensor, adc, supply);
+  // The ADC is genuinely powered; only the thing on its input is not.
+  wire(q, supply.id, 'plus', adc.id, 'vcc');
+  wire(q, supply.id, 'minus', adc.id, 'gnd');
+  wire(q, sensor.id, 'vcc', adc.id, 'a0');
+  const levels = solve(q).netLevels;
+  const a0Net = [...levels.entries()].find(([, l]) => l.volts === 3.3 || l.volts === 5);
+  const inputVolts = [...levels.values()].map((l) => l.volts);
+  console.log(`   voltages with a powered ADC and an unpowered module: ${inputVolts.join(', ')}`);
+  check(
+    !inputVolts.includes(3.3),
+    'the ADC input does not see the unpowered module\'s declared 3.3 V rail',
+  );
+  check(a0Net !== undefined, 'while the real 5 V supply is present as it should be');
+
+  // A ground pin that reaches nothing is not the circuit's reference either.
+  const r = emptyProject('fake-ground');
+  const lonely = inst('comp.oled');
+  r.componentInstances.push(lonely);
+  const grounds = [...solve(r).netLevels.values()].filter((l) => l.volts === 0);
+  check(grounds.length === 0, 'an unconnected GND pin does not become ground');
+
+  // And a real source on the same net powers it, which is the whole point of
+  // keeping the declaration as metadata rather than deleting the concept.
+  const t = emptyProject('declared-vs-real');
+  const oled2 = inst('comp.oled');
+  const real = inst('comp.dc-supply', { voltage: 5 });
+  t.componentInstances.push(oled2, real);
+  wire(t, real.id, 'plus', oled2.id, 'vcc');
+  wire(t, real.id, 'minus', oled2.id, 'gnd');
+  const powered = [...solve(t).netLevels.values()].map((l) => l.volts);
+  check(powered.includes(5), `a real source powers the module (${powered.join(', ')})`);
+  check(powered.includes(0), 'and its return is the reference');
+  check(!powered.includes(3.3), 'with no trace of what the part merely expected');
 }
 
 // ============================ 3. a regulator makes a rail from a real input ==

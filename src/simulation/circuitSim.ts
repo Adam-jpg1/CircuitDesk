@@ -405,13 +405,6 @@ const REGULATOR_PARTS: Record<
   },
 };
 
-/**
- * Series resistance given to a rail that only exists because a module declared
- * it. Large enough that it cannot drive anything and loses to every real
- * source, small enough to still be a readable voltage on the part itself.
- */
-const DECLARED_RAIL_OHMS = 1_000_000;
-
 const RELAY_PARTS: Record<string, { coil: string; coilReturn: string; pullInVolts: number }> = {
   'comp.relay': { coil: 'in', coilReturn: 'gnd', pullInVolts: 2.5 },
   'comp.relay-dpdt': { coil: 'in', coilReturn: 'gnd', pullInVolts: 2.5 },
@@ -634,15 +627,24 @@ export class CircuitBinding {
   private sourceContributions: { netId: string; volts: number }[] = [];
 
   /**
-   * Rails that exist only because a module said what it expects.
+   * What each module says it expects on a pin — metadata, not electricity.
    *
-   * Kept apart from real ones so the declaration can do the one job it is for —
-   * showing an unwired module at the voltage it wants rather than as dead —
-   * without doing the job it must never do, which is powering something. They
-   * are applied through a large series resistance, so anything real beats them
-   * and nothing downstream can draw from them.
+   * A part that declares "VCC, 3.3 V" is stating a requirement so validation
+   * can check it is met and the inspector can say what the part wants. It is
+   * not a source, and it does not reach the solver at all: it contributes zero
+   * volts and zero conductance to every net.
+   *
+   * This was previously folded into `supplyNets` and later applied through a
+   * megohm, and both were wrong. A megohm is still a source — a high-impedance
+   * CMOS or ADC input draws essentially nothing, so it would read that fake
+   * rail as a real voltage, and an unpowered sensor would appear to work.
    */
-  private declaredOnlyNets = new Set<string>();
+  private declaredRails = new Map<string, number>();
+
+  /** What a part expects on a net, for validation and the inspector only. */
+  declaredRailVolts(netId: string): number | undefined {
+    return this.declaredRails.get(netId);
+  }
   private ultrasonic = new Map<string, UltrasonicState>();
   private netOfInstancePin = (instanceId: string, pinId: string): string | undefined =>
     this.graph.netOf.get(`${instanceId}:${pinId}`);
@@ -1179,7 +1181,7 @@ export class CircuitBinding {
 
   private indexNets(): void {
     this.sourceContributions = [];
-    this.declaredOnlyNets.clear();
+    this.declaredRails.clear();
     // Rails a module *claims* but does not source. Applied only where nothing
     // real is feeding the net, so a part wired to nothing still shows the
     // voltage it expects rather than reading as dead.
@@ -1216,7 +1218,13 @@ export class CircuitBinding {
             this.netAdcChannels.set(net.id, chans);
           }
         }
-        if (pin.type === 'ground') this.groundNets.add(net.id);
+        // Ground is sourced, not declared. A board's GND pin and a battery's
+        // negative terminal are real references; a sensor module's GND pin is
+        // an input, and a module wired to nothing does not become the circuit's
+        // reference just by having the pin.
+        if (pin.type === 'ground' && (def?.isBoard === true || def?.simulationAdapterId === 'sim.supply')) {
+          this.groundNets.add(net.id);
+        }
         // What a rail is at is decided by whatever actually sources it.
         //
         // A board's 5V or 3V3 pin is a real supply. A module's VCC pin is an
@@ -1254,12 +1262,11 @@ export class CircuitBinding {
         }
       }
     }
-    for (const [netId, volts] of declaredByModules) {
-      if (!this.supplyNets.has(netId)) {
-        this.supplyNets.set(netId, volts);
-        this.declaredOnlyNets.add(netId);
-      }
-    }
+    // Declarations are recorded and deliberately go no further. Nothing below
+    // this line may put them into supplyNets, sourceContributions or a level:
+    // an unpowered module's VCC pin is a floating pin, and a floating pin is
+    // not a pin at 5 V.
+    this.declaredRails = declaredByModules;
   }
 
   /**
@@ -2036,7 +2043,7 @@ export class CircuitBinding {
       if (this.groundNets.has(netId)) continue;
       // A declared-only rail is deliberately weak: it shows the module at the
       // voltage it expects and loses to anything that actually sources.
-      setLevel(netId, v, null, this.declaredOnlyNets.has(netId) ? DECLARED_RAIL_OHMS : 0);
+      setLevel(netId, v, null, 0);
     }
 
     // MCU-driven nets, from every running board's real pin state.
