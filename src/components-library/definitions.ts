@@ -1133,6 +1133,38 @@ export const FRAM_I2C = def(
   },
 );
 
+export const DFPLAYER = def(
+  'comp.dfplayer', 'DFPlayer Mini (MP3)', 'Modules', 22, 22, 'dfplayer',
+  [
+    pin('vcc', 'VCC', 1.2, 3, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('rx', 'RX', 1.2, 7, { type: 'digital', caps: ['uart-rx', 'digital-in'] }),
+    pin('tx', 'TX', 1.2, 11, { type: 'digital', caps: ['uart-tx', 'digital-out'] }),
+    pin('dacr', 'DAC_R', 1.2, 15, { type: 'passive' }),
+    pin('dacl', 'DAC_L', 1.2, 19, { type: 'passive' }),
+    pin('spk1', 'SPK1', 20.8, 3, { type: 'passive' }),
+    pin('gnd', 'GND', 20.8, 7, { type: 'ground', caps: ['ground'] }),
+    pin('spk2', 'SPK2', 20.8, 11, { type: 'passive' }),
+    pin('busy', 'BUSY', 20.8, 15, { type: 'digital', caps: ['digital-out'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.dfplayer',
+    properties: [
+      prop('trackCount', 'Tracks on card', 'number', 10, { min: 0, max: 255 }),
+      prop('baud', 'Baud', 'number', 9600),
+    ],
+    description:
+      'The DFPlayer\'s serial protocol, properly parsed. Every command is a ten-byte frame with a checksum, ' +
+      'and a frame whose checksum is wrong is ignored and counted — which matters because hand-rolled ' +
+      'DFPlayer code gets that checksum wrong constantly, and a model that accepted anything starting with ' +
+      '0x7E would make broken code look correct. Play, pause, stop, next, previous, track select, folder ' +
+      'select, volume, equaliser and the status queries all drive real state a sketch can read back, and the ' +
+      'BUSY pin follows playback so a sketch can wait for a track. A track past the end of the simulated card ' +
+      'does not play. NOT modelled and not claimed: audio. Nothing decodes an MP3, nothing makes sound, and ' +
+      'there is no file system — a track number is a number.',
+  },
+);
+
 export const SEVEN_SEGMENT = def(
   'comp.seven-segment', '7-Segment Display (CC)', 'Displays', 14, 20, 'seven-segment',
   [
@@ -1283,8 +1315,20 @@ export const BLUETOOTH = def(
     pin('txd', 'TXD', 11.0, 35.6, { type: 'digital', caps: ['uart-tx'], voltage: 3.3 }),
     pin('rxd', 'RXD', 14.0, 35.6, { type: 'digital', caps: ['uart-rx'], voltage: 3.3, description: '3.3 V logic — use a divider from 5 V TX' }),
   ],
-  'validation',
-  { validationRules: ['uart-pins', 'voltage-level'], description: 'Classic Bluetooth SPP module. Wiring/validation-level: RXD is 3.3 V-only, which the validator enforces.' },
+  'simulated',
+  {
+    validationRules: ['uart-pins', 'voltage-level'],
+    simulationAdapterId: 'sim.hc05',
+    description:
+      'Classic Bluetooth SPP module, simulated as the UART device it is from the board\'s side. The AT/data ' +
+      'split is real: hold EN/KEY high and the module answers AT commands (AT, AT+NAME, AT+PSWD/AT+PIN, ' +
+      'AT+ROLE, AT+UART, AT+VERSION?, AT+ADDR?, AT+RESET), with ERROR for anything it does not know; leave ' +
+      'EN low and it is transparent, so every byte the sketch writes is passed through rather than ' +
+      'interpreted. RXD is 3.3 V-only, which the validator enforces. There is NO Bluetooth here: no radio, ' +
+      'no pairing, no inquiry, no RFCOMM, no profiles, and no addressing beyond the strings the AT commands ' +
+      'store — bytes sent in data mode are recorded, not transmitted to anything. Needs a board with a ' +
+      'modelled UART: the ESP32-C3 and C6 have none yet.',
+  },
 );
 
 export const WIFI_ESP01 = def(
@@ -1710,7 +1754,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331, EPAPER29,
   NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
-  GPS, BLUETOOTH, WIFI_ESP01,
+  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
   CELL_15, COIN_CELL, DC_SUPPLY, REGULATOR_5, REGULATOR_33, LDO_33, BUCK_CONVERTER, BOOST_CONVERTER,
   HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,
