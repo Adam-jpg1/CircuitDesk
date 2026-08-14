@@ -6,17 +6,20 @@
 //
 // Datasheet behaviours modelled: control-byte command/data split, page and
 // horizontal/vertical addressing modes, column/page address windows, display
-// on/off, inverse, contrast, multiplex ratio, display offset/start line, and
-// the charge pump. Commands that are accepted but have no visible effect in a
+// on/off, inverse, contrast, multiplex ratio, the charge pump, and the three
+// controls that decide which way up the picture comes out — segment remap, COM
+// scan direction and the display start line. Those last three are applied when
+// a pixel is read out rather than when it is written, which is what the silicon
+// does and what keeps a read-back agreeing with the write that produced it. Commands that are accepted but have no visible effect in a
 // simulation (clock divide, pre-charge, COM pin config, VCOM deselect) are
 // consumed with their arguments so the byte stream stays in sync. Anything else
 // is counted as unhandled and reported, never silently ignored.
 
+import { PagedMonoRam } from './pagedMono';
 import type { DeviceSnapshot, I2cDevice } from './types';
 
 export const SSD1306_WIDTH = 128;
 export const SSD1306_HEIGHT = 64;
-const PAGES = SSD1306_HEIGHT / 8;
 
 /** The two addresses the SSD1306 is strapped to on real breakout boards. */
 export const SSD1306_ADDRESSES = [0x3c, 0x3d] as const;
@@ -30,8 +33,8 @@ export class Ssd1306Device implements I2cDevice {
   readonly instanceId: string;
   private readonly address: number;
 
-  /** GDDRAM: one byte per column per page, bit n = row (page*8 + n). */
-  readonly ram = new Uint8Array((SSD1306_WIDTH * SSD1306_HEIGHT) / 8);
+  /** GDDRAM and the cursor that walks it, shared with the other paged panels. */
+  readonly panel = new PagedMonoRam(SSD1306_WIDTH, SSD1306_HEIGHT);
 
   private mode: Mode = 'idle';
   private reading = false;
@@ -41,19 +44,9 @@ export class Ssd1306Device implements I2cDevice {
   private displayOn = false;
   private inverse = false;
   private contrast = 0x7f;
-  private addressingMode: 'horizontal' | 'vertical' | 'page' = 'page';
-  private colStart = 0;
-  private colEnd = SSD1306_WIDTH - 1;
-  private pageStart = 0;
-  private pageEnd = PAGES - 1;
-  private col = 0;
-  private page = 0;
 
-  private dataBytes = 0;
   private unhandled: number[] = [];
   private log: string[] = [];
-  /** Bumped on every RAM change so the canvas knows when to repaint. */
-  revision = 0;
 
   constructor(instanceId: string, address: number = SSD1306_ADDRESSES[0]) {
     this.instanceId = instanceId;
@@ -66,7 +59,7 @@ export class Ssd1306Device implements I2cDevice {
 
   /** Power-on defaults, per the datasheet reset state. */
   reset(): void {
-    this.ram.fill(0);
+    this.panel.reset();
     this.mode = 'idle';
     this.reading = false;
     this.pendingArgs = 0;
@@ -74,17 +67,8 @@ export class Ssd1306Device implements I2cDevice {
     this.displayOn = false;
     this.inverse = false;
     this.contrast = 0x7f;
-    this.addressingMode = 'page';
-    this.colStart = 0;
-    this.colEnd = SSD1306_WIDTH - 1;
-    this.pageStart = 0;
-    this.pageEnd = PAGES - 1;
-    this.col = 0;
-    this.page = 0;
-    this.dataBytes = 0;
     this.unhandled = [];
     this.log = [];
-    this.revision++;
   }
 
   start(_address: number, write: boolean): void {
@@ -111,36 +95,11 @@ export class Ssd1306Device implements I2cDevice {
       return true;
     }
     if (this.mode === 'data') {
-      this.writeRam(value);
+      this.panel.write(value);
       return true;
     }
     this.command(value);
     return true;
-  }
-
-  private writeRam(value: number): void {
-    const index = this.page * SSD1306_WIDTH + this.col;
-    if (index >= 0 && index < this.ram.length) {
-      this.ram[index] = value;
-      this.revision++;
-    }
-    this.dataBytes++;
-    // Advance the cursor exactly as the addressing mode dictates.
-    if (this.addressingMode === 'vertical') {
-      this.page++;
-      if (this.page > this.pageEnd) {
-        this.page = this.pageStart;
-        this.col = this.col >= this.colEnd ? this.colStart : this.col + 1;
-      }
-    } else {
-      this.col++;
-      if (this.col > this.colEnd) {
-        this.col = this.colStart;
-        if (this.addressingMode === 'horizontal') {
-          this.page = this.page >= this.pageEnd ? this.pageStart : this.page + 1;
-        }
-      }
-    }
   }
 
   private note(text: string): void {
@@ -159,19 +118,19 @@ export class Ssd1306Device implements I2cDevice {
 
     if (value >= 0x00 && value <= 0x0f) {
       // Page-mode lower column start
-      this.col = (this.col & 0xf0) | (value & 0x0f);
+      this.panel.col = (this.panel.col & 0xf0) | (value & 0x0f);
       return;
     }
     if (value >= 0x10 && value <= 0x1f) {
-      this.col = (this.col & 0x0f) | ((value & 0x0f) << 4);
+      this.panel.col = (this.panel.col & 0x0f) | ((value & 0x0f) << 4);
       return;
     }
     if (value >= 0xb0 && value <= 0xb7) {
-      this.page = value & 0x07;
+      this.panel.page = value & 0x07;
       return;
     }
     if (value >= 0x40 && value <= 0x7f) {
-      // Display start line — accepted; the canvas renders from RAM directly.
+      this.panel.startLine = value & 0x3f;
       return;
     }
 
@@ -195,9 +154,17 @@ export class Ssd1306Device implements I2cDevice {
         this.note(value === 0xa5 ? 'entire display on' : 'resume from RAM');
         return;
       case 0xa0:
-      case 0xa1: // segment remap
+        this.panel.segmentRemap = false;
+        return;
+      case 0xa1:
+        this.panel.segmentRemap = true;
+        return;
       case 0xc0:
-      case 0xc8: // COM scan direction
+        this.panel.comScanReverse = false;
+        return;
+      case 0xc8:
+        this.panel.comScanReverse = true;
+        return;
       case 0xe3: // NOP
         return;
       case 0x20:
@@ -232,23 +199,23 @@ export class Ssd1306Device implements I2cDevice {
   private applyArgument(value: number): void {
     switch (this.pendingCommand) {
       case 0x20:
-        this.addressingMode = value === 0 ? 'horizontal' : value === 1 ? 'vertical' : 'page';
-        this.note(`addressing mode: ${this.addressingMode}`);
+        this.panel.addressingMode = value === 0 ? 'horizontal' : value === 1 ? 'vertical' : 'page';
+        this.note(`addressing mode: ${this.panel.addressingMode}`);
         return;
       case 0x21:
         if (this.pendingArgs === 2) {
-          this.colStart = value & 0x7f;
-          this.col = this.colStart;
+          this.panel.colStart = value & 0x7f;
+          this.panel.col = this.panel.colStart;
         } else {
-          this.colEnd = value & 0x7f;
+          this.panel.colEnd = value & 0x7f;
         }
         return;
       case 0x22:
         if (this.pendingArgs === 2) {
-          this.pageStart = value & 0x07;
-          this.page = this.pageStart;
+          this.panel.pageStart = value & 0x07;
+          this.panel.page = this.panel.pageStart;
         } else {
-          this.pageEnd = value & 0x07;
+          this.panel.pageEnd = value & 0x07;
         }
         return;
       case 0x81:
@@ -266,29 +233,28 @@ export class Ssd1306Device implements I2cDevice {
   /** True when the pixel is lit, accounting for display on/off and inverse. */
   pixel(x: number, y: number): boolean {
     if (!this.displayOn) return false;
-    if (x < 0 || y < 0 || x >= SSD1306_WIDTH || y >= SSD1306_HEIGHT) return false;
-    const bit = (this.ram[(y >> 3) * SSD1306_WIDTH + x] >> (y & 7)) & 1;
-    return this.inverse ? bit === 0 : bit === 1;
+    const bit = this.panel.pixel(x, y);
+    return this.inverse ? !bit : bit;
   }
 
-  /** Packed 1-bit-per-pixel frame for the canvas, or null while the panel is off. */
+  /** Packed 1-bit-per-pixel frame as the glass shows it, or null while off. */
   frame(): Uint8Array | null {
-    return this.displayOn ? this.ram : null;
+    return this.displayOn ? this.panel.orientedFrame() : null;
   }
 
+  /** GDDRAM as firmware wrote it, unrotated. */
+  get ram(): Uint8Array {
+    return this.panel.ram;
+  }
+  get revision(): number {
+    return this.panel.revision;
+  }
   get isOn(): boolean {
     return this.displayOn;
   }
   get litPixels(): number {
     if (!this.displayOn) return 0;
-    let n = 0;
-    for (let i = 0; i < this.ram.length; i++) {
-      let b = this.ram[i];
-      while (b) {
-        n += b & 1;
-        b >>= 1;
-      }
-    }
+    const n = this.panel.litCount();
     return this.inverse ? SSD1306_WIDTH * SSD1306_HEIGHT - n : n;
   }
   get unhandledCommands(): number[] {
@@ -299,7 +265,7 @@ export class Ssd1306Device implements I2cDevice {
     return {
       status:
         `SSD1306 @0x${this.address.toString(16)} — ${this.displayOn ? 'on' : 'off'}, ` +
-        `${this.dataBytes} data bytes, ${this.litPixels} lit pixels` +
+        `${this.panel.dataBytes} data bytes, ${this.litPixels} lit pixels` +
         (this.unhandled.length ? `, ${this.unhandledCommands.length} unhandled command(s)` : ''),
       log: [...this.log],
     };

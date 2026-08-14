@@ -334,6 +334,29 @@ export const OLED = def(
   },
 );
 
+/**
+ * The 1.12" square OLED. Same footprint and the same two bus wires as the
+ * SSD1306 module, a different controller behind them — which is the whole
+ * reason it is worth having: swapping the part in a project is the cheapest way
+ * to find out that the driver you chose was the wrong one.
+ */
+export const SH1107_OLED = def(
+  'comp.sh1107', 'OLED 128×128 (SH1107)', 'Displays', 30, 30, 'sh1107',
+  [
+    pin('gnd', 'GND', 9.0, 1.0, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', 'VCC', 13.0, 1.0, { type: 'power-3v3', caps: ['power'], voltage: 3.3 }),
+    pin('scl', 'SCL', 17.0, 1.0, { type: 'digital', caps: ['i2c-scl'] }),
+    pin('sda', 'SDA', 21.0, 1.0, { type: 'digital', caps: ['i2c-sda'] }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.sh1107',
+    validationRules: ['i2c-pins'],
+    description:
+      'Square 128×128 I²C OLED. Its command set is close enough to the SSD1306 to be confused with it and different in the places that matter: sixteen pages instead of eight, a four-bit page opcode, a seven-bit column address, and a single-opcode addressing mode where the SSD1306 takes an argument byte — so an SSD1306 driver pointed at one produces a blank panel here exactly as it does on a bench. Segment remap, COM scan direction and the start line are applied, so a driver that flips the panel flips it here too. Contrast and multiplex ratio are stored and reported rather than shown.',
+  },
+);
+
 export const SEVEN_SEGMENT = def(
   'comp.seven-segment', '7-Segment Display (CC)', 'Displays', 14, 20, 'seven-segment',
   [
@@ -874,7 +897,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   PUSH_BUTTON, TOGGLE_SWITCH, POTENTIOMETER,
   BUZZER, SPEAKER, RELAY,
   SERVO, DC_MOTOR, STEPPER, MOTOR_DRIVER,
-  LCD1602, OLED, SEVEN_SEGMENT,
+  LCD1602, OLED, SH1107_OLED, SEVEN_SEGMENT,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
   GPS, BLUETOOTH, WIFI_ESP01,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
