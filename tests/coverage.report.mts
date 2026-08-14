@@ -103,6 +103,103 @@ const contradictory = COMPONENT_COVERAGE.filter(
 ).map((e) => e.id);
 check(contradictory.length === 0, `no entry is both parity and beyond-parity${contradictory.length ? `: ${contradictory.join(', ')}` : ''}`);
 
+// ---------------------------------------------------------------------------
+// Every gap names the primitive that would close it.
+//
+// This is the check that keeps the matrix a plan rather than a wish list. A
+// part that is not fully simulated must say WHAT CAPABILITY IS MISSING — not
+// that it is unfinished, which is already obvious from its status. The
+// difference matters: "analog-solver" tells the next person what to build and
+// which other parts they would unblock at the same time; "TODO" tells them
+// nothing and quietly accumulates.
+/**
+ * Simulation primitives that now exist, derived from the matrix itself.
+ *
+ * A primitive counts as built when some FINISHED part is built on it. Deriving
+ * it rather than keeping a hand-written list is the point: the list would rot
+ * exactly like the entries it is meant to police, and would need updating by
+ * the same person who forgot to update them.
+ */
+const IMPLEMENTED_PRIMITIVES = new Set(
+  COMPONENT_COVERAGE.filter((e) => e.status === 'simulated').flatMap((e) => e.dependencies),
+);
+
+const VAGUE_BLOCKERS = [
+  'todo', 'later', 'future', 'future-work', 'unfinished', 'not-done', 'notdone',
+  'unsupported', 'not-supported', 'needs-simulation', 'needs-work', 'tbd', 'wip',
+  'none', 'n/a', 'pending',
+];
+{
+  const gaps = COMPONENT_COVERAGE.filter((e) => e.status !== 'simulated');
+  const blockerless = gaps.filter((e) => e.dependencies.length === 0).map((e) => e.id);
+  check(
+    blockerless.length === 0,
+    `every gap names the primitive that would close it${blockerless.length ? `: ${blockerless.join(', ')}` : ` (${gaps.length} gaps, all accounted for)`}`,
+  );
+
+  const vague = gaps
+    .filter((e) => e.dependencies.some((d) => VAGUE_BLOCKERS.includes(d.toLowerCase())))
+    .map((e) => `${e.id} (${e.dependencies.join(', ')})`);
+  check(vague.length === 0, `and none of them is a placeholder${vague.length ? `: ${vague.join('; ')}` : ''}`);
+
+  // A gap whose every dependency already exists is STALE, not blocked.
+  //
+  // `dependencies` means "primitives this part is built on". On a finished
+  // part that is documentation — a 74HC138 depends on the logic-IC engine, and
+  // saying so is how the next combinational part gets estimated. On a gap it
+  // is the work plan, and it only stays a work plan while at least one of
+  // those primitives is still missing. Infrastructure landed steadily through
+  // this project; without this check, entries quietly go on citing engines
+  // that were finished months ago and finished work stays invisible.
+  const stale = COMPONENT_COVERAGE.filter(
+    (e) => e.status !== 'simulated' && e.dependencies.every((d) => IMPLEMENTED_PRIMITIVES.has(d)),
+  ).map((e) => `${e.id} (${e.dependencies.join(', ')})`);
+  check(
+    stale.length === 0,
+    `no gap is waiting on something that already exists${stale.length ? `: ${stale.join('; ')}` : ''}`,
+  );
+
+  // One id per part. A duplicate row means two people's opinions about the
+  // same component, and the matrix stops being an answer.
+  const seen = new Set<string>();
+  const duplicates: string[] = [];
+  for (const e of COMPONENT_COVERAGE) {
+    if (seen.has(e.id)) duplicates.push(e.id);
+    seen.add(e.id);
+  }
+  check(duplicates.length === 0, `no target is listed twice${duplicates.length ? `: ${duplicates.join(', ')}` : ''}`);
+
+  // A part recorded as Missing that actually ships is the worst kind of stale
+  // entry: it hides finished work and invites someone to build it again.
+  const missingButShipped = COMPONENT_COVERAGE.filter((e) => e.status === 'missing' && shipped.has(e.id)).map((e) => e.id);
+  check(
+    missingButShipped.length === 0,
+    `nothing recorded as missing actually ships${missingButShipped.length ? `: ${missingButShipped.join(', ')}` : ''}`,
+  );
+}
+
+// The blockers themselves, as a work plan: which primitive unblocks the most.
+//
+// Only the primitives that do NOT yet exist are counted. A gap also lists what
+// it is already built on — an HC-05 sits on the UART endpoint and waits for a
+// Bluetooth channel — and counting the finished half would make the plan look
+// like there is work where there is none.
+{
+  const byBlocker = new Map<string, string[]>();
+  for (const e of COMPONENT_COVERAGE) {
+    if (e.status === 'simulated') continue;
+    for (const d of e.dependencies) {
+      if (IMPLEMENTED_PRIMITIVES.has(d)) continue;
+      byBlocker.set(d, [...(byBlocker.get(d) ?? []), e.id]);
+    }
+  }
+  const ranked = [...byBlocker.entries()].sort((a, b) => b[1].length - a[1].length);
+  console.log(`\n   ${ranked.length} distinct blocker(s), most valuable first:`);
+  for (const [blocker, ids] of ranked) {
+    console.log(`     ${String(ids.length).padStart(3)}  ${blocker}`);
+  }
+}
+
 console.log(
   failures === 0
     ? '\nCoverage matrix is consistent with the shipped library.'
