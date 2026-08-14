@@ -58,6 +58,8 @@ import { GpsNeo6mDevice } from './devices/gpsNeo6m';
 import { Hc05Device } from './devices/hc05';
 import { Esp01Device, DEFAULT_ACCESS_POINT } from './devices/esp01';
 import { IrMedium } from './devices/irMedium';
+import { RfMedium } from './devices/rfMedium';
+import { Nrf24Device } from './devices/nrf24';
 
 /**
  * Two edges no further apart than this are cycles of one carrier.
@@ -364,6 +366,8 @@ interface SpiDeviceModel {
 
 interface SpiCreateContext extends DeviceCreateContext {
   csPinId: string | null;
+  /** The shared radio medium, for parts that are radios. */
+  radio: RfMedium;
   /**
    * Live level of a control pin, resolved against the board that owns this
    * device. Two identical displays on two boards each read their own wiring.
@@ -556,6 +560,13 @@ const SPI_DEVICE_MODELS: Record<string, SpiDeviceModel> = {
   'comp.hc595': {
     busPins: { sck: 'srclk', mosi: 'ser', miso: null, cs: null },
     create: (ctx) => new Sn74hc595Device(ctx.instanceId, ctx.logicVolts),
+  },
+  'comp.nrf24l01': {
+    // CSN selects the chip for a transaction; CE enables the radio. They are
+    // different signals and the model treats them as different signals.
+    busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'csn' },
+    controlPins: ['ce'],
+    create: (ctx) => new Nrf24Device(ctx.instanceId, ctx.csPinId ?? 'csn', ctx.radio, ctx.nowUs),
   },
   'comp.sd-card': {
     busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'cs' },
@@ -1180,6 +1191,9 @@ export class CircuitBinding {
   }
 
   private setupSpiDevices(runner: BoardRunner, boardInstanceId: string): SpiDevice[] {
+    // Control-pin pads per instance, kept so an edge subscription can be
+    // attached after sync() has decided which devices actually exist.
+    const controlPadsByInstance = new Map<string, Map<string, number>>();
     const board = this.boardDefinitionOf(boardInstanceId);
     // Engines whose hardware SPI controller is not yet bridged to the shared
     // device models expose no bus. Attaching nothing is the honest outcome:
@@ -1276,6 +1290,7 @@ export class CircuitBinding {
 
       const csPinId = model.busPins.cs;
       controlReaders.set(inst.id, readControl);
+      controlPadsByInstance.set(inst.id, controlPads);
       wanted.push({
         instanceId: inst.id,
         csPin,
@@ -1286,6 +1301,7 @@ export class CircuitBinding {
             csPinId,
             readControl,
             logicVolts,
+            radio: this.rfMedium,
             nowUs: () => runner.timeMs * 1000,
             saved: inst.simulationState,
           }),
@@ -1299,6 +1315,20 @@ export class CircuitBinding {
     for (const device of devices) {
       const read = controlReaders.get(device.instanceId);
       if (read && device.attachControls) device.attachControls(read);
+
+      // A radio's CE has to be watched as an edge, not sampled. RF24's write()
+      // raises it for ten microseconds and drops it again, and a per-slice
+      // sample would see it low both times and never transmit anything.
+      if (device instanceof Nrf24Device) {
+        const cePad = controlPadsByInstance.get(device.instanceId)?.get('ce');
+        if (cePad !== undefined) {
+          this.unsubscribeLatches.push(
+            runner.addPinListener((pin, high) => {
+              if (pin === cePad) device.setCe(high);
+            }),
+          );
+        }
+      }
     }
 
     // Chip select changes between transactions, when no byte is being clocked,
@@ -2043,6 +2073,14 @@ export class CircuitBinding {
    * so a re-bind does not throw away a burst that is still in flight.
    */
   private readonly irMedium = new IrMedium();
+  /**
+   * The room's radio, shared by every RF part on the canvas.
+   *
+   * One medium for every family, so an nRF24 and a LoRa module on the same
+   * band are representable and a second radio family is a register map rather
+   * than another transport.
+   */
+  private readonly rfMedium = new RfMedium();
   private irReceivers = new Map<
     string,
     {
@@ -2516,6 +2554,21 @@ export class CircuitBinding {
       if (typeof resettable.settle === 'function') resettable.settle();
     }
 
+    // Radios, receive first and transmit second, across the whole canvas.
+    //
+    // The order is the hardware's, not the scheduler's. An acknowledgement
+    // leaves about 130 microseconds after the packet it answers, long before
+    // the sender's retransmit delay expires. If a transmitter evaluated its
+    // timeout before the receiver on the other board had looked, it would
+    // retransmit a packet that had in fact arrived — and the receiver would
+    // get it twice.
+    for (const device of this.spiDevices) {
+      if (device instanceof Nrf24Device) device.radioReceive();
+    }
+    for (const device of this.spiDevices) {
+      if (device instanceof Nrf24Device) device.radioTransmit();
+    }
+
     const highVolts = Number(this.boardDef?.metadata.logicVoltage ?? 5);
     // A CMOS input switches around half the supply, so the threshold comes
     // from the board rather than being fixed at an AVR's 2.5 V.
@@ -2879,6 +2932,21 @@ export class CircuitBinding {
       const low = link.device.outputLow;
       setLevel(outNet, low ? 0 : highVolts, null, low ? 0 : 30000);
     }
+
+    // Radios. IRQ is an open-drain output that the chip pulls LOW while an
+    // unmasked interrupt is asserted and releases otherwise — so a sketch that
+    // waits on a falling edge sees one only when something genuinely happened.
+    for (const device of this.spiDevices) {
+      if (!(device instanceof Nrf24Device)) continue;
+      const irqNet = this.netOfInstancePin(device.instanceId, 'irq');
+      if (!irqNet) continue;
+      const asserted = device.irqAsserted;
+      setLevel(irqNet, asserted ? 0 : highVolts, null, asserted ? 0 : 30000);
+    }
+    // Traffic older than a hundred milliseconds cannot affect anything: the
+    // longest airtime here is well under a millisecond and every receiver
+    // holds a cursor past it.
+    this.rfMedium.prune(this.irTimeUs() - 100000);
 
     // Relay coils. Read before the contacts are next solved, so the armature
     // follows the coil by one slice — see `energisedRelays`.
