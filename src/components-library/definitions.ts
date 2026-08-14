@@ -896,6 +896,132 @@ export const RELAY_DPDT = def(
   },
 );
 
+// ---------- Power sources, regulators and converters ----------
+
+/**
+ * A voltage source: two terminals and a voltage it actually imposes.
+ *
+ * Only these and a board's own rails source anything. A module's VCC pin is an
+ * input however it is labelled, and artwork sources nothing at all — which is
+ * the rule that keeps "there is a 5V label here" from becoming "there is 5 V
+ * here".
+ */
+function voltageSource(
+  id: string,
+  name: string,
+  volts: number,
+  widthMm: number,
+  heightMm: number,
+  artworkId: string,
+  description: string,
+  adjustable = false,
+): ComponentDefinition {
+  return def(
+    id, name, 'Power', widthMm, heightMm, artworkId,
+    [
+      pin('plus', '+', widthMm * 0.3, heightMm - 0.6, { type: 'power-vin', caps: ['power'], voltage: volts }),
+      pin('minus', '−', widthMm * 0.7, heightMm - 0.6, { type: 'ground', caps: ['ground'] }),
+    ],
+    'simulated',
+    {
+      simulationAdapterId: 'sim.supply',
+      properties: [
+        prop('voltage', 'Voltage', 'number', volts, {
+          unit: 'V',
+          min: adjustable ? 1 : volts,
+          max: adjustable ? 30 : volts,
+        }),
+      ],
+      description,
+    },
+  );
+}
+
+export const CELL_15 = voltageSource(
+  'comp.cell-15', 'Cell (1.5V)', 1.5, 26, 10, 'battery-aa',
+  'A single 1.5 V cell. It imposes its voltage across its terminals, which is what makes a series stack behave ' +
+    'like a stack. Behavioural: capacity, internal resistance and discharge are not modelled — it never goes flat.',
+);
+
+export const COIN_CELL = voltageSource(
+  'comp.battery-coin', 'Coin cell (CR2032)', 3, 16, 16, 'battery-coin',
+  'A 3 V lithium coin cell. Behavioural: capacity, internal resistance and discharge are not modelled, which ' +
+    'matters more here than for most sources — a CR2032 cannot in reality supply what a project often asks of it.',
+);
+
+export const DC_SUPPLY = voltageSource(
+  'comp.dc-supply', 'Adjustable DC supply', 5, 36, 24, 'dc-supply',
+  'A bench supply, set by its voltage property. It imposes exactly that across its terminals. Behavioural: ' +
+    'current limiting, ripple and load regulation are not modelled.',
+  true,
+);
+
+/** A three-terminal regulator or converter module. */
+function regulatorPart(
+  id: string,
+  name: string,
+  widthMm: number,
+  heightMm: number,
+  artworkId: string,
+  description: string,
+  nominal: number,
+  withEnable = false,
+): ComponentDefinition {
+  const pins: PinDefinition[] = [
+    pin('vin', 'IN', widthMm * 0.2, heightMm - 0.6, { type: 'power-vin', caps: ['power'] }),
+    pin('gnd', 'GND', widthMm * 0.5, heightMm - 0.6, { type: 'ground', caps: ['ground'] }),
+    pin('vout', 'OUT', widthMm * 0.8, heightMm - 0.6, { type: 'passive', caps: ['power'] }),
+  ];
+  if (withEnable) pins.push(pin('en', 'EN', widthMm * 0.5, 0.6, { type: 'digital', caps: ['digital-in'] }));
+  return def(id, name, 'Power', widthMm, heightMm, artworkId, pins, 'simulated', {
+    simulationAdapterId: 'sim.regulator',
+    properties: [prop('outputVoltage', 'Output', 'number', nominal, { unit: 'V' })],
+    description,
+  });
+}
+
+export const REGULATOR_5 = regulatorPart(
+  'comp.regulator-5', 'Linear regulator (5V, 7805)', 14, 18, 'regulator',
+  'A 7805. It imposes 5 V on its output when its input is at least two volts above that and its ground is ' +
+    'wired — which is why feeding one 5 V gives nothing, and why a floating ground gives nothing whatever the ' +
+    'input is. Behavioural: ripple, efficiency, dropout curve, thermal shutdown, transient response and ' +
+    'current limit are not modelled.',
+  5,
+);
+
+export const REGULATOR_33 = regulatorPart(
+  'comp.regulator-33', 'Linear regulator (3.3V)', 14, 18, 'regulator',
+  'A 3.3 V linear regulator, needing about 1.5 V of headroom. Behavioural: ripple, efficiency, dropout curve, ' +
+    'thermal shutdown, transient response and current limit are not modelled.',
+  3.3,
+);
+
+export const LDO_33 = regulatorPart(
+  'comp.ldo', 'LDO regulator (3.3V, enable)', 14, 18, 'regulator',
+  'A low-dropout regulator: it holds 3.3 V from an input only a few hundred millivolts above it, which is the ' +
+    'entire reason to choose one over a 7805-style part. Its enable pin is pulled up on the module, so leaving ' +
+    'it unwired runs it and driving it low shuts it off. Behavioural: ripple, quiescent current, thermal ' +
+    'shutdown and current limit are not modelled.',
+  3.3,
+  true,
+);
+
+export const BUCK_CONVERTER = regulatorPart(
+  'comp.buck-converter', 'Buck converter (step-down)', 22, 16, 'converter',
+  'A step-down switching module. It holds its set output from any input above it with a volt of headroom, and ' +
+    'needs at least six volts in to start. Behavioural and deliberately so: switching frequency, efficiency, ' +
+    'ripple, inductor behaviour and current limit are not modelled, and no efficiency figure is claimed.',
+  5,
+);
+
+export const BOOST_CONVERTER = regulatorPart(
+  'comp.boost-converter', 'Boost converter (step-up)', 22, 16, 'converter',
+  'A step-up switching module. It holds its set output from any input BELOW that output and above about two ' +
+    'volts — feed it more than its output and it does not regulate, which is the mistake this model exists to ' +
+    'reproduce. Behavioural: switching frequency, efficiency, ripple and current limit are not modelled.',
+  5,
+);
+
 export const SEVEN_SEGMENT = def(
   'comp.seven-segment', '7-Segment Display (CC)', 'Displays', 14, 20, 'seven-segment',
   [
@@ -1058,7 +1184,7 @@ export const BATTERY_9V = def(
 export const BATTERY_AA = def(
   'comp.battery-aa', 'Battery Holder (2×AA, 3 V)', 'Power', 33, 58, 'battery-aa',
   [
-    pin('plus', '+', 6.0, 2.0, { type: 'power-3v3', caps: ['power'], voltage: 3 }),
+    pin('plus', '+', 6.0, 2.0, { type: 'power-vin', caps: ['power'], voltage: 3 }),
     pin('minus', '−', 27.0, 2.0, { type: 'ground', caps: ['ground'] }),
   ],
   'simulated',
@@ -1072,8 +1198,16 @@ export const REGULATOR = def(
     pin('gnd', 'GND', 5.0, 8.6, { type: 'ground', caps: ['ground'] }),
     pin('vout', 'VOUT', 8.3, 8.6, { type: 'power-3v3', caps: ['power'], voltage: 3.3 }),
   ],
-  'validation',
-  { description: '3.3 V LDO regulator. Validation-level: treated as a 3.3 V source when powered.' },
+  'simulated',
+  {
+    simulationAdapterId: 'sim.regulator',
+    properties: [prop('outputVoltage', 'Output', 'number', 5, { unit: 'V' })],
+    description:
+      'A three-terminal linear regulator. It imposes its set output when its input is at least two volts ' +
+      'above that and its ground is wired — so feeding a 5 V part 5 V gives nothing, and a floating ground ' +
+      'gives nothing whatever the input. Behavioural: ripple, efficiency, dropout curve, thermal shutdown, ' +
+      'transient response and current limit are not modelled.',
+  },
 );
 
 export const LEVEL_CONVERTER = def(
@@ -1444,6 +1578,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
   GPS, BLUETOOTH, WIFI_ESP01,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
+  CELL_15, COIN_CELL, DC_SUPPLY, REGULATOR_5, REGULATOR_33, LDO_33, BUCK_CONVERTER, BOOST_CONVERTER,
   HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,
   GENERIC_IC, HEADER_CONNECTOR,
   PUSH_BUTTON_6MM, SLIDE_SWITCH, LIMIT_SWITCH,
