@@ -450,6 +450,103 @@ function BatteryArt({ def }: ArtProps) {
  * The pixels themselves still come from the simulated SSD1306's GDDRAM. Nothing
  * here draws a picture the firmware did not put there.
  */
+/**
+ * A WS2812 part, drawn from the latched frame.
+ *
+ * One shape per pixel in the layout the part actually has, filled with the
+ * colour that pixel's twenty-four bits decoded to. An unlit pixel is drawn as
+ * dark plastic rather than omitted, because an eight-pixel strip with two lit
+ * is a strip with six dark pixels — hiding them would make a half-written
+ * frame look like a shorter strip.
+ */
+function NeoPixelArt({ def, visual, layout }: ArtProps & { layout: 'single' | 'ring' | 'strip' | 'matrix' }) {
+  const w = def.widthMm * MM;
+  const h = def.heightMm * MM;
+  const colors = visual?.pixelColors ?? [];
+  const count = Math.max(1, Math.floor(Number(def.properties.find((p) => p.key === 'pixelCount')?.default ?? 1)));
+
+  const fill = (i: number) => {
+    const c = colors[i];
+    if (!c || (!c.r && !c.g && !c.b)) return '#2a2f36';
+    return `rgb(${c.r},${c.g},${c.b})`;
+  };
+  const glow = (i: number) => {
+    const c = colors[i];
+    return c && (c.r || c.g || c.b) ? 0.55 : 0;
+  };
+
+  const dots: JSX.Element[] = [];
+  if (layout === 'ring') {
+    const cx = w / 2;
+    const cy = h / 2;
+    const r = Math.min(w, h) * 0.36;
+    const dr = Math.min(w, h) * 0.07;
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 - Math.PI / 2;
+      dots.push(<circle key={i} cx={cx + r * Math.cos(a)} cy={cy + r * Math.sin(a)} r={dr} fill={fill(i)} />);
+    }
+  } else if (layout === 'matrix') {
+    const side = Math.round(Math.sqrt(count)) || 1;
+    const pad = w * 0.08;
+    const cell = Math.min((w - pad * 2) / side, (h * 0.82 - pad * 2) / side);
+    for (let i = 0; i < count; i++) {
+      const col = i % side;
+      const row = Math.floor(i / side);
+      dots.push(
+        <rect
+          key={i}
+          x={pad + col * cell + cell * 0.12}
+          y={pad + row * cell + cell * 0.12}
+          width={cell * 0.76}
+          height={cell * 0.76}
+          rx={cell * 0.16}
+          fill={fill(i)}
+        />,
+      );
+    }
+  } else {
+    // A strip, and a single pixel, are the same row at two lengths.
+    const cell = w / Math.max(count, 1);
+    const size = Math.min(cell * 0.7, h * 0.5);
+    for (let i = 0; i < count; i++) {
+      dots.push(
+        <rect
+          key={i}
+          x={(i + 0.5) * cell - size / 2}
+          y={h * 0.34 - size / 2}
+          width={size}
+          height={size}
+          rx={size * 0.18}
+          fill={fill(i)}
+        />,
+      );
+    }
+  }
+
+  const halos = Array.from({ length: count }, (_, i) => glow(i)).some((g) => g > 0);
+
+  return (
+    <g>
+      <rect x="1" y="1.5" width={w} height={h} rx="3" fill="rgba(0,0,0,0.35)" />
+      <rect width={w} height={h} rx="3" fill="#101318" stroke="#333c46" />
+      {layout === 'ring' && (
+        <circle cx={w / 2} cy={h / 2} r={Math.min(w, h) * 0.2} fill="#0b0e12" stroke="#262c33" />
+      )}
+      {halos && (
+        <g opacity="0.5" filter="url(#cd-pixel-glow)">
+          {dots}
+        </g>
+      )}
+      {dots}
+      <defs>
+        <filter id="cd-pixel-glow" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="2.2" />
+        </filter>
+      </defs>
+    </g>
+  );
+}
+
 function OledArt(props: ArtProps) {
   return <MonoPanelArt {...props} cols={128} rows={64} idleLabel="OLED" />;
 }
@@ -1296,6 +1393,10 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   lcd1602: (p) => <Lcd1602Art {...p} />,
   oled: (p) => <OledArt {...p} />,
   sh1107: (p) => <Sh1107Art {...p} />,
+  neopixel: (p) => <NeoPixelArt {...p} layout="single" />,
+  'neopixel-ring': (p) => <NeoPixelArt {...p} layout="ring" />,
+  'neopixel-strip': (p) => <NeoPixelArt {...p} layout="strip" />,
+  'neopixel-matrix': (p) => <NeoPixelArt {...p} layout="matrix" />,
   led: (p) => <LedArt {...p} />,
   'rgb-led': (p) => <RgbLedArt {...p} />,
   resistor: (p) => <ResistorArt {...p} />,

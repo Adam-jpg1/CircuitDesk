@@ -260,10 +260,10 @@ const LEDS: CoverageEntry[] = [
   entry('comp.led', 'LED', 'LEDs', 'wt', 'passive', 'simulated', ['gpio', 'analog'], NONE, 'hardware', ['tests/sim.behaviors.mts']),
   entry('comp.rgb-led', 'RGB LED', 'LEDs', 'wt', 'passive', 'simulated', ['gpio', 'pwm'], NONE, 'hardware', ['tests/sim.behaviors.mts']),
   entry('comp.led-bar-graph', 'LED bar graph', 'LEDs', 'wt', 'passive', 'missing', ['gpio'], NONE, 'none', NONE),
-  entry('comp.neopixel', 'NeoPixel (WS2812)', 'LEDs', 'w', 'addressable-led', 'missing', ['gpio'], ['ws2812-timing'], 'none', NONE),
-  entry('comp.neopixel-ring', 'NeoPixel ring', 'LEDs', 'w', 'addressable-led', 'missing', ['gpio'], ['ws2812-timing'], 'none', NONE),
-  entry('comp.neopixel-strip', 'NeoPixel strip', 'LEDs', 'w', 'addressable-led', 'missing', ['gpio'], ['ws2812-timing'], 'none', NONE),
-  entry('comp.neopixel-matrix', 'NeoPixel matrix', 'LEDs', 'w', 'addressable-led', 'missing', ['gpio'], ['ws2812-timing'], 'none', NONE),
+  entry('comp.neopixel', 'NeoPixel (WS2812)', 'LEDs', 'w', 'addressable-led', 'simulated', ['gpio'], NONE, 'hardware', ['tests/leds.addressable.mts']),
+  entry('comp.neopixel-ring', 'NeoPixel ring', 'LEDs', 'w', 'addressable-led', 'simulated', ['gpio'], NONE, 'hardware', ['tests/leds.addressable.mts']),
+  entry('comp.neopixel-strip', 'NeoPixel strip', 'LEDs', 'w', 'addressable-led', 'simulated', ['gpio'], NONE, 'hardware', ['tests/leds.addressable.mts']),
+  entry('comp.neopixel-matrix', 'NeoPixel matrix', 'LEDs', 'w', 'addressable-led', 'simulated', ['gpio'], NONE, 'hardware', ['tests/leds.addressable.mts']),
 ];
 
 // --------------------------------------------------------------------- Logic
