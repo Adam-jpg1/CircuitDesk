@@ -255,6 +255,17 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
           <div style={{ fontSize: 11, color: 'var(--text-2)' }}>Wiper: {Math.round((potPositions[inst.id] ?? 0.5) * 100)}%</div>
         </div>
       )}
+      {adapter === 'sim.keypad' && (
+        <div>
+          <button className="btn" onClick={() => useEditorStore.getState().setKeyPanel(inst.id)}>
+            Open key panel
+          </button>
+          <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 4 }}>
+            A bigger view of the same keys. Pressing one closes a crossing in the matrix — firmware has to
+            scan for it, exactly as on the bench.
+          </div>
+        </div>
+      )}
       {adapter === 'sim.joystick' && (
         // Two wipers, because that is what the module is: the sliders set the
         // same positions the axes impose on VRx and VRy, so what the stick

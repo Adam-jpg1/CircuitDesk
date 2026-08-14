@@ -230,6 +230,13 @@ export function CanvasStage() {
     [toWorld],
   );
 
+  // Double-clicking a part opens whatever bigger view it has. Only the key
+  // matrices have one: fifty keys on a 118 mm part is nine pixels a key at the
+  // zoom the canvas opens at, which is accurate and also not usable.
+  const onPartDoubleClick = useCallback((inst: ComponentInstance, def: PartDefinition | undefined) => {
+    if (def?.simulationAdapterId === 'sim.keypad') useEditorStore.getState().setKeyPanel(inst.id);
+  }, []);
+
   const onPartPointerDown = useCallback(
     (inst: ComponentInstance, e: React.PointerEvent) => {
       e.stopPropagation();
@@ -474,6 +481,7 @@ export function CanvasStage() {
             connectedPins={connectedPins.get(inst.id)}
             zoom={view.zoom}
             onPointerDown={onPartPointerDown}
+            onDoubleClick={onPartDoubleClick}
             onPinClick={onPinClick}
           />
         ))}
@@ -652,6 +660,7 @@ const PartView = memo(function PartView({
   connectedPins,
   zoom,
   onPointerDown,
+  onDoubleClick,
   onPinClick,
 }: {
   inst: ComponentInstance;
@@ -661,6 +670,7 @@ const PartView = memo(function PartView({
   connectedPins: Set<string> | undefined;
   zoom: number;
   onPointerDown: (inst: ComponentInstance, e: React.PointerEvent) => void;
+  onDoubleClick: (inst: ComponentInstance, def: PartDefinition | undefined) => void;
   onPinClick: (componentId: string, pin: PinDefinition, e: React.MouseEvent) => void;
 }) {
   const visual = useSimulationStore((s) => s.visuals[inst.id]);
@@ -688,6 +698,7 @@ const PartView = memo(function PartView({
     <g
       transform={`translate(${inst.x} ${inst.y}) rotate(${inst.rotation} ${w / 2} ${h / 2})`}
       onPointerDown={(e) => onPointerDown(inst, e)}
+      onDoubleClick={() => onDoubleClick(inst, def)}
       style={{ cursor: 'move' }}
     >
       {def.isBoard ? (

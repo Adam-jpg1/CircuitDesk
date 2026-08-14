@@ -47,6 +47,13 @@ interface EditorState {
   wireDraft: WireDraft | null;
   view: { x: number; y: number; zoom: number };
   hoveredPin: { componentId: string; pinId: string } | null;
+  /**
+   * The keypad or keyboard whose full-size key panel is open, or null.
+   *
+   * A view of one part, not a mode: the panel presses the same contacts the
+   * canvas does, so nothing about the circuit depends on whether it is open.
+   */
+  keyPanelInstanceId: string | null;
   bottomTab: BottomTab;
   activeFileId: string | null;
   /**
@@ -76,6 +83,7 @@ interface EditorState {
   setView(view: { x: number; y: number; zoom: number }): void;
   setSelection(sel: Selection): void;
   setHoveredPin(pin: { componentId: string; pinId: string } | null): void;
+  setKeyPanel(instanceId: string | null): void;
   setBottomTab(tab: BottomTab): void;
   setActiveFile(id: string): void;
   /** Opens the sketch a board runs. Does not copy or reassign anything. */
@@ -178,6 +186,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     wireDraft: null,
     view: { x: 0, y: 0, zoom: 1 },
     hoveredPin: null,
+    keyPanelInstanceId: null,
     bottomTab: 'code',
     activeFileId: null,
     activeBoardId: null,
@@ -208,6 +217,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           activeFileId: project.codeFiles[0]?.id ?? null,
           activeBoardId: null,
           selection: { componentIds: [], connectionIds: [] },
+          keyPanelInstanceId: null,
           saveState: 'saved',
           undoDepth: 0,
           redoDepth: 0,
@@ -234,7 +244,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
       undoStack = [];
       redoStack = [];
-      set({ project: null, loadError: null, lastCompile: null, validationIssues: [], wireDraft: null });
+      set({ project: null, loadError: null, lastCompile: null, validationIssues: [], wireDraft: null, keyPanelInstanceId: null });
     },
 
     markDirtyAndSave: scheduleSave,
@@ -243,6 +253,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setView: (view) => set({ view }),
     setSelection: (selection) => set({ selection }),
     setHoveredPin: (hoveredPin) => set({ hoveredPin }),
+    setKeyPanel: (keyPanelInstanceId) => set({ keyPanelInstanceId }),
     setBottomTab: (bottomTab) => set({ bottomTab }),
     setActiveFile: (activeFileId) => set({ activeFileId, activeBoardId: null }),
 
