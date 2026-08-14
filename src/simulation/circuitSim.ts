@@ -55,6 +55,8 @@ import { Hd44780ParallelDevice, LCD_DATA_PINS_8 } from './devices/lcdParallel';
 import { Ws2812Device } from './devices/ws2812';
 import { UartLink, type UartPeripheral } from './devices/uartEndpoint';
 import { GpsNeo6mDevice } from './devices/gpsNeo6m';
+import { Hc05Device } from './devices/hc05';
+import { DfPlayerDevice } from './devices/dfplayer';
 import { Ads1115Device, ADS1115_ADDRESSES } from './devices/ads1115';
 import { Mcp3008Device, MCP3008_CHANNELS } from './devices/mcp3008';
 import { Ds1307Device, DS1307_ADDRESS } from './devices/ds1307';
@@ -428,9 +430,17 @@ const BOARDS_WITH_UART = new Set([
 /** UART devices, and which of their pins carry which direction. */
 const UART_DEVICE_PARTS: Record<
   string,
-  { /** Device pin that DRIVES the board's RX. */ tx: string; /** Device pin the board's TX drives. */ rx: string }
+  {
+    /** Device pin that DRIVES the board's RX. */
+    tx: string;
+    /** Device pin the board's TX drives. */
+    rx: string;
+    create: (instanceId: string, baud: number) => UartPeripheral;
+  }
 > = {
-  'comp.gps': { tx: 'tx', rx: 'rx' },
+  'comp.gps': { tx: 'tx', rx: 'rx', create: (id, baud) => new GpsNeo6mDevice(id, baud) },
+  'comp.hc05': { tx: 'txd', rx: 'rxd', create: (id, baud) => new Hc05Device(id, baud) },
+  'comp.dfplayer': { tx: 'tx', rx: 'rx', create: (id, baud) => new DfPlayerDevice(id, baud) },
 };
 
 const RELAY_PARTS: Record<string, { coil: string; coilReturn: string; pullInVolts: number }> = {
@@ -872,6 +882,41 @@ export class CircuitBinding {
     // listener that outlived it would re-solve a circuit that no longer exists.
     this.switchedPinListeners.forEach((off) => off());
     this.switchedPinListeners = [];
+    this.serialTaps.forEach((off) => off());
+    this.serialTaps.clear();
+  }
+
+  /**
+   * Taps a board's transmitted bytes so a wired module hears them.
+   *
+   * The board-to-device direction cannot be polled the way the other one is:
+   * a byte leaves the UART the moment the firmware writes it, and the settle
+   * that runs between slices would see only that some unknown number of bytes
+   * had gone by. So the runner's serial-out callback is chained — whatever was
+   * there first still runs, so the serial monitor keeps its attribution — and
+   * every byte is offered to the links belonging to THIS board.
+   *
+   * Chained rather than replaced, and released on re-bind, because stacking a
+   * second tap on the same runner would deliver every byte twice.
+   */
+  private tapBoardSerial(runner: BoardRunner): void {
+    if (this.serialTaps.has(runner)) return;
+    const downstream = runner.onSerialByte;
+    runner.onSerialByte = (byte: number) => {
+      downstream?.(byte);
+      const nowUs = runner.timeMs * 1000;
+      for (const { link, runner: owner } of this.uartLinks.values()) {
+        if (owner !== runner) continue;
+        // The rate as it is at this byte, not as it was at the last settle: a
+        // sketch that changes Serial.begin() mid-run must corrupt from the
+        // byte it changed on.
+        link.setBoardConfig({ baud: runner.uartBaudRate ?? link.boardBaud });
+        link.boardTransmitted(byte, nowUs);
+      }
+    };
+    this.serialTaps.set(runner, () => {
+      runner.onSerialByte = downstream;
+    });
   }
 
   /**
@@ -984,8 +1029,7 @@ export class CircuitBinding {
       if (!powered || !grounded) continue;
 
       const existing = this.uartDeviceCache.get(inst.id);
-      const device: UartPeripheral =
-        existing ?? new GpsNeo6mDevice(inst.id, Number(inst.properties.baud ?? 9600));
+      const device: UartPeripheral = existing ?? spec.create(inst.id, Number(inst.properties.baud ?? 9600));
       this.uartDeviceCache.set(inst.id, device);
 
       const link = new UartLink(boardInstanceId, device);
@@ -993,6 +1037,9 @@ export class CircuitBinding {
       // normal GPS install — but the board cannot configure it.
       if (deviceRxNet !== boardTxNet) link.noteContention(0);
       this.uartLinks.set(inst.id, { link, runner });
+      // Only a device whose RX is genuinely on the board's TX net hears it, so
+      // the tap goes in once a link exists and the direction is real.
+      if (deviceRxNet === boardTxNet) this.tapBoardSerial(runner);
     }
   }
 
@@ -1699,6 +1746,12 @@ export class CircuitBinding {
   private uartDeviceCache = new Map<string, UartPeripheral>();
   private uartLinks = new Map<string, { link: UartLink; runner: BoardRunner }>();
 
+  /** Serial-out taps, keyed by runner, so a re-bind cannot stack them. */
+  private serialTaps = new Map<BoardRunner, () => void>();
+
+  /** The baud last pushed from a part's property, so AT+UART= is not undone. */
+  private appliedUartBaud = new Map<string, number>();
+
   /** A UART device's link, for the canvas and the inspector. */
   uartLinkFor(instanceId: string): UartLink | undefined {
     return this.uartLinks.get(instanceId)?.link;
@@ -2123,6 +2176,7 @@ export class CircuitBinding {
       device.setBaud(num('baud', 9600));
     }
 
+
     for (const { link, runner: owner } of this.uartLinks.values()) {
       const nowUs = owner.timeMs * 1000;
       link.setBoardConfig({ baud: owner.uartBaudRate ?? 9600 });
@@ -2448,6 +2502,28 @@ export class CircuitBinding {
       }
       setLevel(outNet, nominal, null, 0);
       drivenNets.add(outNet);
+    }
+
+    // The HC-05's KEY pin decides whether it answers AT commands or is
+    // transparent, and it is a real wire — a module with KEY unwired is in
+    // data mode, which is why an AT sketch on one gets no reply.
+    for (const inst of this.graph.instances) {
+      const device = this.uartDeviceCache.get(inst.id);
+      if (device instanceof Hc05Device) {
+        const keyNet = this.netOfInstancePin(inst.id, 'en');
+        const v = keyNet ? (levels.get(keyNet)?.volts ?? null) : null;
+        device.setKeyPin(v !== null && v >= 1.6);
+        // The property is applied when the USER changes it, not on every
+        // slice: AT+UART= sets the module's own rate, and re-asserting the
+        // property here would undo the command the sketch just issued.
+        const wanted = Number(inst.properties.baud ?? 9600);
+        if (this.appliedUartBaud.get(inst.id) !== wanted) {
+          this.appliedUartBaud.set(inst.id, wanted);
+          device.setBaud(wanted);
+        }
+      } else if (device instanceof DfPlayerDevice) {
+        device.setTrackCount(Number(inst.properties.trackCount ?? 10));
+      }
     }
 
     // Relay coils. Read before the contacts are next solved, so the armature
