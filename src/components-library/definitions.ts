@@ -317,6 +317,64 @@ export const LCD1602 = def(
   },
 );
 
+/**
+ * The bare character LCD: sixteen pins, no backpack.
+ *
+ * `LiquidCrystal lcd(rs, en, d4, d5, d6, d7)` is the first display most people
+ * ever wire, and it is a genuinely different part from the I2C module — six
+ * GPIOs instead of two bus wires, and a panel that stays blank until firmware
+ * pulses E. Both are worth having for exactly that reason.
+ */
+function parallelLcd(
+  id: string,
+  name: string,
+  columns: number,
+  rows: number,
+  widthMm: number,
+  heightMm: number,
+): ComponentDefinition {
+  // The real 16-pin 2.54 mm header, in datasheet order.
+  const header: [string, string, Partial<PinSpec>][] = [
+    ['vss', 'VSS', { type: 'ground', caps: ['ground'] }],
+    ['vdd', 'VDD', { type: 'power-5v', caps: ['power'], voltage: 5 }],
+    ['v0', 'V0', { type: 'passive' }],
+    ['rs', 'RS', { type: 'digital', caps: ['digital-in'] }],
+    ['rw', 'RW', { type: 'digital', caps: ['digital-in'] }],
+    ['e', 'E', { type: 'digital', caps: ['digital-in'] }],
+    ['d0', 'D0', { type: 'digital', caps: ['digital-in'] }],
+    ['d1', 'D1', { type: 'digital', caps: ['digital-in'] }],
+    ['d2', 'D2', { type: 'digital', caps: ['digital-in'] }],
+    ['d3', 'D3', { type: 'digital', caps: ['digital-in'] }],
+    ['d4', 'D4', { type: 'digital', caps: ['digital-in'] }],
+    ['d5', 'D5', { type: 'digital', caps: ['digital-in'] }],
+    ['d6', 'D6', { type: 'digital', caps: ['digital-in'] }],
+    ['d7', 'D7', { type: 'digital', caps: ['digital-in'] }],
+    ['a', 'A', { type: 'power-5v', caps: ['power'], voltage: 5 }],
+    ['k', 'K', { type: 'ground', caps: ['ground'] }],
+  ];
+  const pitch = 2.54;
+  const originX = (widthMm - (header.length - 1) * pitch) / 2;
+  return def(
+    id, name, 'Displays', widthMm, heightMm, 'lcd-parallel',
+    header.map(([pinId, label, spec], i) => pin(pinId, label, originX + i * pitch, 2.0, spec)),
+    'simulated',
+    {
+      simulationAdapterId: 'sim.lcd-parallel',
+      description:
+        `Character LCD wired straight to GPIOs — the LiquidCrystal(rs, en, d4, d5, d6, d7) build. ` +
+        `The HD44780 latches on the falling edge of E and reads whatever RS and the data lines hold at that ` +
+        `instant, so the four-bit initialisation dance is real: skip it and the panel stays blank, exactly as ` +
+        `on a breadboard. Wire all eight data lines and it runs eight-bit, one byte per pulse. ${columns}x${rows} ` +
+        `characters at their real DDRAM addresses. R/W is wired but the busy-flag read path is not modelled ` +
+        `(every common library delays instead of polling), and V0 contrast and the backlight pins are power ` +
+        `rather than signal. Custom CGRAM glyphs are accepted but not rendered.`,
+    },
+  );
+}
+
+export const LCD1602_PARALLEL = parallelLcd('comp.lcd1602-parallel', 'LCD 16×2 (parallel)', 16, 2, 80, 36);
+export const LCD2004_PARALLEL = parallelLcd('comp.lcd2004-parallel', 'LCD 20×4 (parallel)', 20, 4, 98, 60);
+
 export const OLED = def(
   'comp.oled', 'OLED 128×64 (SSD1306)', 'Displays', 27, 27, 'oled',
   [
@@ -897,7 +955,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   PUSH_BUTTON, TOGGLE_SWITCH, POTENTIOMETER,
   BUZZER, SPEAKER, RELAY,
   SERVO, DC_MOTOR, STEPPER, MOTOR_DRIVER,
-  LCD1602, OLED, SH1107_OLED, SEVEN_SEGMENT,
+  LCD1602, LCD1602_PARALLEL, LCD2004_PARALLEL, OLED, SH1107_OLED, SEVEN_SEGMENT,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
   GPS, BLUETOOTH, WIFI_ESP01,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,

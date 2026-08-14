@@ -1265,6 +1265,14 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
     </g>
   )),
   lcd2004: (p) => <CharacterLcdArt {...p} columns={20} rows={4} />,
+  // Both parallel panels share one renderer; the geometry comes from the part's
+  // own footprint, so a 16x2 and a 20x4 are the same drawing at two sizes.
+  'lcd-parallel': (p) =>
+    p.def.id === 'comp.lcd2004-parallel' ? (
+      <CharacterLcdArt {...p} columns={20} rows={4} />
+    ) : (
+      <CharacterLcdArt {...p} columns={16} rows={2} />
+    ),
   max7219: (p) => <LedMatrixArt {...p} />,
   'dip-ic': (p) => <DipIcArt {...p} />,
   'logic-block': (p) => <LogicBlockArt {...p} />,
