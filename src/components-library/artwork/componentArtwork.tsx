@@ -2047,6 +2047,179 @@ function LevelConverterArt({ def }: ArtProps) {
   );
 }
 
+
+// ======================================================= storage and clocks
+//
+// Checkpoint G. Nine parts were falling through to the generic box, and they
+// split into two families: through-hole chips, which are all the same object
+// with a different number printed on it, and breakout modules, which are only
+// distinguishable by what is actually ON the board.
+//
+// The chips reuse the DIP renderer the logic ICs already use. That is the
+// point of having it: a 74HC595 and a 24C256 ARE the same package, and drawing
+// two of them by hand would produce two subtly different packages for no
+// reason. What separates them at a glance is the marking, which is what
+// separates them on a bench too.
+
+/** A small PCB, the common ground of every breakout below. */
+function Breakout({
+  W, H, fill = '#14314a', stroke = '#081726',
+}: { W: number; H: number; fill?: string; stroke?: string }) {
+  return (
+    <>
+      <rect x="1" y="1.5" width={W} height={H} rx="3" fill="rgba(0,0,0,0.34)" />
+      <rect width={W} height={H} rx="3" fill={fill} stroke={stroke} />
+      <rect x={W * 0.04} y={H * 0.05} width={W * 0.92} height={H * 0.18} rx="2" fill="rgba(255,255,255,0.045)" />
+    </>
+  );
+}
+
+/** Gold pads under the pins a definition declares. Never invented positions. */
+function PinPads({ def, r = 1.1 }: { def: ComponentDefinition; r?: number }) {
+  return (
+    <>
+      {def.pins.map((p) => (
+        <g key={p.id}>
+          <circle cx={p.x} cy={p.y} r={r * 1.5} fill="#c8a53f" />
+          <circle cx={p.x} cy={p.y} r={r * 0.62} fill="#1a1d21" />
+        </g>
+      ))}
+    </>
+  );
+}
+
+/** A surface-mount body, for the ICs that sit on a breakout. */
+function SmdBody({
+  x, y, w, h, label, size = 4,
+}: { x: number; y: number; w: number; h: number; label?: string; size?: number }) {
+  return (
+    <>
+      <rect x={x + 0.6} y={y + 0.8} width={w} height={h} rx="1.4" fill="rgba(0,0,0,0.3)" />
+      <rect x={x} y={y} width={w} height={h} rx="1.4" fill="#20252b" stroke="#0a0d11" strokeWidth="0.6" />
+      <rect x={x} y={y} width={w} height={h * 0.34} rx="1.2" fill="rgba(255,255,255,0.07)" />
+      <circle cx={x + w * 0.16} cy={y + h * 0.24} r={Math.min(w, h) * 0.09} fill="#39424c" />
+      {label && (
+        <text x={x + w / 2} y={y + h * 0.66} textAnchor="middle" fontSize={size} fill="#98a4b0" fontFamily="sans-serif">
+          {label}
+        </text>
+      )}
+    </>
+  );
+}
+
+/**
+ * The microSD module: the socket is the whole identity of this part.
+ *
+ * A hinged metal cage with the card slot facing out, a card sitting in it, and
+ * the level-shifter and regulator that every one of these boards carries. The
+ * slot mouth is what you recognise across a desk; the word "SD" is not.
+ */
+function SdCardArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const cage = { x: W * 0.06, y: H * 0.08, w: W * 0.88, h: H * 0.46 };
+  return (
+    <g>
+      <Breakout W={W} H={H} fill="#12354a" />
+      {/* The card, sitting proud of the socket mouth. */}
+      <path
+        d={`M ${cage.x + cage.w * 0.14} ${cage.y - H * 0.05}
+            h ${cage.w * 0.6} l ${cage.w * 0.1} ${H * 0.05}
+            v ${cage.h * 0.5} h ${-cage.w * 0.7} z`}
+        fill="#2a3138"
+        stroke="#12161a"
+        strokeWidth="0.7"
+      />
+      {/* Metal cage over it, which is the recognisable part. */}
+      <rect x={cage.x} y={cage.y} width={cage.w} height={cage.h} rx="2" fill="#9aa4ad" stroke="#5b646c" />
+      <rect x={cage.x} y={cage.y} width={cage.w} height={cage.h * 0.3} rx="2" fill="rgba(255,255,255,0.3)" />
+      {/* Slot mouth. */}
+      <rect x={cage.x + cage.w * 0.1} y={cage.y + cage.h * 0.62} width={cage.w * 0.8} height={cage.h * 0.22} rx="1" fill="#0d1114" />
+      {/* Spring latch and the hinge pips a real cage has. */}
+      <circle cx={cage.x + cage.w * 0.06} cy={cage.y + cage.h * 0.5} r="1.4" fill="#6f7982" />
+      <circle cx={cage.x + cage.w * 0.94} cy={cage.y + cage.h * 0.5} r="1.4" fill="#6f7982" />
+      {/* Level shifter and regulator, which is why these boards are this size. */}
+      <SmdBody x={W * 0.1} y={H * 0.63} w={W * 0.34} h={H * 0.16} />
+      <SmdBody x={W * 0.52} y={H * 0.63} w={W * 0.2} h={H * 0.14} />
+      <PinPads def={def} />
+    </g>
+  );
+}
+
+/**
+ * The DS3231 module: an RTC is recognisable by its battery, not its chip.
+ *
+ * The coin cell holder takes up a third of a real board and is the one feature
+ * that tells you at a glance this thing keeps time when the power is off.
+ */
+function RtcModuleArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const cellR = H * 0.3;
+  return (
+    <g>
+      <Breakout W={W} H={H} fill="#123a2c" stroke="#0a241b" />
+      {/* Coin cell in its holder. */}
+      <circle cx={W * 0.7} cy={H * 0.46} r={cellR * 1.16} fill="#8d959d" stroke="#4d545b" />
+      <circle cx={W * 0.7} cy={H * 0.46} r={cellR} fill="#c3cbd3" stroke="#7b848c" />
+      <circle cx={W * 0.7} cy={H * 0.46} r={cellR * 0.55} fill="rgba(255,255,255,0.35)" />
+      <path d={`M ${W * 0.7 - cellR * 1.3} ${H * 0.46} a ${cellR * 1.3} ${cellR * 1.3} 0 0 1 ${cellR * 0.7} ${-cellR * 1.1}`}
+        fill="none" stroke="#6f7982" strokeWidth="2" />
+      {/* The RTC itself and the crystal beside it. */}
+      <SmdBody x={W * 0.08} y={H * 0.3} w={W * 0.3} h={H * 0.3} label="DS3231" size={3.4} />
+      <rect x={W * 0.09} y={H * 0.66} width={W * 0.16} height={H * 0.12} rx={H * 0.06} fill="#9aa4ad" stroke="#5b646c" strokeWidth="0.5" />
+      <PinPads def={def} />
+    </g>
+  );
+}
+
+/**
+ * The MCP4725 breakout: small, one chip, and deliberately unlike the RTC.
+ *
+ * There is no battery and no crystal, so what is left is a tiny board with a
+ * single package and an address-select jumper — which is what one is.
+ */
+function DacModuleArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  return (
+    <g>
+      <Breakout W={W} H={H} fill="#3a2145" stroke="#1e0f26" />
+      <SmdBody x={W * 0.22} y={H * 0.24} w={W * 0.4} h={H * 0.34} label="4725" size={3.6} />
+      {/* Address jumper: two pads and a bridge, which is how you set A0. */}
+      <rect x={W * 0.7} y={H * 0.28} width={W * 0.16} height={H * 0.1} rx="1" fill="#c8a53f" />
+      <rect x={W * 0.7} y={H * 0.44} width={W * 0.16} height={H * 0.1} rx="1" fill="#c8a53f" />
+      <rect x={W * 0.75} y={H * 0.3} width={W * 0.06} height={H * 0.22} fill="#e6e9ec" opacity="0.5" />
+      <SmdBody x={W * 0.1} y={H * 0.66} w={W * 0.12} h={H * 0.1} />
+      <PinPads def={def} />
+    </g>
+  );
+}
+
+/**
+ * A pin header seen from above: plastic strip with square pins in it.
+ *
+ * Small, and it has to stay small — a header is 2.54 mm per pin and drawing it
+ * bigger would make a connector look like a module.
+ */
+function HeaderArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  return (
+    <g>
+      <rect x="0.8" y="1.2" width={W - 1.6} height={H - 1.6} rx="1.5" fill="rgba(0,0,0,0.3)" />
+      <rect x="0" y="0.4" width={W} height={H - 1.6} rx="1.5" fill="#1a1d21" stroke="#0a0c0e" />
+      <rect x="0" y="0.4" width={W} height={(H - 1.6) * 0.3} rx="1.5" fill="rgba(255,255,255,0.08)" />
+      {def.pins.map((p) => (
+        <g key={p.id}>
+          <rect x={p.x - 1.2} y={(H - 1.6) * 0.28} width="2.4" height={(H - 1.6) * 0.5} fill="#0d1013" />
+          <rect x={p.x - 0.9} y={(H - 1.6) * 0.32} width="1.8" height={(H - 1.6) * 0.42} fill="#d8b24a" />
+        </g>
+      ))}
+    </g>
+  );
+}
+
 // ---------- Batch 2: logic ----------
 
 /**
@@ -2322,6 +2495,21 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   // Restored from the parked visual branch and reconciled against the current
   // simulation: the motors now carry real shaft state, which they did not when
   // these were first drawn.
+  // The through-hole chips share the DIP renderer the logic ICs use, because
+  // a 74HC595 and a 24C256 genuinely ARE the same package: drawing each by
+  // hand would give two subtly different packages for no reason, and what
+  // tells them apart on a bench is the marking, which is what the renderer
+  // already prints.
+  hc595: (p) => <DipIcArt {...p} />,
+  hc165: (p) => <DipIcArt {...p} />,
+  eeprom: (p) => <DipIcArt {...p} />,
+  'spi-flash': (p) => <DipIcArt {...p} />,
+  'generic-ic': (p) => <DipIcArt {...p} />,
+  // Modules, which are only distinguishable by what is actually on the board.
+  'sd-card': (p) => <SdCardArt {...p} />,
+  rtc: (p) => <RtcModuleArt {...p} />,
+  dac: (p) => <DacModuleArt {...p} />,
+  header: (p) => <HeaderArt {...p} />,
   diode: (p) => <DiodeArt {...p} />,
   transistor: (p) => <TransistorArt {...p} />,
   mosfet: (p) => <MosfetArt {...p} />,
