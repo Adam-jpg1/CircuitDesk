@@ -266,8 +266,16 @@ export const SERVO = def(
 export const DC_MOTOR = def(
   'comp.dc-motor', 'DC Motor', 'Motors', 25, 20, 'dc-motor',
   [pin('m1', 'M1', 0.6, 8.0), pin('m2', 'M2', 0.6, 12.0)],
-  'validation',
-  { description: 'Brushed DC motor. Validation-level (needs driver; direct GPIO drive is flagged as over-current).', validationRules: ['motor-needs-driver'] },
+  'simulated',
+  {
+    simulationAdapterId: 'sim.motor',
+    validationRules: ['motor-needs-driver'],
+    description:
+      'Brushed DC motor, rated 6 V. Direction is the sign of the voltage across its terminals and speed is the ' +
+      'magnitude relative to that rating — nothing sets a speed, so a backwards H-bridge runs it backwards, an ' +
+      'unwired terminal stops it, and a duty below about a fifth does not overcome its friction. Direct GPIO ' +
+      'drive is still flagged as over-current. Behavioural: no inertia, no back-EMF, no torque and no load.',
+  },
 );
 
 export const STEPPER = def(
@@ -275,8 +283,16 @@ export const STEPPER = def(
   [
     pin('in1', 'IN1', 0.6, 9.0), pin('in2', 'IN2', 0.6, 13.0), pin('in3', 'IN3', 0.6, 17.0), pin('in4', 'IN4', 0.6, 21.0),
   ],
-  'validation',
-  { description: 'Geared stepper. Validation-level: step sequencing display is not simulated yet.' },
+  'simulated',
+  {
+    simulationAdapterId: 'sim.stepper',
+    description:
+      'A bipolar stepper driven by its four coil lines. Position is where the coils put it: the model matches ' +
+      'the pattern firmware drives against the half-step, full-step and wave sequences and moves one step per ' +
+      'adjacent transition. Reverse the sequence and it turns the other way; skip a phase and it does not ' +
+      'move, and the skip is counted rather than credited. De-energise every coil and it holds nothing. ' +
+      'Behavioural: no torque, no missed steps under load, no coil current.',
+  },
 );
 
 export const MOTOR_DRIVER = def(
@@ -294,8 +310,16 @@ export const MOTOR_DRIVER = def(
     pin('out1', 'OUT1', 0.4, 8.0), pin('out2', 'OUT2', 0.4, 14.0),
     pin('out3', 'OUT3', 42.6, 8.0), pin('out4', 'OUT4', 42.6, 14.0),
   ],
-  'validation',
-  { description: 'Dual H-bridge driver. Wiring/validation-level.' },
+  'simulated',
+  {
+    simulationAdapterId: 'sim.motor-driver',
+    description:
+      'A dual H-bridge. Each half drives its two outputs from its two inputs, but only while that half\'s ' +
+      'enable is high — with the enable low the outputs are not driven at all and the motor coasts, which is ' +
+      'why a sketch that forgets ENA gets a motor that never turns however it drives IN1 and IN2. The outputs ' +
+      'swing to the motor supply, so no motor supply means no output whatever the logic side does. ' +
+      'Behavioural: no bridge drop, no shoot-through, no current limit and no thermal shutdown.',
+  },
 );
 
 // ---------- Displays ----------
@@ -689,6 +713,151 @@ export const TM1637 = def(
       'holds a whole frame, so unlike a bare multiplexed display there is no scan to average. Its keypad ' +
       'scanning half is not modelled (no common breakout wires it), nor is display-test mode, and brightness ' +
       'is stored and reported rather than shown as luminance.',
+  },
+);
+
+// ---------- Motors, drivers and actuators ----------
+
+/** A two-terminal motor. Direction and speed come from the terminals, always. */
+function dcMotorPart(
+  id: string,
+  name: string,
+  widthMm: number,
+  heightMm: number,
+  description: string,
+  extra: [string, string, Partial<PinSpec>][] = [],
+): ComponentDefinition {
+  return def(
+    id, name, 'Motors', widthMm, heightMm, 'dc-motor',
+    [
+      pin('m1', 'M+', widthMm * 0.35, heightMm - 0.6, { type: 'passive' }),
+      pin('m2', 'M−', widthMm * 0.65, heightMm - 0.6, { type: 'passive' }),
+      ...extra.map(([pid, label, spec], i) =>
+        pin(pid, label, widthMm * (0.2 + i * 0.2), 0.6, spec),
+      ),
+    ],
+    'simulated',
+    { simulationAdapterId: 'sim.motor', description },
+  );
+}
+
+export const GEARMOTOR = dcMotorPart(
+  'comp.gearmotor', 'Gearmotor (TT, 1:48)', 20, 14,
+  'A geared DC motor. Direction is the sign of the voltage across its terminals and speed is the magnitude ' +
+    'relative to its 6 V rating, so a backwards H-bridge runs it backwards and a missing ground stops it. Below ' +
+    'about a fifth of its rating it does not turn at all, which is why a low PWM duty does nothing. Behavioural: ' +
+    'there is no inertia, no back-EMF, no torque and no load — those need the analog solver.',
+);
+
+export const VIBRATION_MOTOR = dcMotorPart(
+  'comp.vibration-motor', 'Vibration motor', 10, 10,
+  'A coin vibration motor, rated 3 V. Same model as any other brushed motor — direction and magnitude from the ' +
+    'terminals — which matters here because it is usually driven straight from a transistor and a 5 V drive is ' +
+    'well past its rating. Behavioural: no inertia, no back-EMF, no torque.',
+);
+
+export const DC_MOTOR_ENCODER = dcMotorPart(
+  'comp.dc-motor-encoder', 'DC motor with quadrature encoder', 24, 16,
+  'A gearmotor with a quadrature encoder on the shaft. Both channels are derived from the shaft position the ' +
+    'motor model integrates, so a motor that is not turning produces no pulses and one running backwards ' +
+    'produces them in the other order — which is what lets firmware tell direction, and what a pulse-count ' +
+    'property could never do. Eleven pulses per revolution per channel. Behavioural: no inertia or load.',
+  [
+    ['enca', 'A', { type: 'digital', caps: ['digital-out'] }],
+    ['encb', 'B', { type: 'digital', caps: ['digital-out'] }],
+    ['evcc', 'V+', { type: 'power-5v', caps: ['power'], voltage: 5 }],
+    ['egnd', 'GND', { type: 'ground', caps: ['ground'] }],
+  ],
+);
+
+export const SOLENOID = def(
+  'comp.solenoid', 'Solenoid (12V)', 'Motors', 16, 24, 'solenoid',
+  [pin('p1', '+', 5, 23.4, { type: 'passive' }), pin('p2', '−', 11, 23.4, { type: 'passive' })],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.motor',
+    description:
+      'A pull-type solenoid, rated 12 V. It is energised when there is enough voltage across it and released ' +
+      'otherwise, which is the whole of its behaviour. Behavioural: stroke, force, coil inductance and the ' +
+      'flyback a switching transistor needs are not modelled — the diode is still worth wiring, and validation ' +
+      'still asks for it.',
+  },
+);
+
+/** A stepper whose four coils firmware drives directly. */
+function coilStepper(id: string, name: string, steps: number, description: string): ComponentDefinition {
+  return def(
+    id, name, 'Motors', 26, 26, 'stepper',
+    ['in1', 'in2', 'in3', 'in4'].map((pid, i) =>
+      pin(pid, pid.toUpperCase(), 4 + i * 6, 25.4, { type: 'passive', caps: ['digital-in'] }),
+    ),
+    'simulated',
+    { simulationAdapterId: 'sim.stepper', description },
+  );
+}
+
+export const STEPPER_28BYJ = coilStepper(
+  'comp.stepper-28byj', '28BYJ-48 Stepper (5V)', 4096,
+  'The geared unipolar stepper every kit ships. Position is where the coils put it: the model matches the ' +
+    'pattern firmware drives against the half-step, full-step and wave sequences and moves one step per ' +
+    'adjacent transition. Drive the sequence backwards and it turns backwards; skip a phase and it does not ' +
+    'move, and the skip is counted rather than credited as progress; energise nothing and it holds nothing. ' +
+    '4096 steps per output revolution through its gearbox. Behavioural: no torque, no missed steps under load, ' +
+    'no coil current.',
+);
+
+export const A4988 = def(
+  'comp.a4988', 'A4988 Stepper Driver', 'Motors', 20, 20, 'dip-ic',
+  [
+    pin('en', 'EN', 1.2, 3, { type: 'digital', caps: ['digital-in'] }),
+    pin('ms1', 'MS1', 1.2, 5.5, { type: 'digital', caps: ['digital-in'] }),
+    pin('ms2', 'MS2', 1.2, 8, { type: 'digital', caps: ['digital-in'] }),
+    pin('ms3', 'MS3', 1.2, 10.5, { type: 'digital', caps: ['digital-in'] }),
+    pin('rst', 'RST', 1.2, 13, { type: 'digital', caps: ['digital-in'] }),
+    pin('slp', 'SLP', 1.2, 15.5, { type: 'digital', caps: ['digital-in'] }),
+    pin('step', 'STEP', 1.2, 18, { type: 'digital', caps: ['digital-in'] }),
+    pin('dir', 'DIR', 18.8, 18, { type: 'digital', caps: ['digital-in'] }),
+    pin('gnd', 'GND', 18.8, 15.5, { type: 'ground', caps: ['ground'] }),
+    pin('vdd', 'VDD', 18.8, 13, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('1b', '1B', 18.8, 10.5, { type: 'passive' }),
+    pin('1a', '1A', 18.8, 8, { type: 'passive' }),
+    pin('2a', '2A', 18.8, 5.5, { type: 'passive' }),
+    pin('2b', '2B', 18.8, 3, { type: 'passive' }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.stepper',
+    description:
+      'A step/direction stepper driver. It sequences the coils itself, so the model is what happens on its ' +
+      'logic side: one microstep per rising edge on STEP, in the direction DIR is holding. ENABLE is active ' +
+      'low and an unwired one reads as enabled, because the board pulls it down — but drive it high and the ' +
+      'pulses are counted and ignored, which is the answer to "I sent ten thousand steps and nothing moved". ' +
+      'MS1-MS3 select the microstep divisor, so the same pulse count travels a different distance. ' +
+      'Behavioural: the current limit its potentiometer sets, torque, missed steps and thermal shutdown are ' +
+      'not modelled.',
+  },
+);
+
+export const ULN2003 = def(
+  'comp.uln2003', 'ULN2003 Darlington Array', 'Motors', 20, 20, 'dip-ic',
+  [
+    ...Array.from({ length: 7 }, (_, i) =>
+      pin(`in${i + 1}`, `IN${i + 1}`, 1.2, 2.5 + i * 2.4, { type: 'digital', caps: ['digital-in'] }),
+    ),
+    pin('gnd', 'GND', 1.2, 19.3, { type: 'ground', caps: ['ground'] }),
+    ...Array.from({ length: 7 }, (_, i) =>
+      pin(`out${i + 1}`, `OUT${i + 1}`, 18.8, 2.5 + i * 2.4, { type: 'passive', caps: ['digital-out'] }),
+    ),
+    pin('com', 'COM', 18.8, 19.3, { type: 'passive' }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.uln2003',
+    description:
+      'Seven Darlington sinks. A high on an input pulls the matching output to ground; a low leaves it ' +
+      'floating. It cannot source — which is not a limitation to work around but the reason a 28BYJ-48 wired ' +
+      'to one has its common on the supply rather than on ground, and why wiring it the other way produces a ' +
+      'stepper that does nothing. The flyback diodes to COM are not modelled as clamps.',
   },
 );
 
@@ -1232,6 +1401,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   PUSH_BUTTON, TOGGLE_SWITCH, POTENTIOMETER,
   BUZZER, SPEAKER, RELAY,
   SERVO, DC_MOTOR, STEPPER, MOTOR_DRIVER,
+  GEARMOTOR, VIBRATION_MOTOR, DC_MOTOR_ENCODER, SOLENOID, STEPPER_28BYJ, A4988, ULN2003,
   LCD1602, LCD1602_PARALLEL, LCD2004_PARALLEL, OLED, SH1107_OLED, SEVEN_SEGMENT,
   SEVEN_SEGMENT_CA, SEVEN_SEGMENT_2, SEVEN_SEGMENT_4, LED_MATRIX_8X8, TM1637,
   NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331, EPAPER29,
