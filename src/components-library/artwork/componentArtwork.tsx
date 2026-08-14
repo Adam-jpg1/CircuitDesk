@@ -105,8 +105,41 @@ function ResistorArt({ def, instance }: ArtProps) {
   );
 }
 
+/**
+ * The cap of a tactile switch, up or down.
+ *
+ * Shared by the 12 mm and 6 mm buttons because they are the same part at two
+ * sizes, and because the pressed state has to be the same gesture on both. It
+ * used to be a four-tenths-of-a-millimetre radius change — under two pixels at
+ * 1:1 — which meant that at the zoom the canvas opens at, pressing a button
+ * looked exactly like not pressing it. A cap that is down now loses its
+ * highlight, gains a ring of shadow where it has sunk into the housing, and
+ * darkens, which is what a depressed cap looks like from above.
+ */
+function TactileCap({ cx, cy, r, pressed }: { cx: number; cy: number; r: number; pressed: boolean }) {
+  return (
+    <g>
+      {/* The well the cap travels in, visible around it once it is down. */}
+      <circle cx={cx} cy={cy} r={r * 1.24} fill="#0f1419" stroke="#0a0d11" strokeWidth="0.6" />
+      <circle
+        cx={cx}
+        cy={cy + (pressed ? r * 0.06 : -r * 0.06)}
+        r={pressed ? r * 0.86 : r}
+        fill={pressed ? '#171d24' : '#39424c'}
+        stroke="#0d1117"
+        strokeWidth="0.8"
+      />
+      {pressed ? (
+        <circle cx={cx} cy={cy} r={r * 0.86} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={r * 0.24} />
+      ) : (
+        <circle cx={cx - r * 0.3} cy={cy - r * 0.32} r={r * 0.3} fill="rgba(255,255,255,0.2)" />
+      )}
+    </g>
+  );
+}
+
 function ButtonArt({ def, visual }: ArtProps) {
-  const pressed = Boolean(visual?.pressed);
+  const pressed = Boolean(visual?.pressed ?? visual?.contacts?.['']);
   const W = def.widthMm * MM;
   return (
     <g>
@@ -115,8 +148,7 @@ function ButtonArt({ def, visual }: ArtProps) {
       ))}
       <rect x={1.2 * MM} y={1.2 * MM} width={W - 2.4 * MM} height={W - 2.4 * MM} rx="4" fill="#20262d" stroke="#0d1117" />
       <rect x={1.2 * MM} y={1.2 * MM} width={W - 2.4 * MM} height={(W - 2.4 * MM) / 2} rx="4" fill="rgba(255,255,255,0.06)" />
-      <circle cx={W / 2} cy={W / 2} r={(pressed ? 2.8 : 3.2) * MM} fill={pressed ? '#141a1f' : '#2c333b'} stroke="#0d1117" strokeWidth="1" />
-      <circle cx={W / 2 - 0.8 * MM} cy={W / 2 - 0.8 * MM} r={0.9 * MM} fill="rgba(255,255,255,0.12)" />
+      <TactileCap cx={W / 2} cy={W / 2} r={3.2 * MM} pressed={pressed} />
     </g>
   );
 }
@@ -1261,8 +1293,7 @@ function PushButton6mmArt({ def, visual }: ArtProps) {
       ))}
       <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={W - 1 * MM} rx="2.5" fill="#20262d" stroke="#0d1117" />
       <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={(W - 1 * MM) / 2} rx="2.5" fill="rgba(255,255,255,0.06)" />
-      <circle cx={W / 2} cy={W / 2} r={(pressed ? 1.5 : 1.8) * MM} fill={pressed ? '#141a1f' : '#2c333b'} stroke="#0d1117" strokeWidth="0.8" />
-      <circle cx={W / 2 - 0.45 * MM} cy={W / 2 - 0.45 * MM} r={0.5 * MM} fill="rgba(255,255,255,0.12)" />
+      <TactileCap cx={W / 2} cy={W / 2} r={1.9 * MM} pressed={pressed} />
     </g>
   );
 }
@@ -1301,6 +1332,18 @@ function LimitSwitchArt({ def, visual }: ArtProps) {
     <g>
       <rect x={0.4 * MM} y={2.4 * MM} width={W - 0.8 * MM} height={H - 4 * MM} rx="1.5" fill="#1d232a" stroke="#0d1117" />
       <rect x={1.2 * MM} y={3.2 * MM} width={W - 2.4 * MM} height={2 * MM} rx="0.8" fill="rgba(255,255,255,0.06)" />
+      {/* The plunger under the lever, which is the part the lever presses and
+          the thing that tells you this is a microswitch and not a lever. */}
+      <rect
+        x={W * 0.5 - 0.7 * MM}
+        y={(pressed ? 2.5 : 1.9) * MM}
+        width={1.4 * MM}
+        height={(pressed ? 0.9 : 1.5) * MM}
+        rx="0.4"
+        fill={pressed ? '#4b545d' : '#b9c1c9'}
+        stroke="#6b747d"
+        strokeWidth="0.5"
+      />
       {/* The lever: hinged at the left, deflected onto the body when actuated. */}
       <path
         d={`M ${1.6 * MM} ${3.0 * MM} L ${(W - 2 * MM)} ${(pressed ? 2.9 : 0.9) * MM}`}
@@ -1310,8 +1353,23 @@ function LimitSwitchArt({ def, visual }: ArtProps) {
         fill="none"
       />
       <circle cx={1.6 * MM} cy={3.0 * MM} r={0.7 * MM} fill="#9aa4ad" />
-      <circle cx={W - 2 * MM} cy={(pressed ? 2.9 : 0.9) * MM} r={0.9 * MM} fill="#8b9199" />
-      <text x={W / 2} y={H - 3.2 * MM} textAnchor="middle" fontSize={2.1 * MM} fill="#7c858e" fontFamily="sans-serif">
+      {/* The roller on the tip. */}
+      <circle
+        cx={W - 2 * MM}
+        cy={(pressed ? 2.9 : 0.9) * MM}
+        r={0.9 * MM}
+        fill="#c9ccd1"
+        stroke="#6b747d"
+        strokeWidth="0.5"
+      />
+      <text
+        x={W / 2}
+        y={H - 3.2 * MM}
+        textAnchor="middle"
+        fontSize={2.1 * MM}
+        fill={pressed ? '#7fb2e8' : '#7c858e'}
+        fontFamily="sans-serif"
+      >
         {pressed ? 'NO' : 'NC'}
       </text>
       {[3.0, 8.0, 13.0].map((x, i) => (
@@ -1327,13 +1385,23 @@ function DipSwitchArt({ def, instance, visual }: ArtProps) {
   // Poles come from the same hotspots the canvas hit-tests, so the actuator is
   // always centred in the slot the pointer is aimed at.
   const poles = interactiveHotspots(def, instance);
+  // The window the actuators travel in, with the pole numbers printed on the
+  // case below it. The part is 9.5 mm tall, so the numbers only fit because the
+  // window stops short of the bottom edge — and they matter: a bank of white
+  // nubs tells you the pattern but not which pole is which.
+  const win = { x: 1.1 * MM, y: 2.0 * MM, w: W - 2.2 * MM, h: H - 5.6 * MM };
   return (
     <g>
+      <rect x="0.8" y="1" width={W - 1.2 * MM} height={H - 2 * MM} rx="1.2" fill="rgba(0,0,0,0.35)" transform={`translate(${0.6 * MM} ${1.0 * MM})`} />
       <rect x={0.6 * MM} y={1.0 * MM} width={W - 1.2 * MM} height={H - 2 * MM} rx="1.2" fill="#2f6ba8" stroke="#1d4670" />
-      <rect x={1.1 * MM} y={1.9 * MM} width={W - 2.2 * MM} height={H - 3.8 * MM} rx="0.8" fill="#1e2833" />
+      <rect x={win.x} y={win.y} width={win.w} height={win.h} rx="0.8" fill="#1e2833" />
+      {/* The ON end of the travel, marked on the window the way the case marks
+          it — the nub positions only mean something once you know which end is
+          which. */}
+      <rect x={win.x} y={win.y} width={win.w} height={1.1} fill="rgba(255,255,255,0.5)" />
       {poles.map((spot) => {
         const on = engagedIn(visual, spot.key);
-        const nub = dipActuatorRect(spot, on);
+        const nub = dipActuatorRect(spot, on, win);
         return (
           <g key={spot.key}>
             <rect
@@ -1342,24 +1410,25 @@ function DipSwitchArt({ def, instance, visual }: ArtProps) {
               width={nub.w}
               height={nub.h}
               rx="0.4"
-              fill={on ? '#f2f4f6' : '#b3bac1'}
-              stroke="#7d858d"
+              fill={on ? '#f6f8fa' : '#98a1a9'}
+              stroke="#5f676e"
               strokeWidth="0.5"
             />
+            {on && <rect x={nub.x} y={nub.y} width={nub.w} height={nub.h * 0.35} rx="0.4" fill="rgba(255,255,255,0.55)" />}
             <text
               x={spot.x + spot.w / 2}
-              y={H - 0.9 * MM}
+              y={H - 1.55 * MM}
               textAnchor="middle"
-              fontSize={1.7 * MM}
-              fill="#cfd6dd"
+              fontSize={2.4 * MM}
+              fill={on ? '#ffffff' : '#c6d2dd'}
               fontFamily="sans-serif"
+              fontWeight={600}
             >
               {spot.cap}
             </text>
           </g>
         );
       })}
-      <text x={2.0 * MM} y={1.75 * MM} fontSize={1.5 * MM} fill="rgba(255,255,255,0.75)" fontFamily="sans-serif">ON</text>
     </g>
   );
 }
@@ -1374,27 +1443,41 @@ function RotaryEncoderArt({ def, visual }: ArtProps) {
     <g>
       <rect x={0.6 * MM} y={0.6 * MM} width={W - 1.2 * MM} height={H - 3 * MM} rx="1.5" fill="#1c5aa8" stroke="#123f78" />
       <rect x={2.4 * MM} y={4.5 * MM} width={W - 4.8 * MM} height={13 * MM} rx="1" fill="#c9ccd1" stroke="#8b9199" />
-      <circle cx={cx} cy={cy} r={5.2 * MM} fill="#2a3037" stroke="#12171c" strokeWidth="1" />
+      {/* The plated can the shaft comes out of, then the shaft itself. Without
+          the can the encoder was a dark disc on a blue board, which is also
+          what a dozen other modules look like at 1:1. */}
+      <circle cx={cx} cy={cy} r={6.0 * MM} fill="#20262d" stroke="#12171c" strokeWidth="1" />
+      <circle cx={cx} cy={cy} r={5.2 * MM} fill="#3f4750" stroke="#12171c" strokeWidth="1" />
+      <circle cx={cx - 1.3 * MM} cy={cy - 1.6 * MM} r={3.2 * MM} fill="rgba(255,255,255,0.07)" />
       {/* Pressed reads as the shaft sinking: a smaller, darker cap with a
           highlight ring around it, which is legible at 1:1 in a way that a
           two-tenths-of-a-millimetre radius change is not. */}
-      {clicked && <circle cx={cx} cy={cy} r={5.2 * MM} fill="none" stroke="#7fb2e8" strokeWidth="1.6" />}
-      <circle cx={cx} cy={cy} r={(clicked ? 3.0 : 3.9) * MM} fill={clicked ? '#12171c' : '#3a434d'} />
-      {/* Knurling, so it reads as a shaft rather than a dot. */}
-      {Array.from({ length: 12 }, (_, i) => {
-        const angle = (i / 12) * Math.PI * 2;
+      {clicked && <circle cx={cx} cy={cy} r={5.9 * MM} fill="none" stroke="#7fb2e8" strokeWidth="1.6" />}
+      {/* Knurling on the flank of the shaft, drawn as flutes rather than
+          spokes — a real D-shaft is ridged all the way round its edge. */}
+      {Array.from({ length: 16 }, (_, i) => {
+        const angle = (i / 16) * Math.PI * 2;
         return (
           <line
             key={i}
-            x1={cx + Math.cos(angle) * 3.9 * MM}
-            y1={cy + Math.sin(angle) * 3.9 * MM}
-            x2={cx + Math.cos(angle) * 5.0 * MM}
-            y2={cy + Math.sin(angle) * 5.0 * MM}
-            stroke="rgba(255,255,255,0.22)"
-            strokeWidth="0.9"
+            x1={cx + Math.cos(angle) * 3.6 * MM}
+            y1={cy + Math.sin(angle) * 3.6 * MM}
+            x2={cx + Math.cos(angle) * 5.1 * MM}
+            y2={cy + Math.sin(angle) * 5.1 * MM}
+            stroke="rgba(0,0,0,0.45)"
+            strokeWidth="1.1"
           />
         );
       })}
+      <circle cx={cx} cy={cy} r={(clicked ? 2.7 : 3.6) * MM} fill={clicked ? '#12171c' : '#2a3037'} stroke="#12171c" />
+      {/* The flat of the D-shaft, so the knob has an orientation you can see. */}
+      <rect
+        x={cx - 2.4 * MM}
+        y={cy - (clicked ? 2.7 : 3.6) * MM}
+        width={4.8 * MM}
+        height={1.1 * MM}
+        fill="rgba(255,255,255,0.16)"
+      />
       <text x={cx} y={H - 3.6 * MM} textAnchor="middle" fontSize={2.2 * MM} fill="#cfe0f4" fontFamily="sans-serif">KY-040</text>
       {[3.0, 7.5, 12.0, 16.5].map((x, i) => (
         <line key={i} x1={x * MM} y1={H - 2 * MM} x2={x * MM} y2={H} stroke="#9aa4ad" strokeWidth="2" />
@@ -1407,19 +1490,47 @@ function JoystickArt({ def, visual }: ArtProps) {
   const clicked = engagedIn(visual, 'sw');
   const W = def.widthMm * MM;
   const H = def.heightMm * MM;
-  const cx = W / 2;
-  const cy = 13 * MM;
+  const gimbalX = W / 2;
+  const gimbalY = 13 * MM;
+  // The stick sits where the wipers say it does. These are the same two numbers
+  // the module imposes on its VRx/VRy pins, so a stick drawn hard over is a
+  // stick the firmware is reading as hard over — there is no separate animation
+  // and nothing moves that the ADC would not see move. A part with no published
+  // axes (unpowered, or not yet simulated) draws centred, which is where a real
+  // stick's springs hold it.
+  const axes = visual?.axes;
+  const throwR = 4.6 * MM;
+  const dx = ((axes?.x ?? 0.5) - 0.5) * 2 * throwR;
+  const dy = ((axes?.y ?? 0.5) - 0.5) * 2 * throwR;
+  const cx = gimbalX + dx;
+  const cy = gimbalY + dy;
+  const deflected = Math.hypot(dx, dy) > 0.5;
   return (
     <g>
       <rect x={0.6 * MM} y={0.6 * MM} width={W - 1.2 * MM} height={H - 3 * MM} rx="1.5" fill="#1c5aa8" stroke="#123f78" />
       {/* Gimbal housing */}
       <rect x={4 * MM} y={2.5 * MM} width={W - 8 * MM} height={21 * MM} rx="2" fill="#2a3037" stroke="#12171c" />
-      <circle cx={cx} cy={cy} r={9.5 * MM} fill="#20262d" stroke="#12171c" strokeWidth="1.2" />
+      <circle cx={gimbalX} cy={gimbalY} r={9.5 * MM} fill="#20262d" stroke="#12171c" strokeWidth="1.2" />
+      {/* The opening the shaft moves in, so the offset reads as travel rather
+          than as a cap drawn slightly off centre. */}
+      <circle cx={gimbalX} cy={gimbalY} r={throwR + 1.4 * MM} fill="#0e1319" stroke="#12171c" />
       {/* Clicked reads as the cap pushed in: smaller, darker, ringed. */}
       {clicked && <circle cx={cx} cy={cy} r={9.5 * MM} fill="none" stroke="#7fb2e8" strokeWidth="1.8" />}
+      {/* The shaft, leaning out of the gimbal towards the cap. */}
+      {deflected && (
+        <line
+          x1={gimbalX}
+          y1={gimbalY}
+          x2={cx}
+          y2={cy}
+          stroke="#12171c"
+          strokeWidth={3.2 * MM}
+          strokeLinecap="round"
+        />
+      )}
       <circle cx={cx} cy={cy} r={(clicked ? 5.4 : 6.8) * MM} fill={clicked ? '#0b0f13' : '#171d23'} stroke="#0b0f13" />
       <ellipse cx={cx} cy={cy - 1.5 * MM} rx={(clicked ? 3.4 : 4.6) * MM} ry={(clicked ? 2.2 : 3.2) * MM} fill="rgba(255,255,255,0.09)" />
-      <text x={cx} y={H - 3.4 * MM} textAnchor="middle" fontSize={2.2 * MM} fill="#cfe0f4" fontFamily="sans-serif">JOYSTICK</text>
+      <text x={W / 2} y={H - 3.4 * MM} textAnchor="middle" fontSize={2.2 * MM} fill="#cfe0f4" fontFamily="sans-serif">JOYSTICK</text>
       {[6, 11, 16, 21, 26].map((x, i) => (
         <line key={i} x1={x * MM} y1={H - 2 * MM} x2={x * MM} y2={H} stroke="#9aa4ad" strokeWidth="2" />
       ))}
@@ -1439,32 +1550,98 @@ function KeyMatrixArt({ def, instance, visual }: ArtProps) {
   const keys = interactiveHotspots(def, instance);
   if (keys.length === 0) return <GenericBoxArt def={def} instance={instance} visual={visual} />;
 
+  // The membrane sheet the keys are embossed in: everything above the header
+  // band. Drawn from the keys' own extent so it fits whatever grid the part is.
+  const top = Math.min(...keys.map((k) => k.y));
+  const bottom = Math.max(...keys.map((k) => k.y + k.h));
+  const left = Math.min(...keys.map((k) => k.x));
+  const right = Math.max(...keys.map((k) => k.x + k.w));
+  const margin = Math.min(2.2 * MM, (W - (right - left)) / 2);
+  const sheet = {
+    x: left - margin,
+    y: top - margin,
+    w: right - left + margin * 2,
+    h: bottom - top + margin * 2,
+  };
+  // Where the flat tail leaves the sheet on a real membrane keypad: at the pin
+  // edge, over the pads the footprint already places.
+  const tailY = sheet.y + sheet.h;
+
   return (
     <g>
-      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={H - 1 * MM} rx="3" fill="#20262d" stroke="#0d1117" />
-      <rect x={1.6 * MM} y={1.6 * MM} width={W - 3.2 * MM} height={H - 3.2 * MM} rx="2" fill="#2b323a" />
+      {/* Backing plate */}
+      <rect x="1" y="1.5" width={W} height={H} rx="3" fill="rgba(0,0,0,0.35)" />
+      <rect width={W} height={H} rx="3" fill="#171c22" stroke="#0d1117" />
+      {/* The membrane itself: a slightly proud sheet with a printed border, so
+          the keys sit in something rather than floating on the body. */}
+      <rect x={sheet.x} y={sheet.y} width={sheet.w} height={sheet.h} rx={1.5 * MM} fill="#2b323a" stroke="#3d4650" />
+      <rect
+        x={sheet.x + 0.8 * MM}
+        y={sheet.y + 0.8 * MM}
+        width={sheet.w - 1.6 * MM}
+        height={sheet.h - 1.6 * MM}
+        rx={1.2 * MM}
+        fill="none"
+        stroke="rgba(255,255,255,0.08)"
+        strokeWidth="0.8"
+      />
+      {/* The flat flex tail down to the header. */}
+      <rect
+        x={W / 2 - sheet.w * 0.22}
+        y={tailY - 0.4 * MM}
+        width={sheet.w * 0.44}
+        height={Math.max(2 * MM, H - tailY - 1.6 * MM)}
+        rx="1"
+        fill="#3a3223"
+        stroke="#241f14"
+      />
       {keys.map((k) => {
         const down = engagedIn(visual, k.key);
+        // A pressed membrane key goes down into its well: it loses the raised
+        // highlight, gains an inner shadow and shifts a fraction. At 1:1 that
+        // reads instantly, where a border colour change did not.
+        const dy = down ? k.h * 0.06 : 0;
         return (
           <g key={k.key}>
+            {/* The well the key is embossed out of. */}
+            <rect
+              x={k.x - k.w * 0.04}
+              y={k.y - k.h * 0.04}
+              width={k.w * 1.08}
+              height={k.h * 1.08}
+              rx={k.radius * 1.2}
+              fill="rgba(0,0,0,0.35)"
+            />
             <rect
               x={k.x}
-              y={k.y}
+              y={k.y + dy}
               width={k.w}
               height={k.h}
               rx={k.radius}
-              fill={down ? '#4d5a68' : '#39424c'}
+              fill={down ? '#1f262e' : '#39424c'}
               stroke={down ? '#7fb2e8' : '#1a1f25'}
-              strokeWidth={down ? 1.4 : 0.8}
+              strokeWidth={down ? 1.6 : 0.8}
             />
-            <rect x={k.x} y={k.y} width={k.w} height={k.h * 0.42} rx={k.radius} fill="rgba(255,255,255,0.07)" />
+            {down ? (
+              <rect
+                x={k.x}
+                y={k.y + dy}
+                width={k.w}
+                height={k.h * 0.4}
+                rx={k.radius}
+                fill="rgba(0,0,0,0.55)"
+              />
+            ) : (
+              <rect x={k.x} y={k.y} width={k.w} height={k.h * 0.42} rx={k.radius} fill="rgba(255,255,255,0.09)" />
+            )}
             <text
               x={k.x + k.w / 2}
-              y={k.y + k.h * 0.66}
+              y={k.y + dy + k.h * 0.68}
               textAnchor="middle"
-              fontSize={k.h * 0.46}
-              fill={down ? '#eaf3ff' : '#c3ccd5'}
+              fontSize={k.h * 0.5}
+              fill={down ? '#eaf3ff' : '#d5dde5'}
               fontFamily="sans-serif"
+              fontWeight={600}
             >
               {k.cap.trim()}
             </text>
