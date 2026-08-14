@@ -234,15 +234,20 @@ function SevenSegArt({ def, visual }: ArtProps) {
   const scale = Math.min(W / 14, H / 21);
   return (
     <g>
-      <rect width={W} height={H} rx="3" fill="#15181c" stroke="#000" />
+      {/* The same body as the multi-digit modules next to it in the library:
+          against the canvas the old near-black slab had almost no presence, so
+          a single digit and a four-digit module did not look like the same
+          family of part. */}
+      <rect x="1" y="1.5" width={W} height={H} rx="3" fill="rgba(0,0,0,0.35)" />
+      <rect width={W} height={H} rx="3" fill="#1a1210" stroke="#2e2320" />
       <g transform={`translate(${W / 2 - 7 * scale} ${H / 2 - 10.5 * scale}) scale(${scale})`}>
         {Object.entries(SEG_SHAPES).map(([k, d]) => (
-          <path key={k} d={d} fill={segs[k] ? '#ff4136' : '#2a1210'} opacity={segs[k] ? 1 : 0.85} />
+          <path key={k} d={d} fill={segs[k] ? '#ff4b3e' : '#2a1614'} opacity={segs[k] ? 1 : 1} />
         ))}
-        <circle cx="13" cy="18.5" r="0.9" fill={segs.dp ? '#ff4136' : '#2a1210'} />
+        <circle cx="13" cy="18.5" r="0.9" fill={segs.dp ? '#ff4b3e' : '#2a1614'} />
       </g>
       {segs && Object.values(segs).some(Boolean) && (
-        <rect width={W} height={H} rx="3" fill="#ff4136" opacity="0.05" />
+        <rect width={W} height={H} rx="3" fill="#ff4b3e" opacity="0.05" />
       )}
     </g>
   );
@@ -614,41 +619,89 @@ function RasterPanelArt({ def, visual, round }: ArtProps & { round?: boolean }) 
     setHref(canvas.toDataURL('image/png'));
   }, [raster]);
 
-  // The glass keeps the panel's aspect ratio inside the module outline.
-  const bezel = Math.min(w, h) * 0.06;
-  const availW = w - bezel * 2;
-  const availH = h * 0.82 - bezel * 2;
-  const aspect = raster ? raster.width / raster.height : 1;
+  // The glass keeps the panel's aspect ratio inside the module outline, above
+  // the header band the footprint's pads sit in.
+  const edge = headerEdge(def);
+  const headerH = Math.max(6, h * 0.085);
+  const frame = Math.max(3, Math.min(w, h) * 0.045);
+  const availW = w - frame * 2;
+  const availH = h - headerH - frame * 2;
+  // The panel's native aspect, from the controller's own framebuffer where one
+  // has been published and from the part's declared geometry otherwise, so an
+  // idle panel is the same shape as a running one.
+  const aspect = raster ? raster.width / raster.height : round ? 1 : nativeAspect(def.id);
   let gw = availW;
   let gh = gw / aspect;
   if (gh > availH) {
     gh = availH;
     gw = gh * aspect;
   }
+  if (round) {
+    const d = Math.min(gw, gh);
+    gw = d;
+    gh = d;
+  }
   const gx = (w - gw) / 2;
-  const gy = bezel;
+  const gy = (edge === 'top' ? headerH : 0) + frame + (availH - gh) / 2;
+  const cx = gx + gw / 2;
+  const cy = gy + gh / 2;
+  const clipId = `cd-round-${def.id}`;
 
   return (
     <g>
       <rect x="1" y="1.5" width={w} height={h} rx="4" fill="rgba(0,0,0,0.35)" />
-      <rect width={w} height={h} rx="4" fill="#12161b" stroke="#333c46" />
-      <rect
-        x={gx - 1.5}
-        y={gy - 1.5}
-        width={gw + 3}
-        height={gh + 3}
-        rx={round ? (gw + 3) / 2 : 2}
-        fill="#1b2028"
-        stroke="#39424c"
-      />
+      {/* A round panel gets a round board. Nobody mounts a 1.28" circular
+          display in a square outline, and at 1:1 the outline is most of what
+          tells you which display this is before you read anything. */}
+      {round ? (
+        <>
+          <circle cx={w / 2} cy={cy} r={Math.min(w, h * 0.94) / 2} fill="#12161b" stroke="#333c46" />
+          <circle cx={w / 2} cy={cy} r={Math.min(w, h * 0.94) / 2 - 3} fill="none" stroke="rgba(255,255,255,0.05)" />
+        </>
+      ) : (
+        <rect width={w} height={h} rx="4" fill="#12161b" stroke="#333c46" />
+      )}
+      {/* Bezel: the frame that makes the glass read as a screen set into a
+          module rather than a dark patch painted on the board. */}
+      {round ? (
+        <>
+          <circle cx={cx} cy={cy} r={gw / 2 + frame * 0.7} fill="#39424c" stroke="#1c2228" />
+          <path
+            d={`M ${cx - gw / 2 - frame * 0.7} ${cy} A ${gw / 2 + frame * 0.7} ${gw / 2 + frame * 0.7} 0 0 1 ${cx + gw / 2 + frame * 0.7} ${cy}`}
+            fill="none"
+            stroke="rgba(255,255,255,0.16)"
+            strokeWidth={frame * 0.5}
+          />
+        </>
+      ) : (
+        <>
+          <rect
+            x={gx - frame * 0.7}
+            y={gy - frame * 0.7}
+            width={gw + frame * 1.4}
+            height={gh + frame * 1.4}
+            rx={frame * 0.5}
+            fill="#39424c"
+            stroke="#1c2228"
+          />
+          <rect
+            x={gx - frame * 0.7}
+            y={gy - frame * 0.7}
+            width={gw + frame * 1.4}
+            height={frame * 0.6}
+            rx={frame * 0.3}
+            fill="rgba(255,255,255,0.16)"
+          />
+        </>
+      )}
       {round ? (
         <>
           <defs>
-            <clipPath id={`cd-round-${def.id}`}>
-              <circle cx={gx + gw / 2} cy={gy + gh / 2} r={Math.min(gw, gh) / 2} />
+            <clipPath id={clipId}>
+              <circle cx={cx} cy={cy} r={gw / 2} />
             </clipPath>
           </defs>
-          <circle cx={gx + gw / 2} cy={gy + gh / 2} r={Math.min(gw, gh) / 2} fill="#04060a" />
+          <circle cx={cx} cy={cy} r={gw / 2} fill="#04060a" />
           {href && (
             <image
               href={href}
@@ -656,10 +709,11 @@ function RasterPanelArt({ def, visual, round }: ArtProps & { round?: boolean }) 
               y={gy}
               width={gw}
               height={gh}
-              clipPath={`url(#cd-round-${def.id})`}
+              clipPath={`url(#${clipId})`}
               style={{ imageRendering: 'pixelated' }}
             />
           )}
+          <circle cx={cx} cy={cy} r={gw / 2} fill="none" stroke="rgba(0,0,0,0.5)" strokeWidth="1.2" />
         </>
       ) : (
         <>
@@ -669,24 +723,59 @@ function RasterPanelArt({ def, visual, round }: ArtProps & { round?: boolean }) 
           )}
         </>
       )}
-      {/* Pin header along the bottom edge, over the pads the definition places. */}
-      {def.pins.map((p) => (
-        <rect key={p.id} x={p.x - 1.3} y={h - MM * 2.2} width="2.6" height={MM * 1.6} rx="1" fill="#d8b25c" />
-      ))}
+      {/* The sheet of glass over the panel, which is what stops a colour TFT
+          looking like a coloured rectangle. */}
+      {round ? (
+        <path
+          d={`M ${cx - gw / 2} ${cy} A ${gw / 2} ${gw / 2} 0 0 1 ${cx + gw / 2} ${cy} Z`}
+          fill="rgba(255,255,255,0.05)"
+          pointerEvents="none"
+        />
+      ) : (
+        <rect x={gx} y={gy} width={gw} height={gh * 0.28} fill="rgba(255,255,255,0.05)" pointerEvents="none" />
+      )}
+      <PinHeader def={def} w={w} h={h} edge={edge} thickness={headerH} />
       {!raster && (
         <text
-          x={w / 2}
-          y={gy + gh * 0.55}
-          fontSize={Math.min(gh * 0.16, gw * 0.16)}
+          x={cx}
+          y={cy + gh * 0.05}
+          fontSize={Math.min(gh * 0.14, gw * 0.15)}
           fill="#2b333d"
           textAnchor="middle"
           fontFamily="'DejaVu Sans Mono', 'Courier New', monospace"
         >
-          {def.name.split(' ')[0]}
+          {controllerName(def)}
         </text>
       )}
     </g>
   );
+}
+
+/**
+ * The controller a panel is built on, taken from the part's own name.
+ *
+ * Three different TFTs all reading "TFT" while dark meant they were only
+ * distinguishable once firmware had drawn something, which is exactly when you
+ * least need the label. The names carry the controller in brackets already.
+ */
+function controllerName(def: ComponentDefinition): string {
+  const bracketed = /\(([^)]+)\)\s*$/.exec(def.name);
+  return bracketed ? bracketed[1] : def.name.split(' ')[0];
+}
+
+/** A colour panel's native aspect, for drawing it before firmware has written. */
+function nativeAspect(id: string): number {
+  switch (id) {
+    case 'comp.ili9341':
+    case 'comp.st7789':
+      return 240 / 320;
+    case 'comp.st7735':
+      return 128 / 160;
+    case 'comp.ssd1331':
+      return 96 / 64;
+    default:
+      return 1;
+  }
 }
 
 /** The Nokia 5110's 84x48 glass, on the shared monochrome renderer. */
@@ -841,15 +930,40 @@ function MonoPanelArt({
   idleLabel,
   ink = '#a9e6ff',
   glass: glassFill = '#04060a',
-}: ArtProps & { cols: number; rows: number; idleLabel: string; ink?: string; glass?: string }) {
+  reflective = false,
+}: ArtProps & {
+  cols: number;
+  rows: number;
+  idleLabel: string;
+  ink?: string;
+  glass?: string;
+  /** Paper rather than emitter: matte glass, no glow, no backlight bleed. */
+  reflective?: boolean;
+}) {
   const w = def.widthMm * MM;
   const h = def.heightMm * MM;
   const display = visual?.display;
+  const header = headerEdge(def);
 
-  // As large as the module allows, at the panel's true aspect ratio.
-  const glassW = w * 0.92;
-  const glassH = (glassW * rows) / cols;
-  const glass = { x: (w - glassW) / 2, y: (h - glassH) / 2 + h * 0.04, w: glassW, h: glassH };
+  // As large as the module allows, at the panel's true aspect ratio — and
+  // inside it in BOTH directions. Fitting on width alone is what made the
+  // 128x296 e-paper draw a panel a third taller than the module it is on,
+  // spilling white over whatever was next to it on the canvas.
+  const band = h * 0.11; // reserved for the pin header, at the edge the pins are on
+  const availW = w * 0.9;
+  const availH = h - band - h * 0.06;
+  let glassW = availW;
+  let glassH = (glassW * rows) / cols;
+  if (glassH > availH) {
+    glassH = availH;
+    glassW = (glassH * cols) / rows;
+  }
+  const glass = {
+    x: (w - glassW) / 2,
+    y: header === 'top' ? band + (availH - glassH) / 2 : h * 0.05 + (availH - glassH) / 2,
+    w: glassW,
+    h: glassH,
+  };
   const px = glass.w / cols;
   const py = glass.h / rows;
 
@@ -880,39 +994,106 @@ function MonoPanelArt({
     }
   }
 
+  const bezel = Math.max(2.5, Math.min(w, h) * 0.035);
+
   return (
     <g>
       <rect x="1" y="1.5" width={w} height={h} rx="4" fill="rgba(0,0,0,0.35)" />
-      <rect width={w} height={h} rx="4" fill="#101318" stroke="#333c46" />
-      {/* Pin header, over the four pads along the top edge. */}
-      <rect x={w * 0.22} y="0" width={w * 0.56} height={h * 0.1} rx="1.5" fill="#15181c" />
-      {def.pins.slice(0, 4).map((p) => (
-        <rect key={p.id} x={p.x - 1.4} y={h * 0.02} width="2.8" height={h * 0.06} rx="1" fill="#d8b25c" />
-      ))}
-      {/* The glass sits in a slightly raised frame so the panel reads as glass. */}
+      <rect width={w} height={h} rx="4" fill={reflective ? '#1b1e22' : '#101318'} stroke="#333c46" />
+      <PinHeader def={def} w={w} h={h} edge={header} />
+      {/* A metal bezel around a recessed panel: the frame is what makes the
+          glass read as glass rather than as a dark rectangle painted on. */}
       <rect
-        x={glass.x - 2}
-        y={glass.y - 2}
-        width={glass.w + 4}
-        height={glass.h + 4}
-        rx="1.5"
-        fill="#1b2028"
-        stroke="#39424c"
+        x={glass.x - bezel}
+        y={glass.y - bezel}
+        width={glass.w + bezel * 2}
+        height={glass.h + bezel * 2}
+        rx={bezel * 0.6}
+        fill="#39424c"
+        stroke="#1c2228"
+      />
+      <rect
+        x={glass.x - bezel}
+        y={glass.y - bezel}
+        width={glass.w + bezel * 2}
+        height={bezel * 0.9}
+        rx={bezel * 0.4}
+        fill="rgba(255,255,255,0.16)"
       />
       <rect x={glass.x} y={glass.y} width={glass.w} height={glass.h} fill={glassFill} />
       {lit}
+      {/* An emissive panel has a glass sheet over it and catches the light.
+          Paper does not, which is the whole difference between the two. */}
+      {!reflective && (
+        <rect
+          x={glass.x}
+          y={glass.y}
+          width={glass.w}
+          height={glass.h * 0.3}
+          fill="rgba(255,255,255,0.055)"
+          pointerEvents="none"
+        />
+      )}
       {!display?.on && (
         <text
           x={w / 2}
-          y={glass.y + glass.h * 0.56}
-          fontSize={Math.min(glass.h * 0.3, glass.w * 0.18)}
-          fill="#2b333d"
+          y={glass.y + glass.h * 0.55}
+          fontSize={Math.min(glass.h * 0.22, glass.w * 0.16)}
+          fill={reflective ? 'rgba(90,88,82,0.55)' : '#2b333d'}
           textAnchor="middle"
           fontFamily="'DejaVu Sans Mono', 'Courier New', monospace"
         >
           {idleLabel}
         </text>
       )}
+    </g>
+  );
+}
+
+/**
+ * Which edge of a module its pins are on.
+ *
+ * Read from the footprint rather than passed in, so a renderer shared by
+ * several parts draws the connector where that part's wires actually land.
+ */
+function headerEdge(def: ComponentDefinition): 'top' | 'bottom' {
+  if (def.pins.length === 0) return 'top';
+  const mean = def.pins.reduce((a, p) => a + p.y, 0) / def.pins.length;
+  return mean < (def.heightMm * MM) / 2 ? 'top' : 'bottom';
+}
+
+/**
+ * The pin header strip, drawn over the pads the footprint already places.
+ *
+ * Nothing here moves a pin: the strip is sized from the outermost pads and the
+ * gold pins are drawn at each pad's own x.
+ */
+function PinHeader({
+  def,
+  w,
+  h,
+  edge,
+  thickness,
+}: {
+  def: ComponentDefinition;
+  w: number;
+  h: number;
+  edge: 'top' | 'bottom';
+  thickness?: number;
+}) {
+  if (def.pins.length === 0) return null;
+  const t = thickness ?? Math.max(5, h * 0.09);
+  const xs = def.pins.map((p) => p.x);
+  const pad = Math.max(3, Math.min(w, h) * 0.03);
+  const x0 = Math.max(0, Math.min(...xs) - pad);
+  const x1 = Math.min(w, Math.max(...xs) + pad);
+  const y = edge === 'top' ? 0 : h - t;
+  return (
+    <g>
+      <rect x={x0} y={y} width={x1 - x0} height={t} rx={1.5} fill="#15181c" stroke="#0b0e12" strokeWidth="0.6" />
+      {def.pins.map((p) => (
+        <rect key={p.id} x={p.x - 1.4} y={y + t * 0.18} width="2.8" height={t * 0.64} rx="1" fill="#d8b25c" />
+      ))}
     </g>
   );
 }
@@ -931,37 +1112,69 @@ function MonoPanelArt({
 //
 // The geometry is purely inside the part's existing box. No pin moves.
 
-/** Rows and columns of a 1602, which is what the name means. */
-const LCD_COLS = 16;
-const LCD_ROWS = 2;
+/**
+ * Backlight colours of the two character modules people actually buy.
+ *
+ * The I2C 1602/2004 boards ship with a blue-and-white STN panel; the bare
+ * parallel modules are the classic yellow-green. Same controller, same glass
+ * construction, different filter — so it is one renderer with a colour, not
+ * two drawings.
+ */
+const LCD_BACKLIGHTS = {
+  blue: { on: '#1f5fd0', off: '#101c30', ink: '#eaf4ff', dim: '#2b3c55' },
+  green: { on: '#7ea52a', off: '#2c3a1a', ink: '#12200c', dim: '#48562f' },
+} as const;
 
-function Lcd1602Art({ def, visual }: ArtProps) {
+/**
+ * Every character LCD in the library, at any geometry.
+ *
+ * There used to be two of these: the I2C 1602 got a metal bezel and a lit
+ * panel, and the parallel modules got a flat green rectangle with small text on
+ * it. Standing side by side on one sheet they did not look like the same class
+ * of hardware, which they are — a 20x4 is a 16x2 with more of it, and the I2C
+ * board is the same panel with a backpack soldered on the back.
+ *
+ * What is drawn in the character area is the controller's own DDRAM. The
+ * artwork is the glass, not the content.
+ */
+function CharacterLcdArt({
+  def,
+  visual,
+  columns,
+  rows,
+  tint = 'blue',
+}: ArtProps & { columns: number; rows: number; tint?: keyof typeof LCD_BACKLIGHTS }) {
   const w = def.widthMm * MM;
   const h = def.heightMm * MM;
   const lines = visual?.readout ?? [];
-  // Backlight follows the real PCF8574 backlight bit. An unlit panel is dark
-  // and its characters are barely legible, which is true of the hardware.
-  const lit = visual?.ledOn !== false && lines.length > 0;
+  // Backlight follows the real backlight bit. An unlit panel is dark and its
+  // characters are barely legible, which is true of the hardware.
+  const lit = visual?.ledOn !== false && lines.length > 0 && !/not initialised/i.test(lines[0] ?? '');
+  const colours = LCD_BACKLIGHTS[tint];
 
-  // The header sits over the four pins the definition already places along the
-  // top-left edge, so the connector is drawn where the wires actually land.
-  const headerH = h * 0.13;
-  const bezel = { x: w * 0.045, y: headerH + h * 0.06, w: w * 0.91, h: h * 0.74 };
-  const glass = { x: bezel.x + w * 0.025, y: bezel.y + h * 0.06, w: bezel.w - w * 0.05, h: bezel.h - h * 0.12 };
+  const edge = headerEdge(def);
+  const headerH = Math.max(6, h * 0.1);
+  // The panel takes everything the header does not, which is what makes the
+  // display the part rather than a detail on it.
+  const top = edge === 'top' ? headerH + h * 0.035 : h * 0.045;
+  const bezelH = h - headerH - h * 0.08;
+  const bezel = { x: w * 0.035, y: top, w: w * 0.93, h: bezelH };
+  const inset = Math.max(3, Math.min(w, h) * 0.028);
+  const glass = { x: bezel.x + inset, y: bezel.y + inset, w: bezel.w - inset * 2, h: bezel.h - inset * 2 };
   // Characters live inside a small margin so the outermost column is not flush
   // against the bezel, as on a real panel.
   const area = { x: glass.x + glass.w * 0.03, y: glass.y + glass.h * 0.08, w: glass.w * 0.94, h: glass.h * 0.84 };
-  const cellW = area.w / LCD_COLS;
-  const rowH = area.h / LCD_ROWS;
+  const cellW = area.w / columns;
+  const rowH = area.h / rows;
   const fontSize = Math.min(rowH * 0.82, cellW * 1.5);
 
-  const backlight = lit ? '#1f5fd0' : '#101c30';
-  const character = lit ? '#eaf4ff' : '#2b3c55';
+  const backlight = lit ? colours.on : colours.off;
+  const character = lit ? colours.ink : colours.dim;
 
   const cells: JSX.Element[] = [];
-  for (let row = 0; row < LCD_ROWS; row++) {
-    const text = (lines[row] ?? '').slice(0, LCD_COLS);
-    for (let col = 0; col < LCD_COLS; col++) {
+  for (let row = 0; row < rows; row++) {
+    const text = (lines[row] ?? '').slice(0, columns);
+    for (let col = 0; col < columns; col++) {
       const ch = text[col];
       if (!ch || ch === ' ') continue;
       cells.push(
@@ -986,14 +1199,10 @@ function Lcd1602Art({ def, visual }: ArtProps) {
       {/* PCB */}
       <rect x="1" y="1.5" width={w} height={h} rx="5" fill="rgba(0,0,0,0.35)" />
       <rect width={w} height={h} rx="5" fill="#123a2c" stroke="#0a241b" />
-      {/* Pin header, over the pads the definition places at 2/6/10/14 mm. */}
-      <rect x={w * 0.01} y="0" width={w * 0.22} height={headerH} rx="2" fill="#15181c" />
-      {[2, 6, 10, 14].map((mm) => (
-        <rect key={mm} x={mm * MM - 1.6} y={headerH * 0.18} width="3.2" height={headerH * 0.64} rx="1" fill="#d8b25c" />
-      ))}
+      <PinHeader def={def} w={w} h={h} edge={edge} thickness={headerH} />
       {/* Bezel: a metal frame with a lit edge, so the panel reads as recessed. */}
       <rect x={bezel.x} y={bezel.y} width={bezel.w} height={bezel.h} rx="3" fill="#39424c" stroke="#1c2228" />
-      <rect x={bezel.x} y={bezel.y} width={bezel.w} height={bezel.h * 0.12} rx="3" fill="rgba(255,255,255,0.14)" />
+      <rect x={bezel.x} y={bezel.y} width={bezel.w} height={bezel.h * 0.1} rx="3" fill="rgba(255,255,255,0.14)" />
       {/* The panel itself. */}
       <rect x={glass.x} y={glass.y} width={glass.w} height={glass.h} fill={backlight} stroke="#0c1420" />
       {lit && (
@@ -1001,12 +1210,12 @@ function Lcd1602Art({ def, visual }: ArtProps) {
           x={glass.x}
           y={glass.y}
           width={glass.w}
-          height={glass.h * 0.45}
+          height={glass.h * 0.42}
           fill="rgba(255,255,255,0.10)"
         />
       )}
       {/* Character cells, faintly, the way a dot-matrix panel shows them. */}
-      {Array.from({ length: LCD_COLS - 1 }, (_, i) => (
+      {Array.from({ length: columns - 1 }, (_, i) => (
         <line
           key={`c${i}`}
           x1={area.x + (i + 1) * cellW}
@@ -1017,14 +1226,17 @@ function Lcd1602Art({ def, visual }: ArtProps) {
           strokeWidth="0.6"
         />
       ))}
-      <line
-        x1={area.x}
-        y1={area.y + rowH}
-        x2={area.x + area.w}
-        y2={area.y + rowH}
-        stroke="rgba(0,0,0,0.10)"
-        strokeWidth="0.6"
-      />
+      {Array.from({ length: rows - 1 }, (_, i) => (
+        <line
+          key={`r${i}`}
+          x1={area.x}
+          y1={area.y + (i + 1) * rowH}
+          x2={area.x + area.w}
+          y2={area.y + (i + 1) * rowH}
+          stroke="rgba(0,0,0,0.10)"
+          strokeWidth="0.6"
+        />
+      ))}
       {cells}
     </g>
   );
@@ -2786,52 +2998,6 @@ function LogicBlockArt({ def }: ArtProps) {
 
 // ---------- Batch 4: displays ----------
 
-/**
- * A character LCD of any geometry.
- *
- * The glass, the bezel and a character cell per column — the text comes from
- * the controller's DDRAM, so what is drawn is what firmware wrote.
- */
-function CharacterLcdArt({ def, visual, columns, rows }: ArtProps & { columns: number; rows: number }) {
-  const W = def.widthMm * MM;
-  const H = def.heightMm * MM;
-  const lines = visual?.readout ?? [];
-  const glassX = 5 * MM;
-  const glassY = 6 * MM;
-  const glassW = W - 10 * MM;
-  const glassH = H - 18 * MM;
-  const cellW = glassW / columns;
-  const cellH = glassH / rows;
-  const lit = lines.length > 0 && !/not initialised/.test(lines[0] ?? '');
-  return (
-    <g>
-      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={H - 3 * MM} rx={1.5 * MM} fill="#14532d" stroke="#0b3319" />
-      <rect x={glassX - 1.4 * MM} y={glassY - 1.4 * MM} width={glassW + 2.8 * MM} height={glassH + 2.8 * MM} rx={0.8 * MM} fill="#0d1a10" />
-      <rect x={glassX} y={glassY} width={glassW} height={glassH} fill={lit ? '#2f7d4f' : '#1c3d29'} />
-      {lines.slice(0, rows).map((line, r) =>
-        [...line.padEnd(columns, ' ')].slice(0, columns).map((ch, c) =>
-          ch === ' ' ? null : (
-            <text
-              key={`${r}-${c}`}
-              x={glassX + (c + 0.5) * cellW}
-              y={glassY + (r + 0.72) * cellH}
-              textAnchor="middle"
-              fontSize={cellH * 0.72}
-              fill="#d9f5e2"
-              fontFamily="monospace"
-            >
-              {ch}
-            </text>
-          ),
-        ),
-      )}
-      {def.pins.map((p) => (
-        <line key={p.id} x1={p.x} y1={H - 3 * MM} x2={p.x} y2={H} stroke="#9aa4ad" strokeWidth="2" />
-      ))}
-    </g>
-  );
-}
-
 /** An 8×8 LED matrix panel, lit from the driver's own row registers. */
 function LedMatrixArt({ def, visual }: ArtProps) {
   const W = def.widthMm * MM;
@@ -3035,14 +3201,17 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
       <line x1={W * 0.42} y1={H * 0.4} x2={W * 0.58} y2={H * 0.4} stroke="#7c858e" strokeWidth="0.9" />
     </g>
   )),
+  // The I2C boards: the same panel with a backpack on the back, so they take
+  // the blue-and-white glass those modules ship with.
   lcd2004: (p) => <CharacterLcdArt {...p} columns={20} rows={4} />,
   // Both parallel panels share one renderer; the geometry comes from the part's
-  // own footprint, so a 16x2 and a 20x4 are the same drawing at two sizes.
+  // own footprint, so a 16x2 and a 20x4 are the same drawing at two sizes. The
+  // bare modules are the classic yellow-green STN rather than blue.
   'lcd-parallel': (p) =>
     p.def.id === 'comp.lcd2004-parallel' ? (
-      <CharacterLcdArt {...p} columns={20} rows={4} />
+      <CharacterLcdArt {...p} columns={20} rows={4} tint="green" />
     ) : (
-      <CharacterLcdArt {...p} columns={16} rows={2} />
+      <CharacterLcdArt {...p} columns={16} rows={2} tint="green" />
     ),
   max7219: (p) => <LedMatrixArt {...p} />,
   'dip-ic': (p) => <DipIcArt {...p} />,
@@ -3064,7 +3233,7 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   joystick: (p) => <JoystickArt {...p} />,
   keypad: (p) => <KeyMatrixArt {...p} />,
   'mini-keyboard': (p) => <KeyMatrixArt {...p} />,
-  lcd1602: (p) => <Lcd1602Art {...p} />,
+  lcd1602: (p) => <CharacterLcdArt {...p} columns={16} rows={2} />,
   oled: (p) => <OledArt {...p} />,
   sh1107: (p) => <Sh1107Art {...p} />,
   'seven-segment-multi': (p) => <SevenSegMultiArt {...p} />,
@@ -3072,8 +3241,11 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   'led-matrix': (p) => <BareLedMatrixArt {...p} />,
   nokia5110: (p) => <Nokia5110Art {...p} />,
   // The e-paper's glass is white paper with dark ink, not a lit panel — the
-  // one display in the library that is legible with the power off.
-  epaper: (p) => <MonoPanelArt {...p} cols={128} rows={296} idleLabel="E-Paper" ink="#1b1f24" glass="#e9e6df" />,
+  // one display in the library that is legible with the power off, and the one
+  // that must not pick up the specular highlight the emitters get.
+  epaper: (p) => (
+    <MonoPanelArt {...p} cols={128} rows={296} idleLabel="E-Paper" ink="#232323" glass="#e9e6df" reflective />
+  ),
   tft: (p) => <RasterPanelArt {...p} />,
   'tft-round': (p) => <RasterPanelArt {...p} round />,
   neopixel: (p) => <NeoPixelArt {...p} layout="single" />,
