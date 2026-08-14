@@ -63,6 +63,8 @@ import { Nrf24Device } from './devices/nrf24';
 import { Sx1278Device } from './devices/sx1278';
 import { Ook433Receiver, Ook433Transmitter, OOK_MODULATION, OOK_DEFAULT_KHZ } from './devices/ook433';
 import { Max485Device, Rs485Bus } from './devices/rs485';
+import { CanBus } from './devices/canBus';
+import { Mcp2515Device } from './devices/mcp2515';
 
 /**
  * Two edges no further apart than this are cycles of one carrier.
@@ -74,6 +76,8 @@ import { Max485Device, Rs485Bus } from './devices/rs485';
 const IR_CARRIER_MAX_GAP_US = 40;
 /** Silence for this long ends a mark. */
 const IR_MARK_END_GAP_US = 60;
+/** How much simulated time one settle covers, for anything clocked by it. */
+const DEFAULT_SETTLE_MS = 1;
 /** A gap this long means the next boundary starts a new burst. */
 const IR_BURST_GAP_US = 50000;
 /** The same, for on-off keying, whose gaps between packets are much longer. */
@@ -373,6 +377,8 @@ interface SpiCreateContext extends DeviceCreateContext {
   csPinId: string | null;
   /** The shared radio medium, for parts that are radios. */
   radio: RfMedium;
+  /** The CAN bus this part's CANH/CANL sit on. */
+  canBus: CanBus;
   /**
    * Live level of a control pin, resolved against the board that owns this
    * device. Two identical displays on two boards each read their own wiring.
@@ -572,6 +578,11 @@ const SPI_DEVICE_MODELS: Record<string, SpiDeviceModel> = {
     busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'csn' },
     controlPins: ['ce'],
     create: (ctx) => new Nrf24Device(ctx.instanceId, ctx.csPinId ?? 'csn', ctx.radio, ctx.nowUs),
+  },
+  'comp.mcp2515': {
+    busPins: { sck: 'sck', mosi: 'si', miso: 'so', cs: 'cs' },
+    controlPins: ['int'],
+    create: (ctx) => new Mcp2515Device(ctx.instanceId, ctx.csPinId ?? 'cs', ctx.canBus),
   },
   'comp.lora-sx1278': {
     busPins: { sck: 'sck', mosi: 'mosi', miso: 'miso', cs: 'nss' },
@@ -822,6 +833,7 @@ export class CircuitBinding {
     this.ookTransmitters.clear();
     this.rs485Nodes.clear();
     this.rs485Buses.clear();
+    this.canBuses.clear();
     const i2c: I2cDevice[] = [];
     const spi: SpiDevice[] = [];
     for (const [instanceId, owner] of this.runners) {
@@ -1320,6 +1332,7 @@ export class CircuitBinding {
             readControl,
             logicVolts,
             radio: this.rfMedium,
+            canBus: this.canBusFor(inst.id),
             nowUs: () => runner.timeMs * 1000,
             saved: inst.simulationState,
           }),
@@ -2318,6 +2331,28 @@ export class CircuitBinding {
   >();
   private ookDeviceCache = new Map<string, Ook433Transmitter | Ook433Receiver>();
 
+  /**
+   * CAN: one bus object per CANH net on the canvas.
+   *
+   * Same idea as the RS-485 pair — controllers wired CANH-to-CANH share a
+   * wire, and a project with two independent buses gets two objects that know
+   * nothing about each other.
+   */
+  private canBuses = new Map<string, CanBus>();
+  private canBusFor(instanceId: string): CanBus {
+    const key = this.netOfInstancePin(instanceId, 'canh') ?? `solo:${instanceId}`;
+    const existing = this.canBuses.get(key);
+    if (existing) return existing;
+    const bus = new CanBus(key);
+    this.canBuses.set(key, bus);
+    return bus;
+  }
+  /** A CAN bus, for tests and the inspector. */
+  canBusOf(instanceId: string): CanBus | undefined {
+    const key = this.netOfInstancePin(instanceId, 'canh');
+    return key ? this.canBuses.get(key) : undefined;
+  }
+
   /** RS-485: one bus object per differential pair on the canvas. */
   private rs485Buses = new Map<string, Rs485Bus>();
   private rs485Nodes = new Map<
@@ -2794,6 +2829,14 @@ export class CircuitBinding {
       if (typeof resettable.settle === 'function') resettable.settle();
     }
 
+    // CAN, one bit at a time. The bus is stepped for as many bits as its
+    // bitrate fits into this slice, so a 500 kbit/s bus really does move five
+    // hundred bits per millisecond and a frame really does take its airtime.
+    for (const bus of this.canBuses.values()) {
+      const bits = Math.min(4000, Math.round((bus.agreedBitrate * DEFAULT_SETTLE_MS) / 1000));
+      for (let i = 0; i < bits; i++) bus.stepBit();
+    }
+
     // Radios, receive first and transmit second, across the whole canvas.
     //
     // The order is the hardware's, not the scheduler's. An acknowledgement
@@ -3182,6 +3225,11 @@ export class CircuitBinding {
         if (!irqNet) continue;
         const asserted = device.irqAsserted;
         setLevel(irqNet, asserted ? 0 : highVolts, null, asserted ? 0 : 30000);
+      } else if (device instanceof Mcp2515Device) {
+        const intNet = this.netOfInstancePin(device.instanceId, 'int');
+        if (!intNet) continue;
+        const asserted = device.irqAsserted;
+        setLevel(intNet, asserted ? 0 : highVolts, null, asserted ? 0 : 30000);
       } else if (device instanceof Sx1278Device) {
         // DIO0 is the other polarity: an SX127x drives it HIGH on TxDone or
         // RxDone, which is why LoRa sketches attach a RISING interrupt.

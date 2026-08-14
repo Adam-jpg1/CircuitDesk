@@ -1572,6 +1572,39 @@ export const MAX485 = def(
   },
 );
 
+export const MCP2515 = def(
+  'comp.mcp2515', 'CAN Controller (MCP2515)', 'Modules', 40, 28, 'mcp2515',
+  [
+    pin('int', 'INT', 3.0, 27.6, { type: 'digital', caps: ['digital-out'], description: 'Active low while an enabled interrupt is set' }),
+    pin('sck', 'SCK', 6.5, 27.6, { type: 'digital', caps: ['spi-sck'] }),
+    pin('si', 'SI', 10.0, 27.6, { type: 'digital', caps: ['spi-mosi'] }),
+    pin('so', 'SO', 13.5, 27.6, { type: 'digital', caps: ['spi-miso'] }),
+    pin('cs', 'CS', 17.0, 27.6, { type: 'digital', caps: ['spi-ss'] }),
+    pin('gnd', 'GND', 20.5, 27.6, { type: 'ground', caps: ['ground'] }),
+    pin('vcc', 'VCC', 24.0, 27.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('canh', 'CANH', 32.0, 1.4, { type: 'digital', description: 'Bus high — wire to every other node\'s CANH' }),
+    pin('canl', 'CANL', 37.0, 1.4, { type: 'digital', description: 'Bus low' }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.mcp2515',
+    validationRules: ['spi-pins'],
+    description:
+      'A real MCP2515 on a real CAN bus. The SPI side is the chip\'s own command set — RESET, READ, WRITE, BIT ' +
+      'MODIFY, LOAD TX BUFFER, READ RX BUFFER, RTS, READ STATUS and RX STATUS — over the register file, with ' +
+      'three transmit buffers, two receive buffers, CANINTF and CANINTE, and an INT pin that goes low while an ' +
+      'enabled flag is set. The chip powers up in CONFIGURATION mode and will not transmit until a sketch asks ' +
+      'for normal mode, which is one of the two reasons an MCP2515 project does not work; the other is bit ' +
+      'timing, so the bitrate is COMPUTED from CNF1-3 and the 16 MHz crystal rather than declared, and a node ' +
+      'whose timing does not match the rest of the bus decodes nothing and wrecks what it transmits into. ' +
+      'Underneath is a bit-level bus: two nodes that start in the same bit arbitrate on the wire, the lower ' +
+      'identifier wins, and the loser becomes a receiver without corrupting the winner. Loopback mode never ' +
+      'reaches the wire. NOT modelled: acceptance filters and masks (they are stored and read back, but every ' +
+      'frame is accepted — the largest gap here), error counters and therefore error-passive and bus-off, ' +
+      'one-shot mode, sleep, CLKOUT, and the RXnBF and TXnRTS pins.',
+  },
+);
+
 // ---------- Power ----------
 
 export const BATTERY_9V = def(
@@ -1979,7 +2012,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331, EPAPER29,
   NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
-  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_LED, IR_REMOTE, NRF24L01, LORA_SX1278, RF433_TX, RF433_RX, MAX485,
+  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_LED, IR_REMOTE, NRF24L01, LORA_SX1278, RF433_TX, RF433_RX, MAX485, MCP2515,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
   CELL_15, COIN_CELL, DC_SUPPLY, REGULATOR_5, REGULATOR_33, LDO_33, BUCK_CONVERTER, BOOST_CONVERTER,
   HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,
