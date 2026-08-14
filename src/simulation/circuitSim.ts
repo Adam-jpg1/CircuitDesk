@@ -58,9 +58,10 @@ import { GpsNeo6mDevice } from './devices/gpsNeo6m';
 import { Hc05Device } from './devices/hc05';
 import { Esp01Device, DEFAULT_ACCESS_POINT } from './devices/esp01';
 import { IrMedium } from './devices/irMedium';
-import { RfMedium } from './devices/rfMedium';
+import { RfMedium, RF_BAND } from './devices/rfMedium';
 import { Nrf24Device } from './devices/nrf24';
 import { Sx1278Device } from './devices/sx1278';
+import { Ook433Receiver, Ook433Transmitter, OOK_MODULATION, OOK_DEFAULT_KHZ } from './devices/ook433';
 
 /**
  * Two edges no further apart than this are cycles of one carrier.
@@ -74,6 +75,8 @@ const IR_CARRIER_MAX_GAP_US = 40;
 const IR_MARK_END_GAP_US = 60;
 /** A gap this long means the next boundary starts a new burst. */
 const IR_BURST_GAP_US = 50000;
+/** The same, for on-off keying, whose gaps between packets are much longer. */
+const OOK_BURST_GAP_US = 20000;
 /**
  * How far ahead of a receiver's clock a burst is delivered.
  *
@@ -813,6 +816,9 @@ export class CircuitBinding {
     this.irEmitterListeners = [];
     for (const emitter of this.irEmitters.values()) emitter.cancelGap?.();
     this.irEmitters.clear();
+    for (const link of this.ookReceivers.values()) link.cancels.forEach((c) => c());
+    this.ookReceivers.clear();
+    this.ookTransmitters.clear();
     const i2c: I2cDevice[] = [];
     const spi: SpiDevice[] = [];
     for (const [instanceId, owner] of this.runners) {
@@ -824,6 +830,7 @@ export class CircuitBinding {
       this.setupUartLinks(owner, instanceId);
       this.setupIrReceivers(owner, instanceId);
       this.setupIrEmitters(owner, instanceId);
+      this.setupOokParts(owner, instanceId);
     }
     this.i2cDevices = i2c;
     this.spiDevices = spi;
@@ -1668,6 +1675,107 @@ export class CircuitBinding {
   }
 
   /**
+   * Attaches the 433 MHz parts wired to this board.
+   *
+   * The transmitter needs its DATA pin on one of this board's pads plus power
+   * and ground; the receiver needs the same, and drives its DATA pin from the
+   * medium. Neither has a protocol — the encoding lives in the sketch, which
+   * is exactly why these modules get used for everything.
+   */
+  private setupOokParts(runner: BoardRunner, boardInstanceId: string): void {
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (def?.id !== 'comp.rf433-tx' && def?.id !== 'comp.rf433-rx') continue;
+
+      const dataNet = this.netOfInstancePin(inst.id, 'data');
+      const dataPin = dataNet
+        ? (this.netEndpoints.get(dataNet) ?? []).find((e) => e.instance === boardInstanceId)?.pin ?? null
+        : null;
+      if (dataPin === null) continue;
+      const powered = this.netFedByOther(this.netOfInstancePin(inst.id, 'vcc'), inst.id, POWER_PIN_TYPES);
+      const grounded = this.netFedByOther(this.netOfInstancePin(inst.id, 'gnd'), inst.id, ['ground']);
+      if (!powered || !grounded) continue;
+
+      const khz = Number(inst.properties.frequencyKhz ?? OOK_DEFAULT_KHZ);
+      const cached = this.ookDeviceCache.get(inst.id);
+
+      if (def.id === 'comp.rf433-tx') {
+        const device = cached instanceof Ook433Transmitter ? cached : new Ook433Transmitter(inst.id, khz);
+        device.frequencyKhz = khz;
+        this.ookDeviceCache.set(inst.id, device);
+        this.ookTransmitters.set(inst.id, device);
+        this.irEmitterListeners.push(
+          runner.addPinListener((pin, high) => {
+            if (pin !== dataPin) return;
+            this.ookKeyed(device, high);
+          }),
+        );
+      } else {
+        const device = cached instanceof Ook433Receiver ? cached : new Ook433Receiver(inst.id, khz);
+        device.frequencyKhz = khz;
+        this.ookDeviceCache.set(inst.id, device);
+        this.ookReceivers.set(inst.id, {
+          device, runner, dataPin, cancels: [], cursorUs: -1, deliveredUs: -1, offsetUs: 0,
+        });
+      }
+    }
+  }
+
+  /** The DATA pin moved: the carrier goes on or off at that instant. */
+  private ookKeyed(device: Ook433Transmitter, high: boolean): void {
+    if (high === device.isKeyed) return;
+    device.noteKeyed(high);
+    const nowUs = this.irTimeUs();
+    if (high) {
+      this.rfMedium.beginLive(device.instanceId, device.frequencyKhz, nowUs, { modulation: OOK_MODULATION });
+    } else {
+      this.rfMedium.endLive(device.instanceId, nowUs);
+    }
+    this.pumpOokReceivers();
+  }
+
+  /**
+   * Rebuilds every OOK receiver's pin schedule from the medium.
+   *
+   * The same machinery the infrared receivers use, for the same reason: the
+   * boundaries are microseconds apart, boards take turns on the timeline, and
+   * a burst gets one offset so the intervals survive exactly even when the
+   * receiving board is already past the instant the carrier came on.
+   */
+  private pumpOokReceivers(): void {
+    for (const link of this.ookReceivers.values()) {
+      const nowUs = link.runner.timeMs * 1000;
+      const listener = {
+        band: RF_BAND,
+        channel: link.device.frequencyKhz,
+        match: { modulation: OOK_MODULATION },
+      };
+      const boundaries = new Set(this.rfMedium.waveformTransitions(listener, link.cursorUs, Number.MAX_SAFE_INTEGER));
+      for (const start of this.rfMedium.openStarts(listener)) {
+        if (start > link.cursorUs) boundaries.add(start);
+      }
+
+      for (const at of [...boundaries].sort((a, b) => a - b)) {
+        if (link.cursorUs < 0 || at - link.cursorUs > OOK_BURST_GAP_US) {
+          link.offsetUs = Math.max(0, nowUs + IR_DELIVERY_GUARD_US - at);
+        }
+        let deliverUs = at + link.offsetUs;
+        if (deliverUs <= link.deliveredUs) deliverUs = link.deliveredUs + 1;
+        link.cursorUs = at;
+        link.deliveredUs = deliverUs;
+
+        const apply = () => {
+          const state = this.rfMedium.sampleWaveform(listener, at);
+          link.device.setEnergised(state.energised, deliverUs, state.sources);
+          link.runner.setDigitalInput(link.dataPin, state.energised);
+        };
+        if (deliverUs <= nowUs) apply();
+        else link.cancels.push(link.runner.addMicrosecondEvent(deliverUs - nowUs, apply));
+      }
+    }
+  }
+
+  /**
    * Attaches IR LEDs the firmware itself drives.
    *
    * The anode has to be on one of this board's pads and the cathode has to
@@ -2105,6 +2213,27 @@ export class CircuitBinding {
   private irRemotes = new Map<string, IrRemoteDevice>();
   private irEmitters = new Map<string, IrEmitterState>();
   private irEmitterListeners: (() => void)[] = [];
+
+  /** On-off-keyed 433 MHz parts: a waveform path, not a packet radio. */
+  private ookTransmitters = new Map<string, Ook433Transmitter>();
+  private ookReceivers = new Map<
+    string,
+    {
+      device: Ook433Receiver;
+      runner: BoardRunner;
+      dataPin: number;
+      cancels: (() => void)[];
+      cursorUs: number;
+      deliveredUs: number;
+      offsetUs: number;
+    }
+  >();
+  private ookDeviceCache = new Map<string, Ook433Transmitter | Ook433Receiver>();
+
+  /** An OOK part's model, for the canvas and the inspector. */
+  ookDeviceFor(instanceId: string): Ook433Transmitter | Ook433Receiver | undefined {
+    return this.ookDeviceCache.get(instanceId);
+  }
   /** Models kept across re-binds, so a receiver does not forget what it saw. */
   private irDeviceCache = new Map<string, IrReceiverDevice | IrRemoteDevice>();
 
@@ -2957,6 +3086,15 @@ export class CircuitBinding {
         setLevel(dioNet, asserted ? highVolts : 0, null, 0);
       }
     }
+    // The 433 MHz receivers, whose DATA pin is a real output.
+    this.pumpOokReceivers();
+    for (const [instId, link] of this.ookReceivers) {
+      const dataNet = this.netOfInstancePin(instId, 'data');
+      if (!dataNet) continue;
+      const high = link.device.outputHigh;
+      setLevel(dataNet, high ? highVolts : 0, null, 0);
+    }
+
     // Traffic older than a hundred milliseconds cannot affect anything: the
     // longest airtime here is well under a millisecond and every receiver
     // holds a cursor past it.
@@ -3142,6 +3280,16 @@ export class CircuitBinding {
             engaged[button.key] = controls.pressedButtons.has(contactStateKey(inst.id, button.key));
           }
           visuals.set(inst.id, { contacts: engaged });
+          break;
+        }
+        case 'sim.rf433-tx': {
+          const device = this.ookDeviceCache.get(inst.id);
+          visuals.set(inst.id, { on: device instanceof Ook433Transmitter && device.isKeyed });
+          break;
+        }
+        case 'sim.rf433-rx': {
+          const device = this.ookDeviceCache.get(inst.id);
+          visuals.set(inst.id, { on: device instanceof Ook433Receiver && device.outputHigh });
           break;
         }
         case 'sim.ir-led':
