@@ -1540,6 +1540,38 @@ export const RF433_RX = def(
   },
 );
 
+export const MAX485 = def(
+  'comp.max485', 'RS-485 Transceiver (MAX485)', 'Modules', 22, 18, 'max485',
+  [
+    pin('ro', 'RO', 3.0, 17.6, { type: 'digital', caps: ['digital-out', 'uart-tx'], description: 'Receiver output — wire to the MCU RX' }),
+    pin('re', 'RE', 6.5, 17.6, { type: 'digital', caps: ['digital-in'], description: 'Receiver enable, ACTIVE LOW' }),
+    pin('de', 'DE', 10.0, 17.6, { type: 'digital', caps: ['digital-in'], description: 'Driver enable, active high' }),
+    pin('di', 'DI', 13.5, 17.6, { type: 'digital', caps: ['digital-in', 'uart-rx'], description: 'Driver input — wire to the MCU TX' }),
+    pin('vcc', 'VCC', 17.0, 17.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
+    pin('gnd', 'GND', 20.0, 17.6, { type: 'ground', caps: ['ground'] }),
+    pin('a', 'A', 5.0, 1.4, { type: 'digital', description: 'Differential pair, non-inverting' }),
+    pin('b', 'B', 10.0, 1.4, { type: 'digital', description: 'Differential pair, inverting' }),
+  ],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.max485',
+    description:
+      'A MAX485-style transceiver on a real differential bus. Every transceiver wired A-to-A shares one bus, ' +
+      'which is what makes three nodes a bus rather than three private links, and every node hears every byte ' +
+      'rather than one chosen partner. DE low means the node is not driving, so ' +
+      'a sketch that forgets the turnaround transmits into its own transceiver and nothing reaches the bus; RE ' +
+      'is ACTIVE LOW, so a node holding it high is deaf, including to itself. An idle bus reads as a mark, the ' +
+      'way a biased installation does. Two drivers sending the same data are harmless; two that disagree are a ' +
+      'contention, and every receiver on the bus gets rubbish rather than one of the two messages. The pair ' +
+      'carries BYTES rather than individual bits, which the emulator forces rather than the model choosing: an ' +
+      'AVR USART hands its output to a callback and never drives the TX pad, so there are no edges on DI to put ' +
+      'on a wire. A sketch that bit-bangs its own framing on DI is therefore not carried, and a baud mismatch ' +
+      'between two nodes is not detected. NOT modelled either: differential voltages, common-mode range, ' +
+      'failsafe bias values, termination and reflections, cable length, slew-rate limiting and the maximum baud ' +
+      'it implies, and driver current or thermal limits.',
+  },
+);
+
 // ---------- Power ----------
 
 export const BATTERY_9V = def(
@@ -1947,7 +1979,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331, EPAPER29,
   NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
-  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_LED, IR_REMOTE, NRF24L01, LORA_SX1278, RF433_TX, RF433_RX,
+  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_LED, IR_REMOTE, NRF24L01, LORA_SX1278, RF433_TX, RF433_RX, MAX485,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
   CELL_15, COIN_CELL, DC_SUPPLY, REGULATOR_5, REGULATOR_33, LDO_33, BUCK_CONVERTER, BOOST_CONVERTER,
   HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,

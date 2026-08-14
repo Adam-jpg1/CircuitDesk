@@ -1342,6 +1342,28 @@ function LoraArt({ def, visual }: ArtProps) {
   );
 }
 
+/** The little RS-485 breakout: a DIP-8 on a green board with a screw terminal. */
+function Max485Art({ def, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const driving = visual?.on === true;
+  return (
+    <g>
+      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={H - 1 * MM} rx="1.5" fill="#1d4a2a" stroke="#0c2415" />
+      <rect x={W * 0.1} y={H * 0.06} width={W * 0.42} height={H * 0.2} rx="1" fill="#2b3a45" stroke="#101a20" strokeWidth="0.6" />
+      <circle cx={W * 0.19} cy={H * 0.16} r={W * 0.02} fill="#4a5259" />
+      <circle cx={W * 0.42} cy={H * 0.16} r={W * 0.02} fill="#4a5259" />
+      <rect x={W * 0.28} y={H * 0.36} width={W * 0.44} height={H * 0.3} rx="1" fill="#14181d" stroke="#000" strokeWidth="0.6" />
+      <circle cx={W * 0.34} cy={H * 0.43} r={W * 0.02} fill="#3a424a" />
+      <text x={W * 0.5} y={H * 0.56} textAnchor="middle" fontSize={H * 0.11} fill="#7d868e" fontFamily="sans-serif">485</text>
+      <rect x={W * 0.76} y={H * 0.4} width={W * 0.1} height={H * 0.08} rx="0.6" fill={driving ? '#ff8a5f' : '#123020'} />
+      {def.pins.map((p) => (
+        <rect key={p.id} x={p.x - 1.1} y={p.y - 1.1} width="2.2" height="2.2" rx="0.5" fill="#d8b24a" />
+      ))}
+    </g>
+  );
+}
+
 /** The little square transmitter: a SAW resonator and a coil on bare board. */
 function Rf433TxArt({ def, visual }: ArtProps) {
   const W = def.widthMm * MM;
@@ -1885,6 +1907,7 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   ldr: (p) => <LdrArt {...p} />,
   nrf24: (p) => <Nrf24Art {...p} />,
   lora: (p) => <LoraArt {...p} />,
+  max485: (p) => <Max485Art {...p} />,
   'rf433-tx': (p) => <Rf433TxArt {...p} />,
   'rf433-rx': (p) => <Rf433RxArt {...p} />,
   'ir-receiver': (p) => <IrReceiverArt {...p} />,
