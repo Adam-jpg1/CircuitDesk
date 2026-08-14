@@ -2220,6 +2220,152 @@ function HeaderArt({ def }: ArtProps) {
   );
 }
 
+
+// ================================================== communication modules ==
+//
+// Checkpoint F. Four of these were still generic boxes, and the test for each
+// is the same: at normal zoom, before reading anything, can you tell which one
+// it is? That means drawing the feature that identifies the module physically
+// — a ceramic patch antenna, a metal can, a PCB antenna meander, a card slot —
+// rather than putting its name in the middle of a rectangle.
+//
+// None of them animates. There is no fake radio blinking and no fake playback,
+// because none of these parts exposes state a renderer could honestly read.
+
+/** The zig-zag PCB antenna every 2.4 GHz module carries, as a real trace. */
+function PcbAntenna({ x, y, w, h, stroke = '#c9a227' }: { x: number; y: number; w: number; h: number; stroke?: string }) {
+  const segments = 5;
+  let d = `M ${x} ${y + h}`;
+  for (let i = 0; i < segments; i++) {
+    const x0 = x + (w / segments) * i;
+    const x1 = x + (w / segments) * (i + 1);
+    d += ` L ${x0} ${y} L ${x1} ${y} L ${x1} ${y + h} L ${x1} ${y + h}`;
+  }
+  return <path d={d} fill="none" stroke={stroke} strokeWidth={Math.max(1.2, h * 0.16)} strokeLinejoin="miter" />;
+}
+
+/**
+ * NEO-6M: the ceramic patch antenna IS the part.
+ *
+ * A real one is a 25 mm square of white ceramic with a gold feed dot, sitting
+ * on top of a board barely bigger than it is. Nothing else about a GPS module
+ * is distinctive, and nothing else needs to be.
+ */
+function GpsArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const patch = { x: W * 0.1, y: H * 0.06, w: W * 0.8, h: H * 0.55 };
+  return (
+    <g>
+      <Breakout W={W} H={H} fill="#123a2c" stroke="#0a241b" />
+      {/* Ceramic patch: pale, slightly domed, with the feed pin off centre. */}
+      <rect x={patch.x + 1} y={patch.y + 1.5} width={patch.w} height={patch.h} rx="2" fill="rgba(0,0,0,0.3)" />
+      <rect x={patch.x} y={patch.y} width={patch.w} height={patch.h} rx="2" fill="#e8e4d8" stroke="#a49c88" />
+      <rect x={patch.x} y={patch.y} width={patch.w} height={patch.h * 0.34} rx="2" fill="rgba(255,255,255,0.5)" />
+      <circle cx={patch.x + patch.w * 0.5} cy={patch.y + patch.h * 0.62} r={Math.min(patch.w, patch.h) * 0.07} fill="#c8a53f" />
+      {/* The receiver and the backup cell that keeps the almanac. */}
+      <SmdBody x={W * 0.12} y={H * 0.68} w={W * 0.36} h={H * 0.18} label="NEO-6M" size={3.2} />
+      <circle cx={W * 0.72} cy={H * 0.76} r={H * 0.08} fill="#9aa4ad" stroke="#5b646c" strokeWidth="0.5" />
+      <PinPads def={def} />
+    </g>
+  );
+}
+
+/**
+ * HC-05: a small daughterboard soldered onto a carrier.
+ *
+ * That two-level construction is the give-away — the radio module is a
+ * separate castellated board with its own meander antenna, sitting on a larger
+ * one that carries the regulator, the button and the header.
+ */
+function Hc05Art({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const daughter = { x: W * 0.1, y: H * 0.06, w: W * 0.8, h: H * 0.52 };
+  return (
+    <g>
+      <Breakout W={W} H={H} fill="#12354a" />
+      {/* The daughterboard, raised off the carrier. */}
+      <rect x={daughter.x + 1} y={daughter.y + 1.5} width={daughter.w} height={daughter.h} rx="2" fill="rgba(0,0,0,0.34)" />
+      <rect x={daughter.x} y={daughter.y} width={daughter.w} height={daughter.h} rx="2" fill="#1c4a68" stroke="#0a2536" />
+      {/* Castellated edge pads, which is how these are made. */}
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <rect key={i} x={daughter.x} y={daughter.y + daughter.h * (0.12 + i * 0.14)} width={W * 0.05} height={H * 0.03} fill="#c8a53f" />
+      ))}
+      <PcbAntenna x={daughter.x + daughter.w * 0.18} y={daughter.y + daughter.h * 0.12} w={daughter.w * 0.64} h={daughter.h * 0.2} />
+      <SmdBody x={daughter.x + daughter.w * 0.2} y={daughter.y + daughter.h * 0.46} w={daughter.w * 0.6} h={daughter.h * 0.38} label="BC417" size={3.2} />
+      {/* Carrier: regulator, the little button, and an indicator position. */}
+      <SmdBody x={W * 0.12} y={H * 0.64} w={W * 0.22} h={H * 0.1} />
+      <rect x={W * 0.62} y={H * 0.63} width={W * 0.2} height={H * 0.11} rx="1.5" fill="#2b3138" stroke="#12161a" />
+      <circle cx={W * 0.46} cy={H * 0.69} r={H * 0.022} fill="#3a2626" />
+      <PinPads def={def} />
+    </g>
+  );
+}
+
+/**
+ * ESP-01: unmistakable because of its shape.
+ *
+ * A stubby blue board with the shielded module at one end, the fat meander
+ * antenna at the other, and the 2x4 header underneath — the header being the
+ * reason everyone complains it does not fit a breadboard.
+ */
+function Esp01Art({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  return (
+    <g>
+      <Breakout W={W} H={H} fill="#123a52" stroke="#08202e" />
+      {/* Meander antenna at the top, wide and blunt as the real one. */}
+      <PcbAntenna x={W * 0.12} y={H * 0.06} w={W * 0.76} h={H * 0.13} />
+      {/* Shield can over the ESP8266 and its flash. */}
+      <rect x={W * 0.14} y={H * 0.26} width={W * 0.72} height={H * 0.3} rx="1.6" fill="#9aa4ad" stroke="#5b646c" />
+      <rect x={W * 0.14} y={H * 0.26} width={W * 0.72} height={H * 0.1} rx="1.6" fill="rgba(255,255,255,0.32)" />
+      <text x={W / 2} y={H * 0.45} textAnchor="middle" fontSize={H * 0.055} fill="#5b646c" fontFamily="sans-serif">ESP-01</text>
+      <SmdBody x={W * 0.2} y={H * 0.62} w={W * 0.24} h={H * 0.09} />
+      <circle cx={W * 0.66} cy={H * 0.66} r={H * 0.02} fill="#2b3a45" />
+      <PinPads def={def} />
+    </g>
+  );
+}
+
+/**
+ * DFPlayer Mini: a card slot on a square board.
+ *
+ * The socket is nearly the whole part, which is exactly why it reads as
+ * storage-and-audio rather than as another radio. Nothing here shows playback:
+ * the model knows whether it is playing, but a drawn speaker cone that moved
+ * would be inventing sound this simulator does not produce.
+ */
+function DfPlayerArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const slot = { x: W * 0.08, y: H * 0.1, w: W * 0.84, h: H * 0.44 };
+  return (
+    <g>
+      <Breakout W={W} H={H} fill="#123a2c" stroke="#0a241b" />
+      <rect x={slot.x} y={slot.y} width={slot.w} height={slot.h} rx="2" fill="#9aa4ad" stroke="#5b646c" />
+      <rect x={slot.x} y={slot.y} width={slot.w} height={slot.h * 0.28} rx="2" fill="rgba(255,255,255,0.3)" />
+      {/* The mouth, facing out, with the card's chamfer visible in it. */}
+      <path
+        d={`M ${slot.x + slot.w * 0.12} ${slot.y + slot.h * 0.62}
+            h ${slot.w * 0.68} v ${slot.h * 0.26} h ${-slot.w * 0.76} z`}
+        fill="#0d1114"
+      />
+      <path
+        d={`M ${slot.x + slot.w * 0.18} ${slot.y + slot.h * 0.66} h ${slot.w * 0.5}
+            l ${slot.w * 0.06} ${slot.h * 0.06} v ${slot.h * 0.12} h ${-slot.w * 0.56} z`}
+        fill="#2a3138"
+      />
+      {/* The decoder, and the two capacitors on the audio output. */}
+      <SmdBody x={W * 0.14} y={H * 0.62} w={W * 0.4} h={H * 0.2} label="YX5200" size={3.2} />
+      <circle cx={W * 0.68} cy={H * 0.7} r={H * 0.07} fill="#20252b" stroke="#0a0d11" strokeWidth="0.6" />
+      <circle cx={W * 0.84} cy={H * 0.7} r={H * 0.07} fill="#20252b" stroke="#0a0d11" strokeWidth="0.6" />
+      <PinPads def={def} />
+    </g>
+  );
+}
+
 // ---------- Batch 2: logic ----------
 
 /**
@@ -2510,6 +2656,10 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   rtc: (p) => <RtcModuleArt {...p} />,
   dac: (p) => <DacModuleArt {...p} />,
   header: (p) => <HeaderArt {...p} />,
+  gps: (p) => <GpsArt {...p} />,
+  hc05: (p) => <Hc05Art {...p} />,
+  esp01: (p) => <Esp01Art {...p} />,
+  dfplayer: (p) => <DfPlayerArt {...p} />,
   diode: (p) => <DiodeArt {...p} />,
   transistor: (p) => <TransistorArt {...p} />,
   mosfet: (p) => <MosfetArt {...p} />,
