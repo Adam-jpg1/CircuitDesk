@@ -14,7 +14,8 @@
 // negative cases — wrong channel, wrong address, collision, unwired CE — are
 // asserted with the same machinery.
 
-import { Nrf24Device, NRF_REG, NRF24_BAND } from '../src/simulation/devices/nrf24';
+import { Nrf24Device, NRF_REG, NRF24_BASE_KHZ } from '../src/simulation/devices/nrf24';
+import { RF_BAND } from '../src/simulation/devices/rfMedium';
 import { RfMedium } from '../src/simulation/devices/rfMedium';
 import { simulationController } from '../src/simulation/simulationController';
 import { useSimulationStore } from '../src/simulation/simulationStore';
@@ -185,8 +186,9 @@ section('4. a packet occupies the air for as long as it should');
     const expected = (8 * (1 + 5 + 4 + 1) + 9) / 1_000_000 * 1_000_000;
     const airtime = t.endUs - t.startUs;
     check(Math.abs(airtime - expected) < 1, `airtime is ${airtime.toFixed(0)} us, not instant`);
-    check(t.band === NRF24_BAND, 'on the 2.4 GHz band');
-    check(t.channel === 76, 'on the configured channel');
+    check(t.band === RF_BAND, 'on the shared band every radio uses');
+    check(t.channel === NRF24_BASE_KHZ + 76_000, `at 2476 MHz, the frequency channel 76 actually is (${t.channel} kHz)`);
+    check(t.match.modulation === 'gfsk', 'marked as GFSK, so only its own family can demodulate it');
     check(String(t.match.address) === 'e1e1e1e1e1', 'addressed to TX_ADDR');
   }
 

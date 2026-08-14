@@ -1320,6 +1320,28 @@ function Nrf24Art({ def, visual }: ArtProps) {
   );
 }
 
+/**
+ * The SX1278 breakout: a dark board dominated by the shielded module can, with
+ * the antenna pad at one corner. The can is what makes it recognisable.
+ */
+function LoraArt({ def, visual }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const active = visual?.on === true;
+  return (
+    <g>
+      <rect x={0.5 * MM} y={0.5 * MM} width={W - 1 * MM} height={H - 1 * MM} rx="2" fill="#1b2a24" stroke="#0c1512" />
+      <rect x={W * 0.12} y={H * 0.1} width={W * 0.76} height={H * 0.44} rx="1.5" fill="#9aa4ad" stroke="#5d666e" strokeWidth="0.8" />
+      <rect x={W * 0.18} y={H * 0.16} width={W * 0.64} height={H * 0.32} rx="1" fill="none" stroke="#7d868e" strokeWidth="0.6" />
+      <text x={W / 2} y={H * 0.36} textAnchor="middle" fontSize={H * 0.09} fill="#4a5259" fontFamily="sans-serif">SX1278</text>
+      <circle cx={W * 0.86} cy={H * 0.62} r={W * 0.07} fill={active ? '#8fdc6a' : '#2f4038'} stroke="#101a16" strokeWidth="0.6" />
+      {def.pins.map((p) => (
+        <rect key={p.id} x={p.x - 1.1} y={p.y - 1.1} width="2.2" height="2.2" rx="0.5" fill="#d8b24a" />
+      ))}
+    </g>
+  );
+}
+
 /** A 5 mm LED in clear or smoked epoxy, with the flat on the cathode side. */
 function IrLedArt({ def, visual }: ArtProps) {
   const W = def.widthMm * MM;
@@ -1819,6 +1841,7 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   tmp36: (p) => <Tmp36Art {...p} />,
   ldr: (p) => <LdrArt {...p} />,
   nrf24: (p) => <Nrf24Art {...p} />,
+  lora: (p) => <LoraArt {...p} />,
   'ir-receiver': (p) => <IrReceiverArt {...p} />,
   'ir-led': (p) => <IrLedArt {...p} />,
   'ir-remote': (p) => <IrRemoteArt {...p} />,

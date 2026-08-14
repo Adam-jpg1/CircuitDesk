@@ -40,6 +40,23 @@
 /** A radio band. Parts on different bands cannot hear each other at all. */
 export type RfBand = string;
 
+/**
+ * The one band every radio here shares, with the CHANNEL carrying the actual
+ * centre frequency in kilohertz.
+ *
+ * One numbering for every family on purpose. An nRF24 on channel 76 is at
+ * 2 476 000 kHz and a LoRa module at 433 MHz is at 433 000 kHz, so they cannot
+ * interfere — but a LoRa module and a bare OOK transmitter both sitting on
+ * 433 920 kHz can, and do. Energy is energy; whether a receiver can DEMODULATE
+ * what it hears is a separate question, answered by the modulation field in
+ * `match`.
+ *
+ * Simplification, stated rather than hidden: channels are compared for
+ * equality, not for overlapping bandwidth. Two radios a few kilohertz apart do
+ * not interfere here even though real ones would.
+ */
+export const RF_BAND = 'radio';
+
 export interface RfTransmission {
   /** Monotonic, so a receiver can say which ones it has already taken. */
   readonly id: number;
