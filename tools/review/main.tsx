@@ -253,65 +253,53 @@ const SHEETS: Record<string, { title: string; cells: Cell[]; width: number }> = 
  */
 function Showcase() {
   const W = 2200;
-  const H = 1500;
-  type Item = { id: string; x: number; y: number; board?: boolean; props?: Record<string, unknown> };
-  const items: Item[] = [
-    // boards along the spine
-    { id: 'board.arduino-uno', x: 60, y: 120, board: true },
-    { id: 'board.raspberry-pi-pico', x: 430, y: 130, board: true },
-    { id: 'board.esp32-c6-devkitc-1', x: 560, y: 130, board: true },
-    // input cluster, top left
-    { id: 'comp.mini-keyboard', x: 60, y: 400 },
-    { id: 'comp.keypad-4x4', x: 60, y: 660 },
-    { id: 'comp.joystick', x: 290, y: 660 },
-    { id: 'comp.rotary-encoder', x: 430, y: 660 },
-    { id: 'comp.push-button-6mm', x: 560, y: 660 },
-    { id: 'comp.dip-switch-8', x: 560, y: 730 },
-    // displays down the middle
-    { id: 'comp.lcd1602', x: 740, y: 120 },
-    { id: 'comp.oled', x: 1090, y: 120 },
-    { id: 'comp.ili9341', x: 1260, y: 120 },
-    { id: 'comp.gc9a01', x: 1490, y: 120 },
-    { id: 'comp.epaper29', x: 1710, y: 120 },
-    { id: 'comp.st7789', x: 1940, y: 120 },
-    { id: 'comp.seven-segment-4', x: 740, y: 300 },
-    { id: 'comp.neopixel-ring', x: 920, y: 300 },
-    { id: 'comp.led-matrix', x: 1130, y: 300 },
-    { id: 'comp.neopixel-strip', x: 1290, y: 300 },
-    // sensors
-    { id: 'comp.ultrasonic', x: 740, y: 500 },
-    { id: 'comp.bme280', x: 950, y: 500 },
-    { id: 'comp.mpu6050', x: 1080, y: 500 },
-    { id: 'comp.ldr', x: 1210, y: 500 },
-    // radios and buses
-    { id: 'comp.gps', x: 740, y: 650 },
-    { id: 'comp.nrf24l01', x: 900, y: 650 },
-    { id: 'comp.lora-sx1278', x: 1040, y: 650 },
-    { id: 'comp.max485', x: 1200, y: 650 },
-    { id: 'comp.mcp2515', x: 1330, y: 650 },
-    { id: 'comp.sd-card', x: 1520, y: 650 },
-    { id: 'comp.hc05', x: 1680, y: 650 },
-    // motion, bottom
-    { id: 'comp.servo', x: 740, y: 830 },
-    { id: 'comp.dc-motor', x: 900, y: 830 },
-    { id: 'comp.stepper', x: 1060, y: 830 },
-    { id: 'comp.a4988', x: 1250, y: 830 },
-    { id: 'comp.relay', x: 1400, y: 830 },
-    { id: 'comp.solenoid', x: 1560, y: 830 },
-    // logic + power, bottom band
-    { id: 'comp.hc595', x: 740, y: 1030 },
-    { id: 'comp.gate-nand', x: 880, y: 1030 },
-    { id: 'comp.74hc138', x: 1010, y: 1030 },
-    { id: 'comp.dc-supply', x: 1180, y: 1030 },
-    { id: 'comp.battery-aa', x: 1360, y: 1030 },
-    { id: 'comp.buck-converter', x: 1520, y: 1030 },
-    { id: 'comp.regulator-5', x: 1680, y: 1030 },
-    { id: 'comp.breadboard-half', x: 60, y: 900 },
-    { id: 'comp.resistor', x: 60, y: 1180 },
-    { id: 'comp.led', x: 160, y: 1180 },
-    { id: 'comp.capacitor', x: 230, y: 1180 },
-    { id: 'comp.buzzer', x: 310, y: 1180 },
+  type Row = { y: number; ids: string[]; boards?: boolean };
+  // Grouped the way a bench is grouped rather than packed by size, but laid out
+  // by code within each band: a showcase whose parts overlap each other is
+  // making the opposite of the point it exists to make.
+  const rows: Row[] = [
+    { y: 90, ids: ['board.arduino-uno', 'board.raspberry-pi-pico', 'board.esp32-c6-devkitc-1'], boards: true },
+    { y: 360, ids: ['comp.lcd1602', 'comp.oled', 'comp.ili9341', 'comp.gc9a01', 'comp.epaper29', 'comp.st7789'] },
+    { y: 700, ids: ['comp.seven-segment-4', 'comp.neopixel-ring', 'comp.led-matrix', 'comp.neopixel-strip', 'comp.led', 'comp.rgb-led'] },
+    { y: 920, ids: ['comp.mini-keyboard', 'comp.keypad-4x4', 'comp.joystick', 'comp.rotary-encoder', 'comp.push-button-6mm', 'comp.dip-switch-8'] },
+    {
+      y: 1180,
+      ids: [
+        'comp.ultrasonic', 'comp.bme280', 'comp.mpu6050', 'comp.ldr',
+        'comp.gps', 'comp.nrf24l01', 'comp.lora-sx1278', 'comp.max485', 'comp.mcp2515',
+        'comp.sd-card', 'comp.hc05',
+      ],
+    },
+    {
+      y: 1400,
+      ids: [
+        'comp.servo', 'comp.dc-motor', 'comp.stepper', 'comp.a4988', 'comp.relay', 'comp.solenoid',
+        'comp.hc595', 'comp.gate-nand', 'comp.74hc138',
+      ],
+    },
+    {
+      y: 1620,
+      ids: [
+        'comp.breadboard-half', 'comp.dc-supply', 'comp.battery-aa', 'comp.buck-converter',
+        'comp.regulator-5', 'comp.resistor', 'comp.capacitor', 'comp.buzzer',
+      ],
+    },
   ];
+
+  const GAP_X = 34;
+  const placed: { def: PartDefinition; x: number; y: number }[] = [];
+  let bottom = 0;
+  for (const row of rows) {
+    let x = 50;
+    for (const id of row.ids) {
+      const def = row.boards ? boardOf(id) : defOf(id);
+      if (!def) continue;
+      placed.push({ def, x, y: row.y });
+      x += def.widthMm * 4 + GAP_X;
+      bottom = Math.max(bottom, row.y + def.heightMm * 4);
+    }
+  }
+  const H = bottom + 60;
 
   return (
     <svg width={W} height={H} style={{ display: 'block', background: '#0d1117' }}>
@@ -325,17 +313,15 @@ function Showcase() {
         </pattern>
       </defs>
       <rect width={W} height={H} fill="url(#grid-major)" />
-      <text x={40} y={44} fontSize="22" fill="#e6ebf1" fontFamily="sans-serif" fontWeight="600">
+      <text x={50} y={54} fontSize="22" fill="#e6ebf1" fontFamily="sans-serif" fontWeight="600">
         Showcase workspace
         <tspan fill="#6b7885" fontWeight="400" fontSize="14">
           {'   '}zoom 1.0 — actual size, simulation running
         </tspan>
       </text>
-      {items.map((it, i) => {
-        const def = it.board ? boardOf(it.id) : defOf(it.id);
-        if (!def) return <text key={i} x={it.x} y={it.y} fill="#f85149" fontSize="12">missing {it.id}</text>;
-        return <Part key={i} def={def} properties={it.props} live x={it.x} y={it.y} />;
-      })}
+      {placed.map((it, i) => (
+        <Part key={i} def={it.def} live x={it.x} y={it.y} />
+      ))}
     </svg>
   );
 }
