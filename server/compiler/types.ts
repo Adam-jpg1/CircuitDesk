@@ -65,6 +65,30 @@ export interface CompileResult {
     workaround?: string;
   }[];
   durationMs: number;
+  /**
+   * Where the time went, in milliseconds, measured rather than estimated.
+   *
+   * Present on every build so a slow one can be explained without re-running it
+   * under a profiler: "the ESP32 is slow" and "arduino-cli spends half a second
+   * loading platforms before it compiles anything" are different problems with
+   * different fixes, and only one of them is ours.
+   */
+  timings?: {
+    /** Writing the sketch and its files to the build directory. */
+    prepareMs: number;
+    /** The arduino-cli process, wall clock. */
+    compileMs: number;
+    /** Reading the artifacts back and base64-encoding them. */
+    artifactMs: number;
+  };
+  /**
+   * How this result was produced.
+   *
+   * `compiled` ran the toolchain. `cached` came from the artifact cache without
+   * running anything. `joined` waited on a build another request had already
+   * started for the identical key.
+   */
+  source?: 'compiled' | 'cached' | 'joined';
   /** Board this firmware was built for — execution paths refuse a mismatch. */
   boardId?: string;
   /** Toolchain target this firmware was built for. */

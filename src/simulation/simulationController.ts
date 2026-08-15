@@ -34,6 +34,7 @@ import { compileProjectCode } from '../compiler/compilerClient';
 import { resolveDefinition } from '../project/partsRegistry';
 import { filesForBoard, sketchIdFor } from '../project/sketches';
 import { useSimulationStore } from './simulationStore';
+import type { CompileStage } from '../app/editorStore';
 import type { BoardDefinition, CircuitProject, CompileResult, SimulationNote } from '../types';
 
 const TICK_MS = 12;
@@ -173,9 +174,21 @@ class SimulationController {
     const { targets, unbuildable } = resolveWorkspaceTargets(project);
     const builds: BoardBuild[] = [];
 
-    for (const target of targets) {
-      builds.push(await this.buildTarget(project, target));
+    const labels = this.boardLabels();
+    for (const [index, target] of targets.entries()) {
+      // One status per BUILD, not per board: three Picos on one sketch are one
+      // compile, and saying so three times would misreport what is happening.
+      this.onStage?.({
+        step: 'preparing',
+        sketchName: target.sketchName,
+        fqbn: target.fqbn,
+        boards: target.instanceIds.map((id) => labels.get(id) ?? this.boardLabel(id)),
+        index: index + 1,
+        total: targets.length,
+      });
+      builds.push(await this.buildTarget(project, target, index + 1, targets.length, labels));
     }
+    this.onStage?.(null);
     for (const board of unbuildable) {
       builds.push({
         fqbn: '',
@@ -250,7 +263,21 @@ class SimulationController {
     return def?.name ?? instanceId;
   }
 
-  private async buildTarget(project: CircuitProject, target: WorkspaceTarget): Promise<BoardBuild> {
+  /**
+   * Where build stages are reported, wired up by the app.
+   *
+   * A callback rather than a store write from here, because the controller is
+   * used headless in tests where there is no UI to tell.
+   */
+  onStage?: (stage: CompileStage | null) => void;
+
+  private async buildTarget(
+    project: CircuitProject,
+    target: WorkspaceTarget,
+    index: number,
+    total: number,
+    labels: Map<string, string>,
+  ): Promise<BoardBuild> {
     const files = filesForBoard(project, target.instanceIds[0]);
     const base = {
       fqbn: target.fqbn,
@@ -266,8 +293,13 @@ class SimulationController {
     // two machines can load the same one.
     const cacheKey = buildKey(target.fqbn, files);
 
+    const boards = target.instanceIds.map((id) => labels.get(id) ?? this.boardLabel(id));
+    const stage = (step: CompileStage['step']) =>
+      this.onStage?.({ step, sketchName: target.sketchName, fqbn: target.fqbn, boards, index, total });
+
     const cached = this.artifacts.get(cacheKey);
     if (cached) {
+      stage('cached');
       const notes = this.artifactNotes.get(cacheKey);
       return {
         ...base,
@@ -277,6 +309,7 @@ class SimulationController {
       };
     }
 
+    stage('compiling');
     const result = await this.compileFn(project, {
       boardId: target.boardId,
       fqbn: target.fqbn,

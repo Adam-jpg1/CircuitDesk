@@ -2,6 +2,17 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { CLI_CACHE_ROOT } from './buildCache.js';
+
+/**
+ * Environment every arduino-cli call runs with.
+ *
+ * The only thing set here is where its build cache lives, so the compiled core
+ * archives it shares between builds — and the per-sketch intermediate
+ * directories that used to grow without limit — are somewhere this service can
+ * measure and trim.
+ */
+const CLI_ENV = { ...process.env, ARDUINO_BUILD_CACHE_PATH: CLI_CACHE_ROOT };
 
 const execFileAsync = promisify(execFile);
 const CLI_TIMEOUT_MS = 180_000;
@@ -138,7 +149,27 @@ export interface CliBuildOutput {
   binaryRegions?: { offset: number; data: string }[];
   flashBytes?: number;
   ramBytes?: number;
+  /** Time spent reading artifacts back off disk and encoding them. */
+  artifactMs?: number;
 }
+
+/**
+ * Build steps this service pays for and never reads.
+ *
+ * The ESP32 core's fourth post-objcopy hook runs esptool a third time to write
+ * a padded 4 MB `.merged.bin` — the whole flash image, for flashing a physical
+ * chip over a serial port. Nothing here flashes anything: the artifacts that
+ * leave this service are the application image, the bootloader and the
+ * partition table, each picked by name, and `.merged.bin` is explicitly
+ * excluded from that choice. Writing it cost about 300 ms and 4 MB of disk on
+ * every ESP32 build.
+ *
+ * Overriding a numbered hook is version-specific by nature, so the artifacts a
+ * build produces with this applied are asserted byte-for-byte against a build
+ * without it — see tests/compiler.performance.mts. If a future core renumbers
+ * its hooks, that test fails rather than a needed artifact quietly vanishing.
+ */
+const SKIP_MERGED_IMAGE = ['--build-property', 'recipe.hooks.objcopy.postobjcopy.3.pattern=/usr/bin/env true'];
 
 export async function cliCompile(
   sketchDir: string,
@@ -148,25 +179,36 @@ export async function cliCompile(
   arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' = 'avr',
 ): Promise<CliBuildOutput> {
   const jobs = ['--jobs', String(COMPILE_JOBS)];
+  const skip = arch === 'esp32c3' || arch === 'esp32c6' ? SKIP_MERGED_IMAGE : [];
   // Syntax-only is a real compile with the artifacts thrown away, not a flag.
   // It used to pass `--dry-run`, which arduino-cli 1.5.1 does not have: every
   // call to /api/compiler/validate failed with "unknown flag: --dry-run" and
   // reported it as a build failure. Nothing in the app calls that endpoint, so
   // it went unnoticed. Omitting --output-dir leaves the artifacts in
   // arduino-cli's own build directory, where they are never read.
+  // Deliberately no --build-path. arduino-cli derives one from a hash of the
+  // sketch's own path and keeps compiled CORE archives in a cache shared across
+  // all builds — and passing --build-path opts out of that sharing, so the core
+  // is rebuilt from nothing every time. Measured on an ESP32-C6: 4.2 s with the
+  // shared core cache, 21.3 s without it. The sketch directory this is handed
+  // is content-keyed instead, which is what keeps one user's sketch objects out
+  // of another's while the core archives, which contain nobody's source, are
+  // shared.
   const args = syntaxOnly
-    ? ['compile', ...jobs, '--fqbn', fqbn, '--warnings', 'default', sketchDir]
-    : ['compile', ...jobs, '--fqbn', fqbn, '--warnings', 'default', '--output-dir', outputDir, sketchDir];
+    ? ['compile', ...jobs, ...skip, '--fqbn', fqbn, '--warnings', 'default', sketchDir]
+    : ['compile', ...jobs, ...skip, '--fqbn', fqbn, '--warnings', 'default', '--output-dir', outputDir, sketchDir];
   try {
     const { stdout, stderr } = await execFileAsync('arduino-cli', args, {
       timeout: CLI_TIMEOUT_MS,
       maxBuffer: OUTPUT_LIMIT_BYTES,
       killSignal: 'SIGKILL',
+      env: CLI_ENV,
     });
     let hex: string | undefined;
     let binaryBase64: string | undefined;
     let binaryFormat: 'uf2' | 'bin' | 'esp-image' | undefined;
     let binaryRegions: { offset: number; data: string }[] | undefined;
+    const artifactStart = Date.now();
     if (!syntaxOnly) {
       const files = await readdir(outputDir);
       // Artifact choice follows the TARGET's architecture, not whatever the
@@ -216,9 +258,11 @@ export async function cliCompile(
         if (hexFile) hex = await readFile(path.join(outputDir, hexFile), 'utf8');
       }
     }
+    const artifactMs = Date.now() - artifactStart;
     const flashMatch = /Sketch uses (\d+) bytes/.exec(stdout);
     const ramMatch = /Global variables use (\d+) bytes/.exec(stdout);
     return {
+      artifactMs,
       code: 0,
       stdout,
       stderr,

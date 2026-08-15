@@ -31,6 +31,7 @@ export async function compileAction(run: boolean): Promise<boolean> {
     return false;
   }
   s.setCompiling(true);
+  simulationController.onStage = (stage) => useEditorStore.getState().setCompileStage(stage);
   try {
     const report = await simulationController.build(project);
     // The compiler panel shows one target's diagnostics; the primary board's
@@ -69,6 +70,7 @@ export async function compileAction(run: boolean): Promise<boolean> {
     }
     return failed.length === 0;
   } finally {
+    simulationController.onStage = undefined;
     useEditorStore.getState().setCompiling(false);
   }
 }
