@@ -18,7 +18,7 @@
 // without one. The parts that do not are exercised directly, because a key
 // function is worth testing without waiting four seconds for each case.
 
-import { readdir, mkdir, writeFile, rm, stat } from 'node:fs/promises';
+import { readdir, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { buildKey, evictBuildDirs, CACHE_ROOT, CLI_CACHE_ROOT, cacheStats } from '../server/compiler/buildCache.js';
 
@@ -250,6 +250,37 @@ if (!live) {
       `${stats.maxDirs} dirs / ${Math.round(Number(stats.maxDirBytes) / 1024 / 1024)} MB on disk`);
     check(Number(stats.maxEntries) > 0 && Number(stats.maxBytes) > 0, 'the artifact cache is bounded in both entries and bytes');
   }
+}
+
+// ================================ 6. the abuse protection is untouched =====
+section('6. caching did not weaken the public rate limiter');
+{
+  // A cache that made the benchmark look good by raising the compile ceiling
+  // would have improved the numbers and nothing else. The production default
+  // is what ships; the environment override exists so a full regression run
+  // from one address is not throttled by a rule aimed at public traffic.
+  const source = await readFile('server/index.ts', 'utf8');
+  const configured = /COMPILE_RATE_MAX \?\? (\d+)/.exec(source);
+  check(configured?.[1] === '60', `the public compile budget is still 60 per 5 minutes (${configured?.[1] ?? 'not found'})`);
+  check(/windowMs: 5 \* 60_000/.test(source), 'over the same five-minute window');
+  check(
+    /app\.post\('\/api\/compiler\/compile', compileLimiter/.test(source),
+    'and the compile endpoint still goes through it',
+  );
+  check(
+    /app\.post\('\/api\/compiler\/validate', compileLimiter/.test(source),
+    'as does validate',
+  );
+
+  // The gate is what protects memory, and the cache must not have bypassed it.
+  const service = await readFile('server/compiler/compilerService.ts', 'utf8');
+  check(!/compileGate/.test(service), 'the cache sits inside the gate rather than around it');
+  check(
+    /const COMPILE_JOBS = Math\.max\(1, Number\(process\.env\.COMPILE_JOBS \?\? '1'\)/.test(
+      await readFile('server/compiler/arduinoCli.ts', 'utf8'),
+    ),
+    'and COMPILE_JOBS still defaults to 1',
+  );
 }
 
 console.log(
