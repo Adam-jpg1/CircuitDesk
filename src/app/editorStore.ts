@@ -16,6 +16,27 @@ import { loadSetting, saveSetting, DEFAULT_PANEL_SIZES, type PanelSizes } from '
 import { renderProjectThumbnail } from '../canvas/thumbnail';
 
 export type Tool = 'select' | 'wire' | 'pan';
+
+/**
+ * The stages a build passes through, as the app can actually observe them.
+ *
+ * There is no progress bar here on purpose. The toolchain reports nothing until
+ * it is finished, so anything finer than "which step has started" would be a
+ * number the app made up. `cached` is its own stage because a build that ran
+ * nothing should say so rather than flash through the others.
+ */
+export interface CompileStage {
+  step: 'preparing' | 'compiling' | 'linking' | 'starting' | 'cached';
+  /** Sketch being built. */
+  sketchName: string;
+  /** Target it is being built for. */
+  fqbn: string;
+  /** Boards that share this build, by display name. */
+  boards: string[];
+  /** Which build of how many, for a workspace with several targets. */
+  index: number;
+  total: number;
+}
 export type BottomTab = 'code' | 'serial' | 'compiler' | 'validation' | 'tests' | 'pins' | 'debug';
 
 interface CircuitSnapshot {
@@ -67,6 +88,15 @@ interface EditorState {
   panelSizes: PanelSizes;
 
   compiling: boolean;
+  /**
+   * What the build is doing right now, or null when nothing is building.
+   *
+   * Deliberately a stage rather than a percentage: the compiler does not report
+   * progress and inventing one would be a number that means nothing. Each stage
+   * is a thing that has actually started — `Compiling` appears when the request
+   * is on its way to the toolchain, not before.
+   */
+  compileStage: CompileStage | null;
   lastCompile: CompileResult | null;
   validationIssues: ValidationIssue[];
   highlightedIssueId: string | null;
@@ -97,6 +127,7 @@ interface EditorState {
   setPanelSizes(sizes: Partial<PanelSizes>): void;
   setWireDraft(draft: WireDraft | null): void;
   setCompiling(v: boolean): void;
+  setCompileStage(stage: CompileStage | null): void;
   setLastCompile(r: CompileResult | null): void;
   setValidationIssues(issues: ValidationIssue[]): void;
   setHighlightedIssue(id: string | null): void;
@@ -192,6 +223,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     activeBoardId: null,
     panelSizes: loadSetting('panelSizes', DEFAULT_PANEL_SIZES),
     compiling: false,
+    compileStage: null,
     lastCompile: null,
     validationIssues: [],
     highlightedIssueId: null,
@@ -297,7 +329,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ panelSizes: next });
     },
     setWireDraft: (wireDraft) => set({ wireDraft }),
-    setCompiling: (compiling) => set({ compiling }),
+    setCompiling: (compiling) => set({ compiling, compileStage: compiling ? get().compileStage : null }),
+    setCompileStage: (compileStage) => set({ compileStage }),
     setLastCompile: (lastCompile) => set({ lastCompile }),
     setValidationIssues: (validationIssues) => set({ validationIssues }),
     setHighlightedIssue: (highlightedIssueId) => set({ highlightedIssueId }),

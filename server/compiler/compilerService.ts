@@ -3,8 +3,9 @@ import { detectArduinoCli, cliCompile } from './arduinoCli.js';
 import { detectGccToolchain, gccCompile, parseDiagnostics, BuildTimeoutError } from './gccToolchain.js';
 import { buildSketchDir, buildCliSketchDir } from './sketchBuilder.js';
 import { cleanupDir, createBuildDir, validateFiles, InputValidationError } from './fileService.js';
-import { findTarget, SUPPORTED_TARGETS, type CompileRequest, type CompileResult, type Diagnostic } from './types.js';
+import { findTarget, SUPPORTED_TARGETS, type BoardTarget, type CompileRequest, type CompileResult, type Diagnostic } from './types.js';
 import { includeWarnings } from './libraries.js';
+import { buildKey, buildDirFor, cachedResult, rememberResult, runDeduplicated, evictBuildDirs } from './buildCache.js';
 
 export interface CompilerHealth {
   available: boolean;
@@ -42,6 +43,20 @@ export async function getCompilerHealth(): Promise<CompilerHealth> {
   };
 }
 
+/**
+ * A build, or the memory of one.
+ *
+ * Three ways out, in order of cost:
+ *   - the artifact cache already holds this exact build: no toolchain runs;
+ *   - a build with this exact key is already running: wait for it rather than
+ *     starting a second one;
+ *   - run it, in a build directory derived from the key, so arduino-cli finds
+ *     the objects it left there last time instead of starting from nothing.
+ *
+ * "This exact build" means the sources, the target, the toolchain version and
+ * the core version — see buildKey. Nothing about the project's layout is in
+ * there, so moving a part or renaming a board can never cost a compile.
+ */
 export async function compileProject(req: CompileRequest, syntaxOnly: boolean): Promise<CompileResult> {
   const started = Date.now();
   const base: Omit<CompileResult, 'success'> = {
@@ -90,8 +105,8 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
 
   const cli = await detectArduinoCli();
 
-  // Non-AVR architectures (RP2040) compile ONLY through arduino-cli with the
-  // exact required core installed. There is no fallback to any other
+  // Non-AVR architectures (RP2040, ESP32) compile ONLY through arduino-cli with
+  // the exact required core installed. There is no fallback to any other
   // architecture or board.
   if (target.arch !== 'avr') {
     if (!cli.available) {
@@ -112,28 +127,7 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
         durationMs: Date.now() - started,
       };
     }
-    const buildDirRp = await createBuildDir();
-    try {
-      const sketchDir = await buildCliSketchDir(buildDirRp, req.files);
-      const outDir = path.join(buildDirRp, 'out');
-      const out = await cliCompile(sketchDir, outDir, target.fqbn, syntaxOnly, target.arch);
-      const nameMap = new Map<string, string>([['cdsketch.ino', 'sketch.ino']]);
-      const diagnostics = parseDiagnostics(out.stderr, nameMap);
-      return finish(out.code === 0, 'arduino-cli', cli.version, out, diagnostics, target, started, syntaxOnly, notes);
-    } catch (err) {
-      if (err instanceof BuildTimeoutError) {
-        return { ...base, success: false, error: err.message, errorCode: 'BUILD_TIMEOUT', durationMs: Date.now() - started };
-      }
-      return {
-        ...base,
-        success: false,
-        error: err instanceof Error ? err.message.slice(0, 2000) : 'Internal compiler error.',
-        errorCode: 'INTERNAL',
-        durationMs: Date.now() - started,
-      };
-    } finally {
-      await cleanupDir(buildDirRp);
-    }
+    return cliBuild(req, target, cli, syntaxOnly, notes, base, started);
   }
 
   const health = await getCompilerHealth();
@@ -147,17 +141,14 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
     };
   }
 
+  if (health.toolchain === 'arduino-cli') {
+    return cliBuild(req, target, cli, syntaxOnly, notes, base, started);
+  }
+
+  // The local avr-g++ fallback. Not the deployed path, and not cached: it exists
+  // so a machine without arduino-cli can still build an Uno.
   const buildDir = await createBuildDir();
   try {
-    if (health.toolchain === 'arduino-cli') {
-      const sketchDir = await buildCliSketchDir(buildDir, req.files);
-      const outDir = path.join(buildDir, 'out');
-      const out = await cliCompile(sketchDir, outDir, target.fqbn, syntaxOnly, target.arch);
-      const nameMap = new Map<string, string>([['cdsketch.ino', 'sketch.ino']]);
-      const diagnostics = parseDiagnostics(out.stderr, nameMap);
-      return finish(out.code === 0, 'arduino-cli', health.version, out, diagnostics, target, started, syntaxOnly, notes);
-    }
-
     const gcc = await detectGccToolchain();
     const sketch = await buildSketchDir(buildDir, req.files);
     const sourcesText = req.files.map((f) => f.content);
@@ -171,25 +162,83 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
     }
     return finish(out.code === 0, 'avr-gcc', gcc.version, out, diagnostics, target, started, syntaxOnly, notes);
   } catch (err) {
-    if (err instanceof BuildTimeoutError) {
-      return {
-        ...base,
-        success: false,
-        error: err.message,
-        errorCode: 'BUILD_TIMEOUT',
-        durationMs: Date.now() - started,
-      };
-    }
-    return {
-      ...base,
-      success: false,
-      error: err instanceof Error ? err.message.slice(0, 2000) : 'Internal compiler error.',
-      errorCode: 'INTERNAL',
-      durationMs: Date.now() - started,
-    };
+    return failure(err, base, started);
   } finally {
     await cleanupDir(buildDir);
   }
+}
+
+/** Turns a thrown build error into the result shape the API promises. */
+function failure(err: unknown, base: Omit<CompileResult, 'success'>, started: number): CompileResult {
+  if (err instanceof BuildTimeoutError) {
+    return { ...base, success: false, error: err.message, errorCode: 'BUILD_TIMEOUT', durationMs: Date.now() - started };
+  }
+  return {
+    ...base,
+    success: false,
+    error: err instanceof Error ? err.message.slice(0, 2000) : 'Internal compiler error.',
+    errorCode: 'INTERNAL',
+    durationMs: Date.now() - started,
+  };
+}
+
+/** The arduino-cli path, with the cache, the dedup and the reusable build dir. */
+async function cliBuild(
+  req: CompileRequest,
+  target: BoardTarget,
+  cli: { version: string; coreVersions: Record<string, string> },
+  syntaxOnly: boolean,
+  notes: CompileResult['simulationNotes'],
+  base: Omit<CompileResult, 'success'>,
+  started: number,
+): Promise<CompileResult> {
+  const key = buildKey({
+    fqbn: target.fqbn,
+    toolchainVersion: cli.version,
+    coreVersion: cli.coreVersions[target.core] ?? 'unknown',
+    syntaxOnly,
+    files: req.files,
+  });
+
+  const hit = cachedResult(key);
+  if (hit) return { ...hit, durationMs: Date.now() - started };
+
+  return runDeduplicated(key, async () => {
+    const buildRoot = await buildDirFor(key);
+    const prepareStart = Date.now();
+    try {
+      const sketchDir = await buildCliSketchDir(buildRoot, req.files);
+      const outDir = path.join(buildRoot, 'out');
+      const prepareMs = Date.now() - prepareStart;
+
+      const compileStart = Date.now();
+      const out = await cliCompile(sketchDir, outDir, target.fqbn, syntaxOnly, target.arch);
+      const compileMs = Date.now() - compileStart;
+
+      // The handoff directories are read and finished with. An ESP32 build
+      // leaves a 6.5 MB .elf and an 8.4 MB .map in them that nothing here reads
+      // — 30 MB per build of pure sediment, against a cache budget of 512 MB.
+      // The sketch directory itself stays: arduino-cli derives its intermediate
+      // cache path from a hash of that path, and moving it would throw away the
+      // reuse this whole arrangement exists for.
+      await cleanupDir(outDir);
+      await cleanupDir(path.join(sketchDir, 'build'));
+
+      const nameMap = new Map<string, string>([['cdsketch.ino', 'sketch.ino']]);
+      const diagnostics = parseDiagnostics(out.stderr, nameMap);
+      const result = finish(out.code === 0, 'arduino-cli', cli.version, out, diagnostics, target, started, syntaxOnly, notes);
+      result.timings = { prepareMs, compileMs, artifactMs: out.artifactMs ?? 0 };
+      result.source = 'compiled';
+      rememberResult(key, result);
+      return result;
+    } catch (err) {
+      return failure(err, base, started);
+    } finally {
+      // The directory is the cache, so it stays. Trimming afterwards cannot
+      // throw away the one that is about to be reused.
+      void evictBuildDirs().catch(() => undefined);
+    }
+  });
 }
 
 function finish(

@@ -11,6 +11,8 @@ import { PINNED_CORES, pinnedCore } from './compiler/cores.js';
 import { PINNED_LIBRARIES, headersForTarget } from './compiler/libraries.js';
 import { rateLimit } from './rateLimit.js';
 import { CompileGate, CompilerBusyError } from './compileGate.js';
+import { cacheStats, evictBuildDirs } from './compiler/buildCache.js';
+import { warmCoreCaches } from './compiler/warmup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -66,6 +68,16 @@ app.get('/api/compiler/health', async (_req, res) => {
     console.error('[CircuitDesk] health check failed:', err);
     res.status(500).json({ available: false, toolchain: 'none', version: '', detail: 'Internal error.' });
   }
+});
+
+/**
+ * What the build cache is holding.
+ *
+ * Reported rather than inferred, because "caching is working" is a claim about
+ * hit rate and bounded size, and both are numbers this service already has.
+ */
+app.get('/api/compiler/cache', (_req, res) => {
+  res.json(cacheStats());
 });
 
 app.get('/api/compiler/boards', (_req, res) => {
@@ -272,6 +284,16 @@ app.listen(PORT, HOST, () => {
     try {
       const health = await getCompilerHealth();
       console.log(`[CircuitDesk] toolchain: ${health.toolchain} ${health.version} — ${health.detail}`);
+      // A restart inherits whatever the previous process left on disk, which is
+      // the point of the cache surviving one — but it must not inherit a tree
+      // that has already outgrown its limits.
+      const trimmed = await evictBuildDirs(true);
+      const stats = cacheStats();
+      console.log(
+        `[CircuitDesk] build cache at ${stats.root} (max ${stats.maxDirs} dirs / ` +
+        `${Math.round(stats.maxDirBytes / 1024 / 1024)} MB)` +
+        (trimmed.removed > 0 ? `, trimmed ${trimmed.removed} on startup` : ''),
+      );
       if (health.toolchain === 'avr-gcc') {
         const gcc = await detectGccToolchain();
         const uno = findTarget('arduino:avr:uno');
@@ -279,6 +301,21 @@ app.listen(PORT, HOST, () => {
           await ensureCoreArchive(uno, gcc.coreRoot);
           console.log('[CircuitDesk] Arduino core archive ready.');
         }
+      }
+      if (health.toolchain === 'arduino-cli' && process.env.COMPILE_WARMUP !== 'off') {
+        // Through the gate, so a user who arrives mid-warm-up queues behind one
+        // build rather than running a second one alongside it.
+        const started = Date.now();
+        const outcomes = await warmCoreCaches(
+          (req) => compileGate.run(() => compileProject(req, false)),
+          (line) => console.log(line),
+        );
+        const failed = outcomes.filter((o) => !o.ok);
+        console.log(
+          `[CircuitDesk] core caches warm for ${outcomes.length - failed.length}/${outcomes.length} targets ` +
+          `in ${((Date.now() - started) / 1000).toFixed(1)}s` +
+          (failed.length > 0 ? ` — not warmed: ${failed.map((f) => f.fqbn).join(', ')}` : ''),
+        );
       }
     } catch (err) {
       console.warn('[CircuitDesk] core warmup failed:', err);

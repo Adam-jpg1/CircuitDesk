@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useEditorStore } from '../app/editorStore';
+import { type CompileStage, useEditorStore } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
 import { simulationController } from '../simulation/simulationController';
 import { compileAction, runAction, validateAction } from '../app/actions';
@@ -21,6 +21,7 @@ export function Toolbar() {
   const tool = useEditorStore((s) => s.tool);
   const saveState = useEditorStore((s) => s.saveState);
   const compiling = useEditorStore((s) => s.compiling);
+  const compileStage = useEditorStore((s) => s.compileStage);
   const undoDepth = useEditorStore((s) => s.undoDepth);
   const redoDepth = useEditorStore((s) => s.redoDepth);
   const selection = useEditorStore((s) => s.selection);
@@ -75,8 +76,9 @@ export function Toolbar() {
         <CheckShieldIcon style={{ width: 14, height: 14 }} /> Validate
       </button>
       <button className="btn sm" title="Compile with the real toolchain (Arduino CLI / avr-g++)" disabled={compiling} onClick={() => void compileAction(false)}>
-        <HammerIcon style={{ width: 14, height: 14 }} /> {compiling ? 'Compiling…' : 'Compile'}
+        <HammerIcon style={{ width: 14, height: 14 }} /> {compiling ? stageLabel(compileStage) : 'Compile'}
       </button>
+      {compileStage && <CompileStageDetail stage={compileStage} />}
 
       <div className="sep" />
       {simStatus === 'running' ? (
@@ -137,5 +139,40 @@ function ExportModal({ onClose }: { onClose: () => void }) {
         ))}
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The button's own label while a build is happening.
+ *
+ * Named steps rather than a spinner with a percentage: the toolchain reports
+ * nothing until it is done, so a percentage would be invented.
+ */
+function stageLabel(stage: CompileStage | null): string {
+  switch (stage?.step) {
+    case 'preparing': return 'Preparing…';
+    case 'compiling': return 'Compiling…';
+    case 'linking': return 'Linking…';
+    case 'starting': return 'Starting…';
+    case 'cached': return 'Ready — cached';
+    default: return 'Compiling…';
+  }
+}
+
+/**
+ * What is being built, for whom.
+ *
+ * One line per BUILD, not per board: three Picos running one sketch are one
+ * compile, and the boards it serves are named on that one line.
+ */
+function CompileStageDetail({ stage }: { stage: CompileStage }) {
+  return (
+    <span className="compile-stage" title={`${stage.sketchName} → ${stage.fqbn}`}>
+      <span className="compile-stage-name">{stage.sketchName}</span>
+      <span className="compile-stage-sep">→</span>
+      <span>{stage.fqbn}</span>
+      {stage.boards.length > 0 && <span className="compile-stage-boards">{stage.boards.join(', ')}</span>}
+      {stage.total > 1 && <span className="compile-stage-count">{stage.index}/{stage.total}</span>}
+    </span>
   );
 }
