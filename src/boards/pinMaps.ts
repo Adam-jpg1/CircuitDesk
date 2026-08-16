@@ -212,8 +212,29 @@ export function avrProfileFor(board: BoardDefinition | undefined | null): AvrBoa
  * Arduino-style numbering; returns undefined for everything else (GP pins,
  * power pins, non-AVR boards) rather than guessing.
  */
+export function avrPinNumberForPad(profile: AvrBoardProfile, pad: string): number | undefined {
+  const match = /^P([A-L])(\d)$/.exec(pad);
+  if (!match) return undefined;
+  const port = match[1] as AvrPortName;
+  const index = Number(match[2]);
+  for (const [number, ref] of Object.entries(profile.portMap)) {
+    if (ref.port === port && ref.index === index) return Number(number);
+  }
+  return undefined;
+}
+
 export function arduinoPinNumber(board: BoardDefinition | undefined | null, pinId: string): number | undefined {
   if (!board || (board.architecture ?? 'other') !== 'avr') return undefined;
+  // A board that states which pad a pin reaches has said everything there is
+  // to say, and it is said first: a maker who labels a pin D13 and wires it to
+  // PB3 means PB3, and reading the label instead would drive the wrong port.
+  // The number comes from the variant the firmware was compiled for, because
+  // that numbering is the one the sketch's digitalWrite() went through.
+  const pad = board.padMap?.[pinId];
+  if (pad !== undefined) {
+    const profile = avrProfileFor(board);
+    return profile ? avrPinNumberForPad(profile, pad) : undefined;
+  }
   const analogBase = Number(board.metadata.analogPinBase ?? 14);
   if (/^D\d+$/.test(pinId)) return Number(pinId.slice(1));
   if (/^A\d+$/.test(pinId)) return analogBase + Number(pinId.slice(1));

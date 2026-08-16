@@ -23,6 +23,7 @@
 
 import type { BoardDefinition } from '../types';
 import { arduinoPinNumber, avrProfileFor } from '../boards/pinMaps';
+import { processorProfile } from '../boards/processorProfiles';
 import type { I2cBus } from './devices/i2cBus';
 import type { SpiBus } from './devices/spiBus';
 
@@ -118,9 +119,14 @@ export interface BoardRunner {
  * to resolve GP pins so no AVR code path can ever claim one.
  */
 export function runnerPinIndex(board: BoardDefinition, pinId: string): number | undefined {
-  if (board.architecture === 'rp2040') return rp2040PinIndex(pinId);
+  // A board that carries a pad map is telling us what its pin reaches on the
+  // die, and that is the only thing the emulator has ever known about. Without
+  // this step a custom board's STATUS_LED resolves to nothing and the pin the
+  // user sees never moves, however correctly the firmware drove pad 15.
+  const pad = board.padMap?.[pinId] ?? pinId;
+  if (board.architecture === 'rp2040') return rp2040PinIndex(pad);
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
-  if (espPads !== undefined) return espPadIndex(pinId, espPads);
+  if (espPads !== undefined) return espPadIndex(pad, espPads);
   return arduinoPinNumber(board, pinId);
 }
 
@@ -132,7 +138,14 @@ export function runnerPinIndex(board: BoardDefinition, pinId: string): number | 
  */
 function espVariant(board: BoardDefinition): string {
   const variant = board.metadata?.variant;
-  return typeof variant === 'string' ? variant : '';
+  if (typeof variant === 'string' && variant.length > 0) return variant;
+  // A custom board names a processor rather than a variant, and for these
+  // parts the processor IS the variant — an ESP32-C6 board is an esp32c6 one
+  // whatever its maker called it. Derived rather than required, so nobody has
+  // to type a magic string into a board file to get the right engine.
+  const processor = board.processorProfileId ? processorProfile(board.processorProfileId) : undefined;
+  const architecture = processor?.architecture;
+  return architecture === 'esp32c3' || architecture === 'esp32c6' ? architecture : '';
 }
 
 /**
@@ -209,7 +222,7 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
   // like a working sensor while telling the student nothing true.
   if (isEspRiscv(board)) return undefined;
   if (board.architecture === 'rp2040') {
-    const index = rp2040PinIndex(pinId);
+    const index = rp2040PinIndex(board.padMap?.[pinId] ?? pinId);
     if (index === undefined) return undefined;
     // ADC0..ADC3 are GP26..GP29 on the RP2040.
     const channel = index - 26;
