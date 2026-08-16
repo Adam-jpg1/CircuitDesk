@@ -93,6 +93,16 @@ export interface BuildKeyInput {
   coreVersion: string;
   syntaxOnly: boolean;
   files: { name: string; content: string }[];
+  /**
+   * Extra build properties the request asked for, if any.
+   *
+   * Part of the identity because they change the output: two requests for the
+   * same FQBN and the same source with different flags are two different
+   * builds, and sharing an artifact between them would hand one of them the
+   * other's firmware. Today only the service itself sets these; the field
+   * exists so that stays true when pipelines start carrying their own flags.
+   */
+  buildFlags?: string[];
 }
 
 /**
@@ -104,8 +114,9 @@ export interface BuildKeyInput {
  */
 export function buildKey(input: BuildKeyInput): string {
   const h = createHash('sha256');
-  h.update('circuitdesk-build-v1\0');
+  h.update('circuitdesk-build-v2\0');
   h.update(`${input.fqbn}\0${input.toolchainVersion}\0${input.coreVersion}\0${input.syntaxOnly ? 'syntax' : 'full'}\0`);
+  h.update(`${[...(input.buildFlags ?? [])].sort().join(' ')}\0`);
   const files = [...input.files].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const f of files) {
     h.update(`${f.name.length}:${f.name}\0`);
