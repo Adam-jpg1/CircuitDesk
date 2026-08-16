@@ -7,6 +7,9 @@ import { SupportBadge } from '../ui/primitives';
 import { describeSupport } from '../project/support';
 import { loadSetting, saveSetting } from '../persistence/settings';
 import { PART_SUMMARY, matchRank, partMatches } from '../components-library/partSearch';
+import { useStudioStore } from '../board-studio/studioStore';
+import { libraryBoards } from '../board-studio/boardLibrary';
+import { embeddedBoards } from '../custom-boards/projectBoards';
 import type { PartDefinition } from '../types';
 
 /**
@@ -49,7 +52,8 @@ const CATEGORY_ORDER = [
 export function LibraryPanel() {
   const [query, setQuery] = useState('');
   const customParts = useCustomPartsStore((s) => s.parts);
-  const projectCustoms = useEditorStore((s) => s.project?.customDefinitions);
+  const project = useEditorStore((s) => s.project);
+  const projectCustoms = project?.customDefinitions;
   const [favorites, setFavorites] = useState<string[]>(() => loadSetting<string[]>('favorites', []));
 
   const groups = useMemo(() => {
@@ -95,10 +99,45 @@ export function LibraryPanel() {
     });
   };
 
+  /**
+   * The custom-board definitions reachable from here, by board id.
+   *
+   * Both places a board can live: the user's own library, and the copy embedded
+   * in this project. The project's copy wins, because that is the revision this
+   * project is actually built against and editing the other one would be
+   * editing a different board than the one on the canvas.
+   */
+  const editableBoards = useMemo(() => {
+    const byId = new Map(libraryBoards(customParts).map((b) => [b.id, b]));
+    if (project) for (const [id, board] of embeddedBoards(project)) byId.set(id, board);
+    return byId;
+  }, [customParts, project]);
+
   return (
     <>
       <div className="panel-header">
         <span>Library</span>
+      </div>
+      <div className="library-actions">
+        <button
+          className="btn sm"
+          data-testid="library-new-board"
+          title="Make a board CircuitDesk does not have"
+          onClick={() => useStudioStore.getState().openNew('My board')}
+        >
+          New board
+        </button>
+        <button
+          className="btn sm"
+          data-testid="library-open-board"
+          title="Open a .cdboard.json somebody sent you"
+          onClick={() => {
+            useStudioStore.getState().openNew('My board');
+            useStudioStore.getState().goTo('start');
+          }}
+        >
+          Open board file
+        </button>
       </div>
       <div className="library-search">
         <input
@@ -142,6 +181,20 @@ export function LibraryPanel() {
                   <span className="li-name">{def.name}</span>
                   {PART_SUMMARY[def.id] && <span className="li-summary">{PART_SUMMARY[def.id]}</span>}
                 </span>
+                {editableBoards.has(def.id) && (
+                  <button
+                    className="btn sm"
+                    data-testid={`library-edit-${def.id}`}
+                    title="Open this board in the Board Studio"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const board = editableBoards.get(def.id);
+                      if (board) useStudioStore.getState().openEdit(board);
+                    }}
+                  >
+                    Edit
+                  </button>
+                )}
                 <SupportBadge level={def.supportLevel} title={describeSupport(def)} />
               </div>
             ))}
