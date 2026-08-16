@@ -1,6 +1,7 @@
 import { dbGetProject, dbListProjects, dbPutProject, dbDeleteProject } from '../persistence/db';
 import { resolveDefinition } from './partsRegistry';
 import { ensureSketchAssignments } from './sketches';
+import { migratePinIds } from './pinMigrations';
 import {
   PROJECT_SCHEMA_VERSION,
   uid,
@@ -93,6 +94,20 @@ export function normalizeProject(raw: unknown): CircuitProject {
   if (project.codeFiles.length === 0) {
     project.codeFiles = [{ id: uid('file'), name: 'sketch.ino', content: '', language: 'cpp' }];
   }
+  // Pin renames, BEFORE the filter below drops connections whose pin does not
+  // exist: a renamed pin looks exactly like a deleted one to that filter, so a
+  // migration that ran after it would have nothing left to migrate.
+  const migrated = migratePinIds(project);
+  if (migrated.moved.length > 0) {
+    console.info(
+      `[CircuitDesk] moved ${migrated.moved.length} wire endpoint(s) onto renamed pins: ` +
+      migrated.moved.map((m) => `${m.definitionId} ${m.from}→${m.to}`).join(', '),
+    );
+  }
+  // The project has now been brought up to this build's schema, so it is saved
+  // as such — which is also what stops a rename rule firing twice.
+  project.version = PROJECT_SCHEMA_VERSION;
+
   // Sketch assignments. A project saved before per-board sketches has one
   // source and no assignments; every board is put on it, which is exactly what
   // it was already doing. Idempotent, so a new-format project is untouched.

@@ -390,7 +390,10 @@ section('8. the display chain: CD4026 drives a real seven-segment');
   const clk = b.driver(ctr, 'clk');
   b.tie(ctr, 'inh', false);
   b.tie(ctr, 'rst', false);
-  const deo = b.driver(ctr, 'deo');
+  // DISPLAY ENABLE IN. This used to be called `deo` here, which is the name of
+  // the datasheet's OUTPUT pin — the part had one display-enable pin under the
+  // wrong name. Same pin, same behaviour, correct name.
+  const dei = b.driver(ctr, 'dei');
 
   // Every segment pin wired to the display's matching segment, and the
   // display's common cathode to ground. Nothing else connects them.
@@ -405,7 +408,7 @@ section('8. the display chain: CD4026 drives a real seven-segment');
 
     const litSegments = () => segs.filter((s) => b.level(ctr, s) === 1).join('');
 
-    b.set(deo, true);
+    b.set(dei, true);
     b.set(clk, false);
     check(litSegments() === 'abcdef', `zero lights a-f but not g (${litSegments()})`);
 
@@ -433,9 +436,13 @@ section('8. the display chain: CD4026 drives a real seven-segment');
   }
 
   // Blanking is real, and does not lose the count.
-  b.set(deo, false);
+  b.set(dei, true);
+  check(b.level(ctr, 'deo') === 1, 'display-enable out follows display-enable in');
+  b.set(dei, false);
   const blanked = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].filter((s) => b.level(ctr, s) === 1);
   check(blanked.length === 0, `display-enable low blanks every segment (${blanked.length} still lit)`);
+  // The buffered copy is what lets several digits chain their blanking.
+  check(b.level(ctr, 'deo') === 0, 'and the buffered display-enable output goes low with it');
 }
 
 // ===================================== 9. CD4511 decodes BCD, blanks above 9 ==

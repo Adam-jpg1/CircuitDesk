@@ -258,8 +258,13 @@ export const LOGIC_IC_DEFS: ComponentDefinition[] = [
   ),
   dip(
     LOGIC_PARTS['comp.cd4026'], 'CD4026 (counter + 7-seg driver)',
-    ['clk', 'inh', 'deo', 'a', 'b', 'c', 'd', 'gnd', 'e', 'f', 'g', 'ung', 'rst', 'co', 'vcc', 'vcc'].slice(0, 16),
-    'Decade counter with a seven-segment decoder built in. Its segment pins are real outputs: wire them to a seven-segment display and the digit comes from the counter, not from a shortcut.',
+    // The datasheet's own order. What was here before was wrong at nearly every
+    // position and named VCC twice, which made pin 16 unreachable: a wire to
+    // "vcc" always resolved to the first one. Wires travel by pin id, so a
+    // project saved against the old order keeps every connection it had — see
+    // src/project/pinMigrations.ts for the one pin that had to be renamed.
+    ['clk', 'inh', 'dei', 'deo', 'co', 'f', 'g', 'gnd', 'd', 'a', 'e', 'b', 'c', 'ung', 'rst', 'vcc'],
+    'Decade counter with a seven-segment decoder built in. Its segment pins are real outputs: wire them to a seven-segment display and the digit comes from the counter, not from a shortcut. DISPLAY ENABLE IN blanks the segments without losing the count, and DISPLAY ENABLE OUT is its buffered copy, for chaining blanking across several digits.',
   ),
   dip(
     LOGIC_PARTS['comp.cd4040'], 'CD4040 (12-stage ripple counter)',
