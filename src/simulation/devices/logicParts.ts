@@ -616,12 +616,18 @@ const DIGIT_SEGMENTS: number[][] = [
  * The counter and the decoder are one part, which is what makes it a one-chip
  * digit. The segment outputs are real pins: they drive a seven-segment
  * component through wires, not through a shortcut that draws a number.
+ *
+ * DISPLAY ENABLE is two pins on the real chip and used to be one here, named
+ * for the wrong one: `deo` was read as an input, which is what DISPLAY ENABLE
+ * IN does. It is now `dei`, and `deo` is what it is on the datasheet — a
+ * buffered copy of DEI, which is what lets several of these chain their
+ * blanking down a multi-digit display.
  */
 export const CD4026: LogicIcSpec = {
   id: 'comp.cd4026',
   pins: [
-    inPin('clk'), inPin('inh'), inPin('rst'), inPin('deo'),
-    ...SEGMENTS.map((s) => outPin(s)), outPin('co'), outPin('ung'),
+    inPin('clk'), inPin('inh'), inPin('rst'), inPin('dei'),
+    ...SEGMENTS.map((s) => outPin(s)), outPin('co'), outPin('ung'), outPin('deo'),
     ...RAILS,
   ],
   initialState: () => ({ count: 0 }),
@@ -639,14 +645,16 @@ export const CD4026: LogicIcSpec = {
     if (ctx.input('rst') === 1) ctx.state.count = 0;
     const count = ctx.state.count % 10;
     const pattern = DIGIT_SEGMENTS[count];
-    // Display-enable-out low blanks the segments without losing the count.
-    const blanked = ctx.input('deo') === 0;
+    // Display-enable-in low blanks the segments without losing the count.
+    const enabled = ctx.input('dei') !== 0;
     const out: Record<string, Logic> = {};
     SEGMENTS.forEach((s, i) => {
-      out[s] = (blanked ? 0 : pattern[i]) as Logic;
+      out[s] = (enabled ? pattern[i] : 0) as Logic;
     });
     out.co = (count >= 5 ? 1 : 0) as Logic;
     out.ung = (count === 1 || count === 0 ? 1 : 0) as Logic;
+    // The buffered display-enable, for chaining blanking across digits.
+    out.deo = (enabled ? 1 : 0) as Logic;
     return out;
   },
 };

@@ -288,7 +288,7 @@ export interface CircuitProject {
   thumbnailSvg?: string;
 }
 
-export const PROJECT_SCHEMA_VERSION = '1.0.0';
+export const PROJECT_SCHEMA_VERSION = '1.1.0';
 
 export interface ProjectMeta {
   id: string;
