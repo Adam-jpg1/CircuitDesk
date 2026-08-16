@@ -12,6 +12,7 @@ import {
   channelsCarryingAll,
   suggestedPinsFor,
   busOfLine,
+  describeBusPin,
   BUS_LINE_LABEL,
   type BusLine,
   type BoardBusProfile,
@@ -35,7 +36,10 @@ function crossedLine(line: BusLine): BusLine {
 function describeChannelChoices(profile: BoardBusProfile, lines: readonly BusLine[]): string {
   const parts: string[] = [];
   for (const channel of profile.channels) {
-    const pins = lines.map((line) => channel.defaults[line]).filter((p): p is string => p !== undefined);
+    const pins = lines
+      .map((line) => channel.defaults[line])
+      .filter((p): p is string => p !== undefined)
+      .map((p) => describeBusPin(profile, p));
     if (pins.length !== lines.length) continue;
     parts.push(`${channel.name} (${pins.join('/')})`);
   }
@@ -413,18 +417,34 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
       const boardName = boardInstance?.label || profile.boardName;
 
       for (const w of wiring) {
-        if (busOfLine(w.line) === 'uart') continue; // handled below, as a crossing
         const verdict = classifyBusPin(profile, w.line, w.pinId);
         const lineLabel = BUS_LINE_LABEL[w.line];
+        // The board's own name for the pin, with the processor pad behind it.
+        // On a Pico that is "GP4"; on a board somebody designed it is
+        // "MOTOR_PWM (GP15)" — the silkscreen they are looking at, and the pad
+        // the advice can be checked against.
+        const where = describeBusPin(profile, w.pinId);
+        const options = suggestedPinsFor(profile, w.line).map((p) => describeBusPin(profile, p));
+        const isUart = busOfLine(w.line) === 'uart';
+
         if (verdict.kind === 'incapable') {
-          const options = suggestedPinsFor(profile, w.line);
-          const where = options.length > 0 ? options.join(', ') : 'no pin on this board';
+          // A serial line landing on the board's other serial pin is a swapped
+          // pair, not an incapable pad. The crossing check below says so in the
+          // terms that actually help; saying it twice in two vocabularies would
+          // only make the panel harder to read.
+          if (isUart && classifyBusPin(profile, crossedLine(w.line), w.pinId).kind !== 'incapable') continue;
+          // A UART line on a pad the hardware UART cannot reach is normal
+          // practice rather than a mistake — SoftwareSerial exists precisely
+          // for it — so it is said as information. I2C and SPI have no such
+          // escape on these parts, and stay warnings.
           issues.push(
-            issue('i2c-pins', 'warning', `${moduleName}: ${w.modulePin.label} is on ${w.pinId}, which ${boardName} cannot use for ${lineLabel}`,
-              `${w.pinId} on ${boardName} cannot carry ${lineLabel}. ` +
+            issue(isUart ? 'uart-pins' : 'i2c-pins', isUart ? 'info' : 'warning',
+              `${moduleName}: ${w.modulePin.label} is on ${where}, which ${boardName} cannot use for ${lineLabel}`,
+              `${where} on ${boardName} cannot carry ${lineLabel}. ` +
                 (options.length > 0
-                  ? `On this board ${lineLabel} can go on ${where}.`
-                  : `This board exposes no ${lineLabel}-capable pin.`), {
+                  ? `On this board ${lineLabel} can go on ${options.join(', ')}.`
+                  : `This board exposes no ${lineLabel}-capable pin.`) +
+                (isUart ? ' A software serial port can drive any digital pin instead.' : ''), {
                 affectedComponentIds: [inst.id],
                 affectedConnectionIds: connectionsOf(inst.id, w.modulePin.id),
                 why: profile.routing === 'fixed'
@@ -434,10 +454,12 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
               }),
           );
         } else if (verdict.kind === 'alternate') {
+          const channelDefault = profile.channels.find((c) => c.name === verdict.channel)?.defaults[w.line];
           issues.push(
-            issue('bus-pins-need-config', 'info', `${moduleName}: ${w.modulePin.label} is on ${w.pinId}, an alternate ${lineLabel} pin`,
-              `${w.pinId} is a valid ${lineLabel} pin on ${boardName}, but it is not the default — ` +
-                `${profile.channels.find((c) => c.name === verdict.channel)?.defaults[w.line] ?? 'another pin'} is. ` +
+            issue(isUart ? 'uart-pins-need-config' : 'bus-pins-need-config', 'info',
+              `${moduleName}: ${w.modulePin.label} is on ${where}, an alternate ${lineLabel} pin`,
+              `${where} is a valid ${lineLabel} pin on ${boardName}, but it is not the default — ` +
+                `${channelDefault ? describeBusPin(profile, channelDefault) : 'another pin'} is. ` +
                 'The sketch has to select it.', {
                 affectedComponentIds: [inst.id],
                 affectedConnectionIds: connectionsOf(inst.id, w.modulePin.id),
@@ -452,13 +474,15 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
       // Both halves of a bus have to be on the same controller. Two pads that
       // are each capable, on different controllers, is not a working bus — and
       // checking the pins one at a time cannot see it.
-      for (const bus of ['i2c', 'spi'] as const) {
+      for (const bus of ['i2c', 'spi', 'uart'] as const) {
         const onBus = wiring.filter((w) => busOfLine(w.line) === bus);
         if (onBus.length < 2) continue;
         const eachCapable = onBus.every((w) => classifyBusPin(profile, w.line, w.pinId).kind !== 'incapable');
         if (!eachCapable) continue;
         if (channelsCarryingAll(profile, onBus).length > 0) continue;
-        const described = onBus.map((w) => `${BUS_LINE_LABEL[w.line]} on ${w.pinId}`).join(' and ');
+        const described = onBus
+          .map((w) => `${BUS_LINE_LABEL[w.line]} on ${describeBusPin(profile, w.pinId)}`)
+          .join(' and ');
         issues.push(
           issue('bus-pins-split-controller', 'warning', `${moduleName}: its ${bus.toUpperCase()} lines are on different ${bus.toUpperCase()} controllers`,
             `${boardName} can carry ${described}, but not on the same ${bus.toUpperCase()} peripheral — ` +
