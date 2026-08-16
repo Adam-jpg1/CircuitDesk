@@ -8,7 +8,7 @@ import type { BoardDefinition } from '../types';
 import type { BoardRunner } from './boardRunner';
 // Pure data (no avr8js), already part of the main chunk — imported statically
 // so only the emulator itself is lazily loaded.
-import { AVR_BOARD_PROFILES } from '../boards/pinMaps';
+import { avrProfileForProcessor } from '../boards/pinMaps';
 // Firmware validation is pure and emulator-free, so a bad artifact is refused
 // without downloading an engine chunk to find out.
 import { decodeBase64Firmware, parseRp2040Uf2, FirmwareRejectedError } from './rp2040/uf2';
@@ -32,8 +32,16 @@ export interface FirmwareArtifact {
 
 export interface BoardSimulatorAdapter {
   engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6';
-  /** Canonical board ids this adapter genuinely supports (tested). */
-  boardIds: string[];
+  /**
+   * Processor profiles this adapter genuinely executes.
+   *
+   * Deliberately NOT a list of board ids. An adapter that named the boards it
+   * supports would have to be edited every time somebody brought their own
+   * board, and would make "is this a Raspberry Pi Pico" a question the emulator
+   * asks — which is exactly the coupling that stops a custom RP2040 board from
+   * running. What the emulator actually cares about is the chip.
+   */
+  processorProfileIds: string[];
   /** The artifact format this engine executes. */
   firmwareFormat: 'intel-hex' | 'uf2' | 'esp-image';
   /** Lazily loads the engine and creates a runner with the board's own profile. */
@@ -74,15 +82,19 @@ function assertFormat(adapter: BoardSimulatorAdapter, firmware: FirmwareArtifact
 
 const avr8jsAdapter: BoardSimulatorAdapter = {
   engine: 'avr8js',
-  boardIds: ['board.arduino-uno', 'board.arduino-nano', 'board.arduino-mega2560', 'board.arduino-leonardo'],
+  processorProfileIds: ['proc.atmega328p', 'proc.atmega2560', 'proc.atmega32u4'],
   firmwareFormat: 'intel-hex',
   async createRunner(firmware, board) {
     assertFormat(this, firmware, board);
     const { AVRRunner } = await import('./avrRunner');
-    const profile = AVR_BOARD_PROFILES[board.id];
+    // Keyed by the PROCESSOR, not the board: an ATmega328P is an ATmega328P
+    // whoever put it on a PCB, and the memory map, vector table and port layout
+    // the emulator needs belong to the chip.
+    const profile = avrProfileForProcessor(board.processorProfileId);
     if (!profile) {
       throw new Error(
-        `No AVR pin profile is registered for ${board.name} (${board.id}) — refusing to run it on another board's profile.`,
+        `No AVR machine profile is registered for ${board.name} (processor ${board.processorProfileId ?? 'unknown'}) — ` +
+        "refusing to run it on another processor's profile.",
       );
     }
     return new AVRRunner(firmware.data, profile);
@@ -91,7 +103,7 @@ const avr8jsAdapter: BoardSimulatorAdapter = {
 
 const rp2040jsAdapter: BoardSimulatorAdapter = {
   engine: 'rp2040js',
-  boardIds: ['board.raspberry-pi-pico', 'board.raspberry-pi-pico-w'],
+  processorProfileIds: ['proc.rp2040'],
   firmwareFormat: 'uf2',
   async createRunner(firmware, board) {
     assertFormat(this, firmware, board);
@@ -105,7 +117,7 @@ const rp2040jsAdapter: BoardSimulatorAdapter = {
 
 const esp32c3Adapter: BoardSimulatorAdapter = {
   engine: 'esp32c3',
-  boardIds: ['board.esp32-c3'],
+  processorProfileIds: ['proc.esp32c3'],
   firmwareFormat: 'esp-image',
   async createRunner(firmware, board) {
     assertFormat(this, firmware, board);
@@ -123,7 +135,7 @@ const esp32c3Adapter: BoardSimulatorAdapter = {
 
 const esp32c6Adapter: BoardSimulatorAdapter = {
   engine: 'esp32c6',
-  boardIds: ['board.esp32-c6-devkitc-1'],
+  processorProfileIds: ['proc.esp32c6'],
   firmwareFormat: 'esp-image',
   async createRunner(firmware, board) {
     assertFormat(this, firmware, board);
@@ -145,14 +157,27 @@ const esp32c6Adapter: BoardSimulatorAdapter = {
 
 const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32c3Adapter, esp32c6Adapter];
 
-/** Returns the adapter for a board, or null when the board is not genuinely simulated. */
+/**
+ * The adapter for a board, or null when the board is not genuinely simulated.
+ *
+ * Three things have to agree, and each rules out a different mistake: the board
+ * must claim simulation support, its runtime profile's engine must be the
+ * adapter's, and the adapter must execute the board's processor. A board that
+ * names a runtime for a chip that runtime cannot run gets null rather than a
+ * confident emulator running the wrong machine.
+ */
 export function getSimulatorAdapter(board: BoardDefinition | undefined | null): BoardSimulatorAdapter | null {
   if (!board?.simulation?.supported || board.simulation.engine === 'none') return null;
-  return ADAPTERS.find((a) => a.engine === board.simulation!.engine && a.boardIds.includes(board.id)) ?? null;
+  const processorId = board.processorProfileId;
+  if (!processorId) return null;
+  return (
+    ADAPTERS.find((a) => a.engine === board.simulation!.engine && a.processorProfileIds.includes(processorId)) ?? null
+  );
 }
 
-export function registeredSimulatedBoardIds(): string[] {
-  return ADAPTERS.flatMap((a) => a.boardIds);
+/** Processor profiles some adapter can execute. */
+export function runnableProcessorProfileIds(): string[] {
+  return [...new Set(ADAPTERS.flatMap((a) => a.processorProfileIds))];
 }
 
 /** The artifact format a board's engine executes, for the compile pipeline. */

@@ -176,9 +176,34 @@ export const AVR_BOARD_PROFILES: Record<string, AvrBoardProfile> = {
   'board.arduino-leonardo': ATMEGA32U4_LEONARDO,
 };
 
+/**
+ * The machine profile for a PROCESSOR, which is what the emulator runs on.
+ *
+ * Keyed by chip rather than by board, because a memory map, a vector table and
+ * a port layout belong to the silicon. A board somebody designed around an
+ * ATmega328P and an Arduino Uno need the same machine; what differs between
+ * them is the header labelling, which lives on the board.
+ *
+ * The variant each chip resolves to is the one its compile profile builds for,
+ * so the Arduino pin numbering the firmware was compiled with is the numbering
+ * the runner uses.
+ */
+const AVR_PROFILES_BY_PROCESSOR: Record<string, AvrBoardProfile> = {
+  'proc.atmega328p': ATMEGA328P_UNO,
+  'proc.atmega2560': ATMEGA2560_MEGA,
+  'proc.atmega32u4': ATMEGA32U4_LEONARDO,
+};
+
+export function avrProfileForProcessor(processorProfileId: string | undefined): AvrBoardProfile | undefined {
+  return processorProfileId ? AVR_PROFILES_BY_PROCESSOR[processorProfileId] : undefined;
+}
+
 export function avrProfileFor(board: BoardDefinition | undefined | null): AvrBoardProfile | undefined {
   if (!board) return undefined;
-  return AVR_BOARD_PROFILES[board.id];
+  // A board's own variant profile where it has one — the Nano's A6/A7 are real
+  // and the Uno's profile does not have them — and the processor's otherwise,
+  // which is the path a custom board takes.
+  return AVR_BOARD_PROFILES[board.id] ?? avrProfileForProcessor(board.processorProfileId);
 }
 
 /**

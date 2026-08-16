@@ -421,6 +421,9 @@ function applyCapabilities(raw: BoardDefinition): BoardDefinition {
     pins,
     architecture: caps.architecture,
     aliases: caps.aliases,
+    ...(caps.processorProfileId ? { processorProfileId: caps.processorProfileId } : {}),
+    ...(caps.compileProfileId ? { compileProfileId: caps.compileProfileId } : {}),
+    ...(caps.runtimeProfileId ? { runtimeProfileId: caps.runtimeProfileId } : {}),
     ...(caps.manufacturer ? { manufacturer: caps.manufacturer } : {}),
     compiler: caps.compiler ?? { provider: 'none', supported: false },
     simulation:

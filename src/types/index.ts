@@ -131,6 +131,23 @@ export interface BoardDefinition {
   pins: PinDefinition[];
   compiler?: BoardCompilerInfo;
   simulation?: BoardSimulationInfo;
+  /**
+   * The chip, the toolchain and the emulator, named separately.
+   *
+   * Board identity, compile target and simulation runtime are three different
+   * things, and a board that carries an RP2040 is not a Raspberry Pi Pico. These
+   * are what let a board somebody designed themselves use the same compiler and
+   * the same emulator as a native board without borrowing its name — see
+   * src/boards/processorProfiles.ts and src/boards/pipelineProfiles.ts.
+   *
+   * Optional on the type because stored projects predate them; every board this
+   * build ships names all three, which tests/boards.profiles.mts asserts.
+   */
+  processorProfileId?: string;
+  compileProfileId?: string;
+  runtimeProfileId?: string;
+  /** Physical pin id -> processor pad. Absent means the board uses pad names directly. */
+  padMap?: Record<string, string>;
   /** @deprecated use `compiler` */
   compilerTarget?: CompilerTarget;
   /** @deprecated use `simulation` */

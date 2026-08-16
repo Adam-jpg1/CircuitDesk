@@ -4,7 +4,7 @@
 
 import { BOARD_DEFINITIONS, getBoardDefinition, findBoardByIdOrAlias } from '../src/boards/definitions';
 import { AVR_BOARD_PROFILES, arduinoPinNumber } from '../src/boards/pinMaps';
-import { getSimulatorAdapter, registeredSimulatedBoardIds } from '../src/simulation/adapters';
+import { getSimulatorAdapter, runnableProcessorProfileIds } from '../src/simulation/adapters';
 import { runnerPinIndex } from '../src/simulation/boardRunner';
 import { resolveDefinition } from '../src/project/partsRegistry';
 import { resolveCompileTarget } from '../src/compiler/targets';
@@ -50,7 +50,12 @@ function projectWith(boardDefId: string): CircuitProject {
   for (const b of BOARD_DEFINITIONS) {
     if (b.supportLevel === 'simulated') {
       if (!b.simulation?.supported) { ok = false; console.log('  simulated badge without simulation support:', b.id); }
-      if (!registeredSimulatedBoardIds().includes(b.id)) { ok = false; console.log('  simulated badge without registered adapter:', b.id); }
+      // The adapter registry keys on the PROCESSOR now, so a board claiming
+      // simulation has to name one that some emulator genuinely executes.
+      if (!b.processorProfileId) { ok = false; console.log('  simulated badge without a processor profile:', b.id); }
+      else if (!runnableProcessorProfileIds().includes(b.processorProfileId)) {
+        ok = false; console.log('  simulated badge for a processor no adapter runs:', b.id, b.processorProfileId);
+      }
       // An AVR board needs its own avr8js pin profile; an RP2040 board's pins
       // are the GP pads themselves, resolved through runnerPinIndex.
       if (b.architecture === 'avr' && !AVR_BOARD_PROFILES[b.id]) { ok = false; console.log('  simulated AVR badge without board-specific pin profile:', b.id); }
