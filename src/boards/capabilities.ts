@@ -21,6 +21,17 @@ export const MULTI_VENDOR_DESIGN = 'Various manufacturers';
 
 export interface BoardCapabilityEntry {
   architecture: BoardArchitecture;
+  /**
+   * The chip, the toolchain and the emulator, named separately.
+   *
+   * A native board names the same three profiles a custom board does, which is
+   * what makes them one code path: the adapter registry matches on the runtime
+   * profile and the processor, not on a list of board ids it was told about.
+   * Absent for boards CircuitDesk neither compiles nor runs.
+   */
+  processorProfileId?: string;
+  compileProfileId?: string;
+  runtimeProfileId?: string;
   aliases: string[];
   compiler?: BoardCompilerInfo;
   simulation?: BoardSimulationInfo;
@@ -195,6 +206,9 @@ const avrCliCompiler = (fqbn: string): BoardCompilerInfo => ({
 export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
   // ---------------- AVR (genuinely simulated where tested) ----------------
   'board.arduino-uno': {
+    processorProfileId: 'proc.atmega328p',
+    compileProfileId: 'compile.avr-arduino',
+    runtimeProfileId: 'runtime.avr8js-328p',
     manufacturer: 'Arduino',
     architecture: 'avr',
     aliases: ['arduino-uno', 'uno', 'Arduino UNO R3', 'arduino:avr:uno'],
@@ -208,6 +222,9 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     analogPinBase: 14,
   },
   'board.arduino-nano': {
+    processorProfileId: 'proc.atmega328p',
+    compileProfileId: 'compile.avr-arduino',
+    runtimeProfileId: 'runtime.avr8js-328p',
     manufacturer: 'Arduino',
     architecture: 'avr',
     aliases: ['arduino-nano', 'nano', 'arduino:avr:nano'],
@@ -222,6 +239,9 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation: 'Same ATmega328P core as the Uno; A6/A7 are ADC-only, as on real hardware.',
   },
   'board.arduino-mega2560': {
+    processorProfileId: 'proc.atmega2560',
+    compileProfileId: 'compile.avr-arduino-mega',
+    runtimeProfileId: 'runtime.avr8js-2560',
     manufacturer: 'Arduino',
     architecture: 'avr',
     aliases: ['arduino-mega', 'mega', 'mega2560', 'arduino:avr:mega'],
@@ -244,6 +264,9 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       'attachInterrupt is not emulated on this board either: external interrupts (INT0-INT7) and pin-change interrupts (PCINT0-2) are not modeled for the ATmega2560, so those pins still wire and validate but produce no interrupt behavior.',
   },
   'board.arduino-leonardo': {
+    processorProfileId: 'proc.atmega32u4',
+    compileProfileId: 'compile.avr-arduino-32u4',
+    runtimeProfileId: 'runtime.avr8js-32u4',
     manufacturer: 'Arduino',
     architecture: 'avr',
     aliases: ['arduino-leonardo', 'leonardo', 'arduino:avr:leonardo'],
@@ -312,6 +335,9 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
   // its own FQBN. The retired arduino:mbed_rp2040:pico identifier is kept only
   // as a lookup alias — see the note on the Pico's alias list below.
   'board.raspberry-pi-pico': {
+    processorProfileId: 'proc.rp2040',
+    compileProfileId: 'compile.rp2040-arduino',
+    runtimeProfileId: 'runtime.rp2040js',
     manufacturer: 'Raspberry Pi',
     architecture: 'rp2040',
     // 'arduino:mbed_rp2040:pico' stays purely so findBoardByIdOrAlias() still
@@ -336,6 +362,9 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation: RP2040_LIMITATION,
   },
   'board.raspberry-pi-pico-w': {
+    processorProfileId: 'proc.rp2040',
+    compileProfileId: 'compile.rp2040-arduino',
+    runtimeProfileId: 'runtime.rp2040js',
     manufacturer: 'Raspberry Pi',
     architecture: 'rp2040',
     aliases: ['raspberry-pi-pico-w', 'pico-w', 'rp2040:rp2040:rpipicow'],
@@ -381,6 +410,9 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
   // capability lists stay narrow, because everything else on this part still
   // does nothing.
   'board.esp32-c6-devkitc-1': {
+    processorProfileId: 'proc.esp32c6',
+    compileProfileId: 'compile.esp32c6-arduino',
+    runtimeProfileId: 'runtime.esp32c6',
     architecture: 'esp32',
     variant: 'esp32c6',
     manufacturer: 'Espressif',
@@ -401,6 +433,9 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation: ESP32C6_LIMITATION,
   },
   'board.esp32-c3': {
+    processorProfileId: 'proc.esp32c3',
+    compileProfileId: 'compile.esp32c3-arduino',
+    runtimeProfileId: 'runtime.esp32c3',
     manufacturer: 'Espressif',
     architecture: 'esp32',
     variant: 'esp32c3',

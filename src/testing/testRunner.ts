@@ -3,7 +3,7 @@
 // times, and evaluates assertions against real firmware behavior.
 
 import { AVRRunner, F_CPU } from '../simulation/avrRunner';
-import { AVR_BOARD_PROFILES } from '../boards/pinMaps';
+import { avrProfileFor } from '../boards/pinMaps';
 import { assertFirmwareMatchesBoard } from '../simulation/adapters';
 import { resolveDefinition } from '../project/partsRegistry';
 import { CircuitBinding, emptyControls } from '../simulation/circuitSim';
@@ -30,7 +30,7 @@ export async function runTest(project: CircuitProject, firmware: TestFirmware, t
     return def?.isBoard && def.simulation?.supported === true;
   });
   const boardDef = boardInst ? resolveDefinition(boardInst.definitionId, project) : undefined;
-  const profile = boardDef ? AVR_BOARD_PROFILES[boardDef.id] : undefined;
+  const profile = boardDef?.isBoard ? avrProfileFor(boardDef) : undefined;
   if (!boardDef || !profile) {
     return {
       testId: test.id,

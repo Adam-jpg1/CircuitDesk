@@ -12,7 +12,7 @@
 // user code, and no Arduino function is intercepted. Every observation is
 // taken at a pad, a peripheral register or a rendered component visual.
 
-import { getSimulatorAdapter, registeredSimulatedBoardIds, assertFirmwareMatchesBoard, firmwareFormatForBoard } from '../src/simulation/adapters';
+import { getSimulatorAdapter, runnableProcessorProfileIds, assertFirmwareMatchesBoard, firmwareFormatForBoard } from '../src/simulation/adapters';
 import { CircuitBinding, emptyControls } from '../src/simulation/circuitSim';
 import { buildPinStatesModel, pinStateCell } from '../src/simulation/pinStatesModel';
 import { runnerPinIndex, runnerAdcChannel, runnerPinCount, boardAdcReference } from '../src/simulation/boardRunner';
@@ -160,10 +160,15 @@ function advance(
   // The Pico must never resolve to the AVR engine, on any code path.
   check(adapter?.engine !== 'avr8js', 'the Pico never resolves to avr8js');
   const avrAdapter = getSimulatorAdapter(getBoardDefinition('board.arduino-uno'));
-  check(!avrAdapter?.boardIds.includes(PICO), 'the AVR adapter does not claim the Pico');
-  check(!avrAdapter?.boardIds.includes(PICO_W), 'the AVR adapter does not claim the Pico W');
-  check(registeredSimulatedBoardIds().includes(PICO), 'the Pico is a registered simulated board');
-  check(registeredSimulatedBoardIds().includes(PICO_W), 'the Pico W is a registered simulated board');
+  // The AVR adapter must not claim the RP2040 — stated against the processor,
+  // which is what the registry now keys on, rather than against a board id.
+  check(!avrAdapter?.processorProfileIds.includes('proc.rp2040'), 'the AVR adapter does not run an RP2040');
+  check(runnableProcessorProfileIds().includes('proc.rp2040'), 'the RP2040 is a processor some adapter runs');
+  check(getSimulatorAdapter(pico)?.engine === 'rp2040js', 'and the Pico resolves to the RP2040 engine');
+  check(
+    getSimulatorAdapter(getBoardDefinition(PICO_W))?.engine === 'rp2040js',
+    'as does the Pico W, through the same processor profile',
+  );
 
   // Pin resolution goes through the RP2040 map, never the Arduino one.
   check(runnerPinIndex(pico, 'GP15') === 15, 'GP15 resolves to runner index 15');
