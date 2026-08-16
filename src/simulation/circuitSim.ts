@@ -33,6 +33,7 @@ import { Sn74hc595Device, HC595_OUTPUT_PINS } from './devices/sn74hc595';
 import { SdCardDevice, type SdCardSnapshotData } from './devices/sdCard';
 import { SpiFlashDevice, type SpiFlashSnapshotData } from './devices/spiFlash';
 import { spiPinsFor } from './avr/spiPins';
+import { getBoardBusProfile } from '../boards/busProfile';
 import { Lcd1602Device, LCD1602_ADDRESSES } from './devices/lcd1602';
 import { Eeprom24cDevice, EEPROM_ADDRESSES, type Eeprom24cSnapshotData } from './devices/eeprom24c';
 import { Ds3231Device, DS3231_ADDRESS } from './devices/ds3231';
@@ -2096,13 +2097,27 @@ export class CircuitBinding {
       if (sdaPin !== undefined) busPins.add(sdaPin);
       if (sclPin !== undefined) busPins.add(sclPin);
     } else {
-      const i2cPinIds = (board.metadata.i2cPins as string[] | undefined) ?? [];
-      for (const pinId of i2cPinIds) {
-        const n = runnerPinIndex(board, pinId);
-        if (n !== undefined) busPins.add(n);
+      // Through the board's bus profile rather than its metadata: a native
+      // board's TWI pins are in its metadata, a custom board's come from its
+      // processor and its pad map, and the profile is the one place that knows
+      // both. Reading metadata here meant a custom AVR board's I2C_DATA pin
+      // could be wired perfectly and no device would ever attach to it.
+      const profile = getBoardBusProfile(board);
+      for (const channel of profile?.channels ?? []) {
+        const sdaId = channel.defaults['i2c-sda'];
+        const sclId = channel.defaults['i2c-scl'];
+        if (!sdaId || !sclId) continue;
+        // The first I2C channel with both lines brought out is the one
+        // `Wire` starts on, which is the bus a device with no further
+        // configuration is sitting on.
+        sdaPin = runnerPinIndex(board, sdaId);
+        sclPin = runnerPinIndex(board, sclId);
+        for (const pinId of [...(channel.pins['i2c-sda'] ?? []), ...(channel.pins['i2c-scl'] ?? [])]) {
+          const n = runnerPinIndex(board, pinId);
+          if (n !== undefined) busPins.add(n);
+        }
+        break;
       }
-      sdaPin = i2cPinIds[0] ? runnerPinIndex(board, i2cPinIds[0]) : undefined;
-      sclPin = i2cPinIds[1] ? runnerPinIndex(board, i2cPinIds[1]) : undefined;
     }
 
     // This board's pad on that net, not any board's: two Picos both have a
