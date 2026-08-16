@@ -30,6 +30,7 @@ import { SimulationWorld, type SerialOutputEvent } from './simulationWorld';
 import { SerialTranscript, buildSerialLabels } from './serialLog';
 import { getSimulatorAdapter, assertFirmwareMatchesBoard, type FirmwareArtifact } from './adapters';
 import { resolveWorkspaceTargets, type WorkspaceTarget } from '../compiler/targets';
+import { fingerprintForBoard, checkArtifactRuntime } from '../compiler/fingerprint';
 import { compileProjectCode } from '../compiler/compilerClient';
 import { resolveDefinition } from '../project/partsRegistry';
 import { filesForBoard, sketchIdFor } from '../project/sketches';
@@ -295,10 +296,12 @@ class SimulationController {
       instanceIds: [...target.instanceIds],
     };
     const adapter = getSimulatorAdapter(target.board);
-    // Keyed by what actually determines the bytes: the target and the exact
-    // text going into it. Not the board instance — an artifact is a file, and
-    // two machines can load the same one.
-    const cacheKey = buildKey(target.fqbn, files);
+    // Keyed by the compile fingerprint: the pipeline, the processor, the
+    // target, the flags, the toolchain versions and the exact source. Not the
+    // board instance and nothing visible about the board — an artifact is a
+    // file, two machines can load the same one, and renaming a board must not
+    // rebuild it. See src/compiler/fingerprint.ts.
+    const cacheKey = fingerprintForBoard(target.board, files);
 
     const boards = target.instanceIds.map((id) => labels.get(id) ?? this.boardLabel(id));
     const stage = (step: CompileStage['step']) =>
@@ -345,12 +348,16 @@ class SimulationController {
         result,
       };
     }
-    if (result.firmware.format !== adapter.firmwareFormat) {
+    // Compilation and execution are separate, so nothing has yet checked that
+    // what the toolchain produced is what this board's runtime executes. That
+    // is checked here, with both halves named, rather than inside an engine
+    // whose failure would read as a corrupt artifact.
+    const mismatch = checkArtifactRuntime(target.board, result.firmware.format);
+    if (mismatch) {
       return {
         ...base,
         status: 'artifact-mismatch',
-        detail:
-          `${describe(target)} — built as ${result.firmware.format}, but its engine expects ${adapter.firmwareFormat}`,
+        detail: `${describe(target)} — ${mismatch.message}`,
         durationMs: result.durationMs,
         result,
       };
@@ -374,7 +381,12 @@ class SimulationController {
     if (!this.project) return undefined;
     const build = this.builds.find((b) => b.status === 'built' && b.instanceIds.includes(instanceId));
     if (!build) return undefined;
-    return this.artifacts.get(buildKey(build.fqbn, filesForBoard(this.project, instanceId)));
+    const def = resolveDefinition(
+      this.project.boardInstances.find((b) => b.id === instanceId)?.definitionId ?? '',
+      this.project,
+    );
+    if (!def?.isBoard) return undefined;
+    return this.artifacts.get(fingerprintForBoard(def, filesForBoard(this.project, instanceId)));
   }
 
   // -------------------------------------------------------------- lifecycle
@@ -867,9 +879,7 @@ class SimulationController {
  * different FQBN means a real compilation. The board instance is deliberately
  * absent — sharing a file is not sharing a CPU.
  */
-function buildKey(fqbn: string, files: readonly { name: string; content: string }[]): string {
-  return `${fqbn}\u0002${files.map((f) => `${f.name}\u0000${f.content}`).join('\u0001')}`;
-}
+
 
 /** "receiver.ino — Raspberry Pi Pico", which is what a build report needs. */
 function describe(target: WorkspaceTarget): string {

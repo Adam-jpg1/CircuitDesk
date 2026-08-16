@@ -56,6 +56,13 @@ export interface CompileProfile {
    */
   serverTargetId?: string;
   artifactFormat: ArtifactFormat;
+  /**
+   * Flags and macros this profile adds to every build.
+   *
+   * Part of the compile fingerprint, which is what stops two profiles that
+   * target the same FQBN with different flags from sharing an artifact.
+   */
+  buildFlags?: string[];
   /** Libraries this profile guarantees are installed. */
   libraries?: string[];
   description: string;
