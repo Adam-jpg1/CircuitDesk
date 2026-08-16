@@ -280,6 +280,17 @@ export interface CustomDefinition {
   definition: PartDefinition;
   createdAt: string;
   source?: string;
+  /**
+   * The source description a resolved definition was built from.
+   *
+   * Present on custom BOARDS, whose `definition` is derived: capability is
+   * computed from the processor, compile and runtime profiles at resolve time,
+   * so the thing that can be edited, exported and re-resolved is this, not the
+   * board it produced. Typed loosely here because src/types has no business
+   * importing the custom-board schema — see src/custom-boards/projectBoards.ts,
+   * which validates it on the way back in.
+   */
+  spec?: unknown;
 }
 
 export interface ProjectSettings {

@@ -53,7 +53,20 @@ async function postWithRetry(url: string, body: string, attempts = 3): Promise<R
 
 export async function compileProjectCode(
   project: CircuitProject,
-  target: { boardId: string; fqbn: string; files?: { name: string; content: string }[] },
+  target: {
+    /** The target the compiler service is asked for. On its allowlist. */
+    boardId: string;
+    /**
+     * The board the artifact belongs to, when that differs from the target.
+     *
+     * A custom board compiles as its pipeline's target but the firmware is
+     * still its firmware, and the execution paths refuse a mismatch — so the
+     * stamp has to be the board that will run it.
+     */
+    stampBoardId?: string;
+    fqbn: string;
+    files?: { name: string; content: string }[];
+  },
   syntaxOnly = false,
 ): Promise<CompileResult> {
   const body = {
@@ -90,7 +103,7 @@ export async function compileProjectCode(
       errorCode: raw.errorCode,
       // Stamped from the requested target so cached firmware always carries the
       // board it was built for; execution paths refuse a mismatch.
-      boardId: target.boardId,
+      boardId: target.stampBoardId ?? target.boardId,
       fqbn: target.fqbn,
     };
   } catch (err) {
@@ -106,7 +119,7 @@ export async function compileProjectCode(
       error:
         'Could not reach the compiler server. Make sure the CircuitDesk backend is running (npm run dev starts both).',
       errorCode: 'TOOLCHAIN_MISSING',
-      boardId: target.boardId,
+      boardId: target.stampBoardId ?? target.boardId,
       fqbn: target.fqbn,
     };
   }

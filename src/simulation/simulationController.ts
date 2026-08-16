@@ -84,7 +84,14 @@ export interface BuildReport {
 /** Injectable so tests and offline modes can supply their own compiler. */
 export type CompileFn = (
   project: CircuitProject,
-  target: { boardId: string; fqbn: string; files?: { name: string; content: string }[] },
+  target: {
+    /** The target the compiler service is asked for — always on its allowlist. */
+    boardId: string;
+    /** The board the artifact belongs to, when it differs from the target. */
+    stampBoardId?: string;
+    fqbn: string;
+    files?: { name: string; content: string }[];
+  },
 ) => Promise<CompileResult>;
 
 class SimulationController {
@@ -311,7 +318,11 @@ class SimulationController {
 
     stage('compiling');
     const result = await this.compileFn(project, {
-      boardId: target.boardId,
+      // The service is asked for the TARGET, and the artifact is stamped with
+      // the BOARD. A custom board names the RP2040 target to get RP2040
+      // firmware, and the firmware still belongs to that board.
+      boardId: target.serverBoardId,
+      stampBoardId: target.boardId,
       fqbn: target.fqbn,
       files: files.map((f) => ({ name: f.name, content: f.content })),
     });

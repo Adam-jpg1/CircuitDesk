@@ -16,6 +16,8 @@
 import type { BoardDefinition, CircuitProject } from '../types';
 import { resolveDefinition } from '../project/partsRegistry';
 import { sketchFor, sketchIdFor } from '../project/sketches';
+import { compileProfile } from '../boards/pipelineProfiles';
+import { isCustomBoardId } from '../custom-boards/schema';
 
 export type CompileTargetResolution =
   | { ok: true; board: BoardDefinition; boardId: string; fqbn: string }
@@ -55,6 +57,20 @@ export function resolveCompileTarget(project: CircuitProject): CompileTargetReso
 export interface WorkspaceTarget {
   fqbn: string;
   boardId: string;
+  /**
+   * The id the COMPILER SERVICE knows this target by.
+   *
+   * The service keeps a strict allowlist and refuses anything not on it, which
+   * is exactly the protection that must not be weakened — so a board it has
+   * never heard of compiles by naming the TARGET its pipeline uses, not itself.
+   * A custom RP2040 board sends the RP2040 target and gets RP2040 firmware; it
+   * does not become a Raspberry Pi Pico by doing so, and the artifact is still
+   * stamped with the board that will run it.
+   *
+   * The same value as `boardId` for native boards, which are on the allowlist
+   * under their own names.
+   */
+  serverBoardId: string;
   board: BoardDefinition;
   /** The sketch document this build compiles. */
   sketchId: string;
@@ -66,6 +82,20 @@ export interface WorkspaceTarget {
    * More than one entry means several boards share a build, never a CPU.
    */
   instanceIds: string[];
+}
+
+/**
+ * What the compiler service should be asked to build this board as.
+ *
+ * A board on the service's own allowlist is asked for by name. A custom board
+ * is asked for by the target its compile profile declares — the service refuses
+ * ids it does not know, and that refusal is a protection worth keeping, so the
+ * request names something real rather than the allowlist being widened.
+ */
+function serverTargetFor(def: BoardDefinition): string {
+  if (!isCustomBoardId(def.id)) return def.id;
+  const profile = def.compileProfileId ? compileProfile(def.compileProfileId) : undefined;
+  return profile?.serverTargetId ?? def.id;
 }
 
 /** A board instance the workspace cannot build for, and why. */
@@ -140,6 +170,7 @@ export function resolveWorkspaceTargets(project: CircuitProject): WorkspaceTarge
       byBuild.set(key, {
         fqbn: compiler.fqbn,
         boardId: def.id,
+        serverBoardId: serverTargetFor(def),
         board: def,
         sketchId,
         sketchName: sketch.name,
