@@ -11,8 +11,17 @@
 // board CircuitDesk was built around. Adding "if Pico then GP4/GP5" would fix
 // one board and leave every other one wrong, so the model is what is built here:
 //
-//     board instance -> board definition -> bus capability profile
-//         -> default and alternate pin mappings -> current wiring -> verdict
+//     board instance -> processor profile -> which pads carry which signal
+//         -> the board's own pad map -> its physical pin names -> verdict
+//
+// The middle two steps are what let a board nobody has ever added take part.
+// The capability tables belong to the CHIP and live in processorProfiles.ts;
+// this file knows only how to walk them and how to translate a pad into
+// whatever the board in front of it calls that pin. On an Arduino Pico that
+// translation is the identity — the pin is called GP4 and the pad is GP4. On a
+// board somebody designed last week the pin is called SENSOR_SDA and the pad is
+// GP4, and the verdict has to be the same one while the message uses the name
+// printed on their silkscreen.
 //
 // Three verdicts, because there are three genuinely different situations and
 // collapsing them is what produced the bad message:
@@ -23,7 +32,7 @@
 //                 say so. Worth telling the user, with the call that does it.
 //   * incapable — the peripheral cannot reach this pad at all. A real error.
 //
-// Everything below is taken from the vendor's own sources, not inferred:
+// The capability data is taken from the vendor's own sources, not inferred:
 //
 //   * RP2040 — the Arduino-Pico core's Wire/SPI/SerialUART setSDA/setSCL/setRX/
 //     setTX/setSCK/setCS validity tables, which are the RP2040 datasheet's GPIO
@@ -39,6 +48,11 @@
 // chip's capability is the upper bound; the header is what the user can wire to.
 
 import type { BoardDefinition, PinCapability } from '../types';
+import {
+  processorProfile,
+  type PeripheralController,
+  type ProcessorProfile,
+} from './processorProfiles';
 
 export type BusLine =
   | 'i2c-sda'
@@ -61,6 +75,22 @@ export const BUS_LINE_LABEL: Record<BusLine, string> = {
   'uart-rx': 'RX',
 };
 
+/** The signal key a processor profile's controller uses for each line. */
+const LINE_SIGNAL: Record<BusLine, string> = {
+  'i2c-sda': 'sda',
+  'i2c-scl': 'scl',
+  'spi-sck': 'sck',
+  'spi-mosi': 'mosi',
+  'spi-miso': 'miso',
+  'spi-ss': 'ss',
+  'uart-tx': 'tx',
+  'uart-rx': 'rx',
+};
+
+const I2C_LINES: BusLine[] = ['i2c-sda', 'i2c-scl'];
+const SPI_LINES: BusLine[] = ['spi-sck', 'spi-mosi', 'spi-miso', 'spi-ss'];
+const UART_LINES: BusLine[] = ['uart-tx', 'uart-rx'];
+
 /** Which bus a line belongs to, for messages and for pairing checks. */
 export function busOfLine(line: BusLine): 'i2c' | 'spi' | 'uart' {
   return line.startsWith('i2c') ? 'i2c' : line.startsWith('spi') ? 'spi' : 'uart';
@@ -71,10 +101,12 @@ export function busOfLine(line: BusLine): 'i2c' | 'spi' | 'uart' {
  *
  * `name` is the object the user types — `Wire`, `Wire1`, `SPI`, `Serial1` —
  * because a message that says "use Wire1" is actionable and one that says
- * "use I2C controller 1" is not.
+ * "use I2C controller 1" is not. `controllerId` keeps the chip's own name for
+ * anything that needs to talk about the silicon.
  */
 export interface BusChannel {
   name: string;
+  controllerId: string;
   /** Board pin ids this channel can carry each line on. */
   pins: Partial<Record<BusLine, string[]>>;
   /** The pin the core uses for each line unless the sketch changes it. */
@@ -93,6 +125,15 @@ export interface BoardBusProfile {
    */
   routing: 'fixed' | 'muxable' | 'matrix';
   channels: BusChannel[];
+  /**
+   * Board pin id -> processor pad, for the pins where the two differ.
+   *
+   * Empty for a board that names its pins after its pads, which every native
+   * board does. Populated for a custom board, and it is what lets a message say
+   * `MOTOR_PWM (GP15)` — the name the user gave the pin, and the pad that name
+   * stands for, so the sentence is both recognisable and checkable.
+   */
+  padOfPin: Record<string, string>;
 }
 
 export type BusPinVerdict =
@@ -101,49 +142,34 @@ export type BusPinVerdict =
   | { kind: 'alternate'; channel: string; configuration?: string }
   | { kind: 'incapable' };
 
-// ------------------------------------------------------------- RP2040 tables
-//
-// From the Arduino-Pico core's own validity tables (libraries/Wire/src/Wire.cpp,
-// libraries/SPI/src/SPI.cpp, cores/rp2040/SerialUART.cpp), RP2040 branch. These
-// are pad numbers; only the ones a given board brings out survive into a
-// profile.
-
-const RP2040_I2C: { name: string; sda: number[]; scl: number[] }[] = [
-  { name: 'Wire', sda: [0, 4, 8, 12, 16, 20, 24, 28], scl: [1, 5, 9, 13, 17, 21, 25, 29] },
-  { name: 'Wire1', sda: [2, 6, 10, 14, 18, 22, 26], scl: [3, 7, 11, 15, 19, 23, 27] },
-];
-
-const RP2040_SPI: { name: string; miso: number[]; cs: number[]; sck: number[]; mosi: number[] }[] = [
-  { name: 'SPI', miso: [0, 4, 16, 20], cs: [1, 5, 17, 21], sck: [2, 6, 18, 22], mosi: [3, 7, 19, 23] },
-  { name: 'SPI1', miso: [8, 12, 24, 28], cs: [9, 13, 25, 29], sck: [10, 14, 26], mosi: [11, 15, 27] },
-];
-
-const RP2040_UART: { name: string; tx: number[]; rx: number[] }[] = [
-  { name: 'Serial1', tx: [0, 12, 16, 28], rx: [1, 13, 17, 29] },
-  { name: 'Serial2', tx: [4, 8, 20, 24], rx: [5, 9, 21, 25] },
-];
-
-/** Defaults from the rpipico / rpipicow variant's pins_arduino.h. */
-const RP2040_DEFAULTS: Record<string, Partial<Record<BusLine, number>>> = {
-  Wire: { 'i2c-sda': 4, 'i2c-scl': 5 },
-  Wire1: { 'i2c-sda': 26, 'i2c-scl': 27 },
-  SPI: { 'spi-miso': 16, 'spi-ss': 17, 'spi-sck': 18, 'spi-mosi': 19 },
-  SPI1: { 'spi-miso': 12, 'spi-ss': 13, 'spi-sck': 14, 'spi-mosi': 15 },
-  Serial1: { 'uart-tx': 0, 'uart-rx': 1 },
-  Serial2: { 'uart-tx': 8, 'uart-rx': 9 },
+/**
+ * Defaults from the rpipico / rpipicow variant's pins_arduino.h.
+ *
+ * A variant fact rather than a chip fact — the RP2040 has no opinion about
+ * which of its eight possible SDA pads Wire should start on, and the core's
+ * variant header does. Keyed by the name a sketch uses, because that is what
+ * the variant header is choosing for.
+ */
+const RP2040_VARIANT_DEFAULTS: Record<string, Partial<Record<BusLine, string>>> = {
+  Wire: { 'i2c-sda': 'GP4', 'i2c-scl': 'GP5' },
+  Wire1: { 'i2c-sda': 'GP26', 'i2c-scl': 'GP27' },
+  SPI: { 'spi-miso': 'GP16', 'spi-ss': 'GP17', 'spi-sck': 'GP18', 'spi-mosi': 'GP19' },
+  SPI1: { 'spi-miso': 'GP12', 'spi-ss': 'GP13', 'spi-sck': 'GP14', 'spi-mosi': 'GP15' },
+  Serial1: { 'uart-tx': 'GP0', 'uart-rx': 'GP1' },
+  Serial2: { 'uart-tx': 'GP8', 'uart-rx': 'GP9' },
 };
 
 /** Defaults from each Arduino-ESP32 variant's pins_arduino.h. */
-const ESP_RISCV_DEFAULTS: Record<string, Partial<Record<BusLine, number>>> = {
+const ESP_RISCV_DEFAULTS: Record<string, Partial<Record<BusLine, string>>> = {
   esp32c3: {
-    'i2c-sda': 8, 'i2c-scl': 9,
-    'spi-miso': 5, 'spi-mosi': 6, 'spi-sck': 4, 'spi-ss': 7,
-    'uart-tx': 21, 'uart-rx': 20,
+    'i2c-sda': 'IO8', 'i2c-scl': 'IO9',
+    'spi-miso': 'IO5', 'spi-mosi': 'IO6', 'spi-sck': 'IO4', 'spi-ss': 'IO7',
+    'uart-tx': 'IO21', 'uart-rx': 'IO20',
   },
   esp32c6: {
-    'i2c-sda': 23, 'i2c-scl': 22,
-    'spi-miso': 20, 'spi-mosi': 19, 'spi-sck': 21, 'spi-ss': 18,
-    'uart-tx': 16, 'uart-rx': 17,
+    'i2c-sda': 'IO23', 'i2c-scl': 'IO22',
+    'spi-miso': 'IO20', 'spi-mosi': 'IO19', 'spi-sck': 'IO21', 'spi-ss': 'IO18',
+    'uart-tx': 'IO16', 'uart-rx': 'IO17',
   },
 };
 
@@ -169,83 +195,131 @@ function configurationCall(channel: string, line: BusLine, pinPad: string): stri
   }
 }
 
-// ---------------------------------------------------------------- assembling
+// ---------------------------------------------------- pads to physical pins
+//
+// The one translation everything else is built on. A capability table is
+// written in pads because pads are what the silicon has; a canvas, a wire and
+// an error message are all in board pin ids because that is what the user
+// sees. Every board answers the same two questions, and neither answer is
+// guessed from the shape of a name.
 
-/** The pin ids a board actually exposes, including the aliases it accepts. */
-function exposedPinIds(board: BoardDefinition): Set<string> {
-  const ids = new Set<string>();
-  for (const pin of board.pins) {
-    ids.add(pin.id);
-    for (const alias of pin.aliases ?? []) ids.add(alias);
+interface PadResolver {
+  /** Board pin ids that reach this pad, in the order the board lists them. */
+  pinsFor(pad: string): string[];
+  /** The pad a board pin reaches, when the board says so. */
+  padOfPin: Record<string, string>;
+  /** True when the board carries an explicit pin->pad map of its own. */
+  mapped: boolean;
+}
+
+function padResolver(board: BoardDefinition): PadResolver {
+  const declared = board.padMap ?? {};
+  const byPad = new Map<string, string[]>();
+  const order = new Map(board.pins.map((p, i) => [p.id, i]));
+  for (const [pinId, pad] of Object.entries(declared)) {
+    if (!order.has(pinId)) continue; // a stale mapping names a pin that is gone
+    byPad.set(pad, [...(byPad.get(pad) ?? []), pinId]);
   }
-  return ids;
+  for (const list of byPad.values()) {
+    list.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  }
+
+  return {
+    mapped: byPad.size > 0,
+    padOfPin: { ...declared },
+    pinsFor(pad: string): string[] {
+      const mapped = byPad.get(pad);
+      if (mapped) return mapped;
+      // A board that names its pins after the pads needs no map, and neither
+      // does a pin that answers to the pad as an alias. This is the native
+      // case: the Pico's GP4 pin IS pad GP4, and looking it up any other way
+      // would be inventing a mapping that the board never stated.
+      const out: string[] = [];
+      for (const pin of board.pins) {
+        if (pin.id === pad || (pin.aliases ?? []).includes(pad)) out.push(pin.id);
+      }
+      return out;
+    },
+  };
 }
 
-/** Keeps only pads the board brings out, named the way the board names them. */
-function padsToPinIds(pads: number[], prefix: string, exposed: Set<string>): string[] {
-  return pads.map((n) => `${prefix}${n}`).filter((id) => exposed.has(id));
+/**
+ * How a pin should be named in a message: the maker's name, and the pad it is.
+ *
+ * `MOTOR_PWM (GP15)` on a custom board, `GP15` on a Pico — because on the Pico
+ * repeating the name would be noise, and on the custom board leaving the pad
+ * out would make the advice uncheckable against the datasheet.
+ */
+export function describeBusPin(profile: BoardBusProfile, pinId: string): string {
+  const pad = profile.padOfPin[pinId];
+  return pad && pad !== pinId ? `${pinId} (${pad})` : pinId;
 }
 
-function padDefault(
-  pad: number | undefined,
-  prefix: string,
-  exposed: Set<string>,
-): string | undefined {
-  if (pad === undefined) return undefined;
-  const id = `${prefix}${pad}`;
-  return exposed.has(id) ? id : undefined;
+// ------------------------------------------------------------- assembling
+
+function channelFrom(
+  controller: PeripheralController,
+  lines: readonly BusLine[],
+  resolver: PadResolver,
+  variantDefaults?: Record<string, Partial<Record<BusLine, string>>>,
+): BusChannel | undefined {
+  const name = controller.arduinoName ?? controller.id;
+  const pins: Partial<Record<BusLine, string[]>> = {};
+  const defaults: Partial<Record<BusLine, string>> = {};
+  let reachable = false;
+
+  for (const line of lines) {
+    const signal = LINE_SIGNAL[line];
+    const pads = controller.signals[signal] ?? [];
+    const ids = [...new Set(pads.flatMap((pad) => resolver.pinsFor(pad)))];
+    pins[line] = ids;
+    if (ids.length > 0) reachable = true;
+
+    // The core's variant default first, the chip's own selection second. A
+    // board that does not bring the default pad out simply has no default for
+    // that line, which is the truth and not something to paper over.
+    const defaultPad = variantDefaults?.[name]?.[line] ?? controller.defaults?.[signal];
+    const resolved = defaultPad ? resolver.pinsFor(defaultPad) : [];
+    if (resolved.length > 0 && ids.includes(resolved[0])) defaults[line] = resolved[0];
+  }
+
+  return reachable ? { name, controllerId: controller.id, pins, defaults } : undefined;
 }
 
-function rp2040Profile(board: BoardDefinition): BoardBusProfile {
-  const exposed = exposedPinIds(board);
+/**
+ * The profile for any chip whose controllers state which pads they can reach.
+ *
+ * One function for the RP2040 and for every AVR, because the difference between
+ * them is entirely in the data: an AVR controller lists one pad per signal and
+ * so has no alternates to offer, while an RP2040 controller lists eight. The
+ * `routing` a caller sees still differs, because "you cannot move this" and
+ * "you can move this, in firmware" are different things to be told.
+ */
+function controllerProfile(
+  board: BoardDefinition,
+  processor: ProcessorProfile,
+  resolver: PadResolver,
+  routing: 'fixed' | 'muxable',
+  variantDefaults?: Record<string, Partial<Record<BusLine, string>>>,
+): BoardBusProfile | undefined {
   const channels: BusChannel[] = [];
-  for (const bus of RP2040_I2C) {
-    const d = RP2040_DEFAULTS[bus.name] ?? {};
-    channels.push({
-      name: bus.name,
-      pins: {
-        'i2c-sda': padsToPinIds(bus.sda, 'GP', exposed),
-        'i2c-scl': padsToPinIds(bus.scl, 'GP', exposed),
-      },
-      defaults: {
-        'i2c-sda': padDefault(d['i2c-sda'], 'GP', exposed),
-        'i2c-scl': padDefault(d['i2c-scl'], 'GP', exposed),
-      },
-    });
-  }
-  for (const bus of RP2040_SPI) {
-    const d = RP2040_DEFAULTS[bus.name] ?? {};
-    channels.push({
-      name: bus.name,
-      pins: {
-        'spi-miso': padsToPinIds(bus.miso, 'GP', exposed),
-        'spi-mosi': padsToPinIds(bus.mosi, 'GP', exposed),
-        'spi-sck': padsToPinIds(bus.sck, 'GP', exposed),
-        'spi-ss': padsToPinIds(bus.cs, 'GP', exposed),
-      },
-      defaults: {
-        'spi-miso': padDefault(d['spi-miso'], 'GP', exposed),
-        'spi-mosi': padDefault(d['spi-mosi'], 'GP', exposed),
-        'spi-sck': padDefault(d['spi-sck'], 'GP', exposed),
-        'spi-ss': padDefault(d['spi-ss'], 'GP', exposed),
-      },
-    });
-  }
-  for (const bus of RP2040_UART) {
-    const d = RP2040_DEFAULTS[bus.name] ?? {};
-    channels.push({
-      name: bus.name,
-      pins: {
-        'uart-tx': padsToPinIds(bus.tx, 'GP', exposed),
-        'uart-rx': padsToPinIds(bus.rx, 'GP', exposed),
-      },
-      defaults: {
-        'uart-tx': padDefault(d['uart-tx'], 'GP', exposed),
-        'uart-rx': padDefault(d['uart-rx'], 'GP', exposed),
-      },
-    });
-  }
-  return { boardId: board.id, boardName: board.name, routing: 'muxable', channels };
+  const add = (group: PeripheralController[], lines: readonly BusLine[]) => {
+    for (const controller of group) {
+      const channel = channelFrom(controller, lines, resolver, variantDefaults);
+      if (channel) channels.push(channel);
+    }
+  };
+  add(processor.i2c, I2C_LINES);
+  add(processor.spi, SPI_LINES);
+  add(processor.uarts, UART_LINES);
+  if (channels.length === 0) return undefined;
+  return {
+    boardId: board.id,
+    boardName: board.name,
+    routing,
+    channels,
+    padOfPin: resolver.padOfPin,
+  };
 }
 
 /**
@@ -255,17 +329,28 @@ function rp2040Profile(board: BoardDefinition): BoardBusProfile {
  * profile is "all of them" with the variant's defaults marked. Saying a pin is
  * incapable when the matrix can reach it would be the same class of mistake
  * this file exists to remove.
+ *
+ * The channels are named rather than derived from the processor profile's
+ * controller lists, which are empty for these parts: the emulator models none
+ * of these peripherals, so the chip profile claims none. Wiring is a question
+ * about the silicon, not about the emulator, and the matrix is real whether or
+ * not CircuitDesk executes anything through it.
  */
-function espMatrixProfile(board: BoardDefinition, variant: string): BoardBusProfile {
-  const exposed = exposedPinIds(board);
-  const gpios = board.pins.filter((p) => /^IO\d+$/.test(p.id)).map((p) => p.id);
-  const d = ESP_RISCV_DEFAULTS[variant] ?? {};
-  const all = (line: BusLine): Partial<Record<BusLine, string[]>> => ({ [line]: gpios });
-  const channel = (name: string, lines: BusLine[]): BusChannel => ({
+function matrixProfile(
+  board: BoardDefinition,
+  processor: ProcessorProfile,
+  resolver: PadResolver,
+  defaults: Partial<Record<BusLine, string>>,
+): BoardBusProfile {
+  const gpios = [...new Set(processor.pads.flatMap((pad) => resolver.pinsFor(pad)))];
+  const channel = (name: string, controllerId: string, lines: readonly BusLine[]): BusChannel => ({
     name,
-    pins: Object.assign({}, ...lines.map(all)),
+    controllerId,
+    pins: Object.fromEntries(lines.map((line) => [line, gpios])) as Partial<Record<BusLine, string[]>>,
     defaults: Object.fromEntries(
-      lines.map((line) => [line, padDefault(d[line], 'IO', exposed)]).filter(([, v]) => v !== undefined),
+      lines
+        .map((line) => [line, resolver.pinsFor(defaults[line] ?? '')[0]])
+        .filter(([, v]) => v !== undefined),
     ) as Partial<Record<BusLine, string>>,
   });
   return {
@@ -273,20 +358,25 @@ function espMatrixProfile(board: BoardDefinition, variant: string): BoardBusProf
     boardName: board.name,
     routing: 'matrix',
     channels: [
-      channel('Wire', ['i2c-sda', 'i2c-scl']),
-      channel('SPI', ['spi-sck', 'spi-mosi', 'spi-miso', 'spi-ss']),
-      channel('Serial1', ['uart-tx', 'uart-rx']),
+      channel('Wire', 'i2c0', I2C_LINES),
+      channel('SPI', 'spi2', SPI_LINES),
+      channel('Serial1', 'uart1', UART_LINES),
     ],
+    padOfPin: resolver.padOfPin,
   };
 }
 
 /**
- * AVR boards, whose lines are bonded silicon.
+ * Native AVR boards, whose lines are bonded silicon.
  *
- * The pin lists live in each board's metadata because they are facts about that
- * chip's packaging: A4/A5 on an Uno, D20/D21 on a Mega, D2/D3 on a Leonardo.
- * There are no alternates, so `pins` and `defaults` say the same thing — which
- * is exactly the truth about the hardware.
+ * These boards name their pins the way the Arduino core numbers them — A4, D20,
+ * SDA — and carry no pad map, so the pin lists live in each board's metadata:
+ * they are facts about that chip's packaging as that variant exposes it. There
+ * are no alternates, so `pins` and `defaults` say the same thing, which is
+ * exactly the truth about the hardware.
+ *
+ * A custom AVR board takes the other route — its pad map is explicit, so its
+ * profile comes from the processor's controllers like every other custom board.
  */
 function fixedProfile(board: BoardDefinition): BoardBusProfile | undefined {
   const meta = board.metadata as Record<string, unknown>;
@@ -295,7 +385,11 @@ function fixedProfile(board: BoardDefinition): BoardBusProfile | undefined {
   const uart = (meta.uartPins as string[] | undefined) ?? [];
   if (i2c.length === 0 && spi.length === 0 && uart.length === 0) return undefined;
 
-  const exposed = exposedPinIds(board);
+  const exposed = new Set<string>();
+  for (const pin of board.pins) {
+    exposed.add(pin.id);
+    for (const alias of pin.aliases ?? []) exposed.add(alias);
+  }
   const keep = (ids: string[]) => ids.filter((id) => exposed.has(id));
   const channels: BusChannel[] = [];
 
@@ -307,6 +401,7 @@ function fixedProfile(board: BoardDefinition): BoardBusProfile | undefined {
   if (sda.length > 0 || scl.length > 0) {
     channels.push({
       name: 'Wire',
+      controllerId: 'twi0',
       pins: { 'i2c-sda': sda, 'i2c-scl': scl },
       defaults: { 'i2c-sda': sda[0], 'i2c-scl': scl[0] },
     });
@@ -325,6 +420,7 @@ function fixedProfile(board: BoardDefinition): BoardBusProfile | undefined {
     if (sck.length + mosi.length + miso.length > 0) {
       channels.push({
         name: 'SPI',
+        controllerId: 'spi0',
         pins: { 'spi-sck': sck, 'spi-mosi': mosi, 'spi-miso': miso, 'spi-ss': cs },
         defaults: { 'spi-sck': sck[0], 'spi-mosi': mosi[0], 'spi-miso': miso[0], 'spi-ss': cs[0] },
       });
@@ -336,12 +432,13 @@ function fixedProfile(board: BoardDefinition): BoardBusProfile | undefined {
     const rx = keep(uart.filter((id) => board.pins.find((p) => p.id === id)?.capabilities.includes('uart-rx')));
     channels.push({
       name: 'Serial',
+      controllerId: 'usart0',
       pins: { 'uart-tx': tx, 'uart-rx': rx },
       defaults: { 'uart-tx': tx[0], 'uart-rx': rx[0] },
     });
   }
 
-  return { boardId: board.id, boardName: board.name, routing: 'fixed', channels };
+  return { boardId: board.id, boardName: board.name, routing: 'fixed', channels, padOfPin: {} };
 }
 
 /**
@@ -350,12 +447,32 @@ function fixedProfile(board: BoardDefinition): BoardBusProfile | undefined {
  * Undefined matters: it means CircuitDesk does not know this board's bus
  * layout, and the caller must then say nothing rather than fall back to
  * another board's pins. That fallback is the bug this file replaces.
+ *
+ * Note what this function does NOT look at: the board's id. A custom board and
+ * a native board reach the same code by the same route — the processor they
+ * name and the pad map they carry — which is what makes "your board works like
+ * ours" true rather than aspirational.
  */
 export function getBoardBusProfile(board: BoardDefinition | undefined): BoardBusProfile | undefined {
   if (!board?.isBoard) return undefined;
-  if (board.architecture === 'rp2040') return rp2040Profile(board);
-  const variant = (board.metadata?.variant as string | undefined) ?? '';
-  if (variant in ESP_RISCV_DEFAULTS) return espMatrixProfile(board, variant);
+  const processor = board.processorProfileId ? processorProfile(board.processorProfileId) : undefined;
+  if (processor) {
+    const resolver = padResolver(board);
+    switch (processor.architecture) {
+      case 'rp2040':
+        return controllerProfile(board, processor, resolver, 'muxable', RP2040_VARIANT_DEFAULTS);
+      case 'esp32c3':
+      case 'esp32c6':
+        return matrixProfile(board, processor, resolver, ESP_RISCV_DEFAULTS[processor.architecture] ?? {});
+      case 'avr':
+        // A pad map is the board telling us its own wiring; metadata pin lists
+        // are the native variant's. Prefer the board's own statement.
+        if (resolver.mapped) {
+          return controllerProfile(board, processor, resolver, 'fixed') ?? fixedProfile(board);
+        }
+        return fixedProfile(board);
+    }
+  }
   return fixedProfile(board);
 }
 
@@ -385,14 +502,22 @@ export function classifyBusPin(profile: BoardBusProfile, line: BusLine, pinId: s
   return {
     kind: 'alternate',
     channel: channel.name,
-    configuration: configurationCall(channel.name, line, padArgument(pinId)),
+    configuration: configurationCall(channel.name, line, padArgument(profile, pinId)),
   };
 }
 
-/** The number a `setSDA()`-style call wants, from a board pin id like GP4. */
-function padArgument(pinId: string): string {
-  const match = /^(?:GP|IO|D|A)(\d+)$/.exec(pinId);
-  return match ? match[1] : pinId;
+/**
+ * The number a `setSDA()`-style call wants.
+ *
+ * It is the GPIO number, so it comes from the PAD — a custom board's
+ * `SENSOR_SDA` yields 4 because the pad behind it is GP4, and a Pico's GP4
+ * yields 4 because the pin is the pad. Guessing a number out of the pin's own
+ * name would produce nonsense for exactly the boards this milestone is for.
+ */
+function padArgument(profile: BoardBusProfile, pinId: string): string {
+  const pad = profile.padOfPin[pinId] ?? pinId;
+  const match = /^(?:GP|IO|D|A)(\d+)$/.exec(pad);
+  return match ? match[1] : pad;
 }
 
 /**

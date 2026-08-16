@@ -38,6 +38,16 @@ export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6';
 export interface PeripheralController {
   /** Controller id as the chip's own documentation names it: `i2c0`, `usart1`. */
   id: string;
+  /**
+   * What a sketch calls this controller — `Wire`, `SPI1`, `Serial1`.
+   *
+   * Carried here because it is the only name the user can act on. A message
+   * that says "put both lines on i2c0" is a datasheet fact; one that says "put
+   * both lines on Wire" is something they can type. The two names are not
+   * derivable from each other (the RP2040's uart0 is Arduino's Serial1), so the
+   * profile states both rather than letting a consumer guess.
+   */
+  arduinoName?: string;
   /** Pads this controller's signals may use, by signal name. */
   signals: Record<string, string[]>;
   /** Pads used when firmware does not say otherwise (Wire.begin(), Serial1). */
@@ -104,11 +114,12 @@ const ATMEGA328P: ProcessorProfile = {
   pads: avrPads({ B: 8, C: 7, D: 8 }),
   adcChannels: { PC0: 0, PC1: 1, PC2: 2, PC3: 3, PC4: 4, PC5: 5 },
   pwmPads: ['PD3', 'PD5', 'PD6', 'PB1', 'PB2', 'PB3'],
-  uarts: [{ id: 'usart0', signals: { tx: ['PD1'], rx: ['PD0'] }, defaults: { tx: 'PD1', rx: 'PD0' } }],
-  i2c: [{ id: 'twi0', signals: { sda: ['PC4'], scl: ['PC5'] }, defaults: { sda: 'PC4', scl: 'PC5' } }],
+  uarts: [{ id: 'usart0', arduinoName: 'Serial', signals: { tx: ['PD1'], rx: ['PD0'] }, defaults: { tx: 'PD1', rx: 'PD0' } }],
+  i2c: [{ id: 'twi0', arduinoName: 'Wire', signals: { sda: ['PC4'], scl: ['PC5'] }, defaults: { sda: 'PC4', scl: 'PC5' } }],
   spi: [
     {
       id: 'spi0',
+      arduinoName: 'SPI',
       signals: { sck: ['PB5'], miso: ['PB4'], mosi: ['PB3'], ss: ['PB2'] },
       defaults: { sck: 'PB5', miso: 'PB4', mosi: 'PB3', ss: 'PB2' },
     },
@@ -133,11 +144,12 @@ const ATMEGA2560: ProcessorProfile = {
     PK0: 8, PK1: 9, PK2: 10, PK3: 11, PK4: 12, PK5: 13, PK6: 14, PK7: 15,
   },
   pwmPads: ['PE4', 'PE5', 'PE3', 'PH3', 'PH4', 'PH5', 'PB4', 'PB5', 'PB6', 'PB7', 'PL3', 'PL4', 'PL5'],
-  uarts: [{ id: 'usart0', signals: { tx: ['PE1'], rx: ['PE0'] }, defaults: { tx: 'PE1', rx: 'PE0' } }],
-  i2c: [{ id: 'twi0', signals: { sda: ['PD1'], scl: ['PD0'] }, defaults: { sda: 'PD1', scl: 'PD0' } }],
+  uarts: [{ id: 'usart0', arduinoName: 'Serial', signals: { tx: ['PE1'], rx: ['PE0'] }, defaults: { tx: 'PE1', rx: 'PE0' } }],
+  i2c: [{ id: 'twi0', arduinoName: 'Wire', signals: { sda: ['PD1'], scl: ['PD0'] }, defaults: { sda: 'PD1', scl: 'PD0' } }],
   spi: [
     {
       id: 'spi0',
+      arduinoName: 'SPI',
       signals: { sck: ['PB1'], miso: ['PB3'], mosi: ['PB2'], ss: ['PB0'] },
       defaults: { sck: 'PB1', miso: 'PB3', mosi: 'PB2', ss: 'PB0' },
     },
@@ -166,11 +178,12 @@ const ATMEGA32U4: ProcessorProfile = {
   adcChannels: { PF0: 0, PF1: 1, PF4: 4, PF5: 5, PF6: 6, PF7: 7 },
   // Timer4 is not modelled, so its two PWM pads are deliberately absent.
   pwmPads: ['PD0', 'PC6', 'PB5', 'PB6', 'PB7'],
-  uarts: [{ id: 'usart1', signals: { tx: ['PD3'], rx: ['PD2'] }, defaults: { tx: 'PD3', rx: 'PD2' } }],
-  i2c: [{ id: 'twi0', signals: { sda: ['PD1'], scl: ['PD0'] }, defaults: { sda: 'PD1', scl: 'PD0' } }],
+  uarts: [{ id: 'usart1', arduinoName: 'Serial1', signals: { tx: ['PD3'], rx: ['PD2'] }, defaults: { tx: 'PD3', rx: 'PD2' } }],
+  i2c: [{ id: 'twi0', arduinoName: 'Wire', signals: { sda: ['PD1'], scl: ['PD0'] }, defaults: { sda: 'PD1', scl: 'PD0' } }],
   spi: [
     {
       id: 'spi0',
+      arduinoName: 'SPI',
       signals: { sck: ['PB1'], miso: ['PB3'], mosi: ['PB2'], ss: ['PB0'] },
       defaults: { sck: 'PB1', miso: 'PB3', mosi: 'PB2', ss: 'PB0' },
     },
@@ -201,11 +214,13 @@ const RP2040: ProcessorProfile = {
   uarts: [
     {
       id: 'uart0',
+      arduinoName: 'Serial1',
       signals: { tx: ['GP0', 'GP12', 'GP16', 'GP28'], rx: ['GP1', 'GP13', 'GP17', 'GP29'] },
       defaults: { tx: 'GP0', rx: 'GP1' },
     },
     {
       id: 'uart1',
+      arduinoName: 'Serial2',
       signals: { tx: ['GP4', 'GP8', 'GP20', 'GP24'], rx: ['GP5', 'GP9', 'GP21', 'GP25'] },
       defaults: { tx: 'GP4', rx: 'GP5' },
     },
@@ -213,6 +228,7 @@ const RP2040: ProcessorProfile = {
   i2c: [
     {
       id: 'i2c0',
+      arduinoName: 'Wire',
       signals: {
         sda: ['GP0', 'GP4', 'GP8', 'GP12', 'GP16', 'GP20', 'GP24', 'GP28'],
         scl: ['GP1', 'GP5', 'GP9', 'GP13', 'GP17', 'GP21', 'GP25', 'GP29'],
@@ -221,6 +237,7 @@ const RP2040: ProcessorProfile = {
     },
     {
       id: 'i2c1',
+      arduinoName: 'Wire1',
       signals: {
         sda: ['GP2', 'GP6', 'GP10', 'GP14', 'GP18', 'GP22', 'GP26'],
         scl: ['GP3', 'GP7', 'GP11', 'GP15', 'GP19', 'GP23', 'GP27'],
@@ -231,6 +248,7 @@ const RP2040: ProcessorProfile = {
   spi: [
     {
       id: 'spi0',
+      arduinoName: 'SPI',
       signals: {
         sck: ['GP2', 'GP6', 'GP18', 'GP22'],
         mosi: ['GP3', 'GP7', 'GP19', 'GP23'],
@@ -241,6 +259,7 @@ const RP2040: ProcessorProfile = {
     },
     {
       id: 'spi1',
+      arduinoName: 'SPI1',
       signals: {
         sck: ['GP10', 'GP14', 'GP26'],
         mosi: ['GP11', 'GP15', 'GP27'],
