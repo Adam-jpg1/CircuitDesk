@@ -8,6 +8,7 @@ import { pinAbsolute, partBounds, partSize, wirePath, snap, type Pt } from './ge
 import { ComponentArtwork } from '../components-library/artwork/componentArtwork';
 import { UnoArtwork } from '../boards/artwork/UnoArtwork';
 import { GenericModuleArtwork } from '../boards/artwork/GenericModuleArtwork';
+import { CustomBoardArtwork } from '../boards/artwork/CustomBoardArtwork';
 import { MegaArtwork } from '../boards/artwork/MegaArtwork';
 import { LeonardoArtwork } from '../boards/artwork/LeonardoArtwork';
 import { hotspotAt, type Hotspot } from '../components-library/artwork/interactiveGeometry';
@@ -708,6 +709,8 @@ const PartView = memo(function PartView({
           <MegaArtwork def={def} />
         ) : def.artwork.builtinId === 'arduino-leonardo' ? (
           <LeonardoArtwork def={def} />
+        ) : def.artwork.kind === 'svg' || def.artwork.builtinId === 'custom-board' ? (
+          <CustomBoardArtwork def={def} />
         ) : (
           <GenericModuleArtwork def={def} />
         )
