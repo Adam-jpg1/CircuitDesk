@@ -15,7 +15,7 @@
 // it is the user's board and it carries the user's name for it.
 
 import { memo } from 'react';
-import type { BoardDefinition } from '../../types';
+import type { BoardDefinition, PinDefinition } from '../../types';
 import { MM } from '../pinHelpers';
 
 /** Reads a stored SVG back as drawable nodes, without ever parsing HTML. */
@@ -25,6 +25,93 @@ function ArtworkImage({ svg, w, h }: { svg: string; w: number; h: number }) {
   // replaced element where its own document cannot reach this one regardless.
   const encoded = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
   return <image href={encoded} width={w} height={h} preserveAspectRatio="xMidYMid meet" />;
+}
+
+/** Font size of a pin label on a generated board. Monospace, so widths are exact. */
+const LABEL_SIZE = 7;
+
+export interface GeneratedBoardLayout {
+  leftPins: PinDefinition[];
+  rightPins: PinDefinition[];
+  processor: string;
+  hasProcessor: boolean;
+  LABEL_SIZE: number;
+  /** Where the two label columns end, in canvas units. */
+  labelRight: number;
+  labelLeft: number;
+  chipW: number;
+  chipH: number;
+  chipX: number;
+  chipY: number;
+  /** True when the package sits between the two headers rather than below them. */
+  inMiddle: boolean;
+  showChip: boolean;
+  showName: boolean;
+  showWiringOnly: boolean;
+}
+
+/**
+ * Where everything goes on a board CircuitDesk draws for itself.
+ *
+ * Pulled out of the component so the rules can be tested without rendering:
+ * the failure this exists to prevent is a silkscreen that reads as a mess —
+ * a chip package sitting on top of somebody's pin names, or a board title
+ * printed through its own labels — and that is a geometry question, not a
+ * React one.
+ *
+ * The rule throughout is that the LABELS win. They are what the maker printed
+ * and the reason a custom board looks like theirs; the decorations give way to
+ * them, and a decoration with no room is not drawn at all rather than drawn
+ * badly.
+ */
+export function generatedBoardLayout(def: BoardDefinition): GeneratedBoardLayout {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const leftPins = def.pins.filter((p) => p.x < W / 2);
+  const rightPins = def.pins.filter((p) => p.x >= W / 2);
+  const hasProcessor = Boolean(def.processorProfileId);
+
+  // Label widths are estimated rather than measured, because this renders
+  // inside an SVG with no layout pass to ask. A monospace face makes the
+  // estimate reliable: every glyph is the same width.
+  const labelWidth = (text: string) => text.length * LABEL_SIZE * 0.62;
+  const labelRight = Math.max(0, ...leftPins.map((p) => p.x + 3.4 * MM + labelWidth(p.label)));
+  const labelLeft = Math.min(W, ...rightPins.map((p) => p.x - 3.4 * MM - labelWidth(p.label)));
+  const gap = labelLeft - labelRight;
+
+  // Below the pin rows when the middle is spoken for, which is where a real
+  // board would put a package it could not fit between two headers.
+  const lowestPin = Math.max(0, ...def.pins.map((p) => p.y));
+  const belowRoom = H - 5.5 * MM - (lowestPin + 3 * MM);
+  const inMiddle = gap >= 26;
+  const chipW = inMiddle ? Math.min(gap - 8, W * 0.42, 70) : Math.min(W * 0.42, 70);
+  const chipH = Math.min(inMiddle ? H * 0.26 : Math.max(belowRoom - 6, 14), chipW, 70);
+  const chipX = inMiddle ? labelRight + (gap - chipW) / 2 : W / 2 - chipW / 2;
+  const chipY = inMiddle ? H / 2 - chipH / 2 : lowestPin + 3 * MM + Math.max(0, (belowRoom - chipH) / 2);
+
+  return {
+    leftPins,
+    rightPins,
+    processor: def.processor,
+    hasProcessor,
+    LABEL_SIZE,
+    labelRight,
+    labelLeft,
+    chipW,
+    chipH,
+    chipX,
+    chipY,
+    inMiddle,
+    // A package that would be a smudge is not drawn at all; the board still
+    // names its processor in the inspector, and a 6-pixel black rectangle
+    // claiming to be an RP2040 helps nobody.
+    showChip: hasProcessor && chipW >= 18 && chipH >= 10,
+    // The same rule for the silkscreen text. A 22 mm board with three pins a
+    // side has no free space, and a name printed across its own pin labels is
+    // worse than no name — the board is captioned everywhere else it appears.
+    showName: H - 5 * MM - lowestPin >= 3.4 * MM,
+    showWiringOnly: !hasProcessor && inMiddle && belowRoom >= 3 * MM,
+  };
 }
 
 export const CustomBoardArtwork = memo(function CustomBoardArtwork({ def }: { def: BoardDefinition }) {
@@ -43,14 +130,10 @@ export const CustomBoardArtwork = memo(function CustomBoardArtwork({ def }: { de
   }
 
   // No artwork: build one from the board's own facts.
-  const leftPins = def.pins.filter((p) => p.x < W / 2);
-  const rightPins = def.pins.filter((p) => p.x >= W / 2);
-  const chipW = Math.min(W * 0.42, 70);
-  const chipH = Math.min(H * 0.26, 70);
-  const chipX = W / 2 - chipW / 2;
-  const chipY = H / 2 - chipH / 2;
-  const processor = def.processor;
-  const hasProcessor = Boolean(def.processorProfileId);
+  const {
+    leftPins, rightPins, processor, hasProcessor, LABEL_SIZE,
+    chipW, chipH, chipX, chipY, showChip, showName, showWiringOnly,
+  } = generatedBoardLayout(def);
 
   return (
     <g>
@@ -93,7 +176,7 @@ export const CustomBoardArtwork = memo(function CustomBoardArtwork({ def }: { de
 
       {/* The chip it carries, when it carries one. A board with no processor
           shows no package, because drawing one would be a claim. */}
-      {hasProcessor && (
+      {showChip && (
         <g>
           <rect x={chipX} y={chipY} width={chipW} height={chipH} rx="2" fill="#15181c" stroke="#0a0d10" />
           <rect x={chipX} y={chipY} width={chipW} height={chipH * 0.4} rx="2" fill="rgba(255,255,255,0.06)" />
@@ -111,7 +194,8 @@ export const CustomBoardArtwork = memo(function CustomBoardArtwork({ def }: { de
         </g>
       )}
 
-      {/* The board's own name, printed on it. */}
+      {/* The board's own name, printed on it — when there is room for it. */}
+      {showName && (
       <text
         x={W / 2}
         y={H - 3.2 * MM}
@@ -123,10 +207,11 @@ export const CustomBoardArtwork = memo(function CustomBoardArtwork({ def }: { de
       >
         {def.name}
       </text>
-      {!hasProcessor && (
+      )}
+      {showWiringOnly && (
         <text
           x={W / 2}
-          y={H / 2}
+          y={chipY + chipH / 2}
           textAnchor="middle"
           fontSize={Math.min(W * 0.06, 9)}
           fill="rgba(255,255,255,0.45)"
@@ -146,7 +231,7 @@ export const CustomBoardArtwork = memo(function CustomBoardArtwork({ def }: { de
             x={pin.x + (onLeft ? 3.4 * MM : -3.4 * MM)}
             y={pin.y + 2.4}
             textAnchor={onLeft ? 'start' : 'end'}
-            fontSize="7"
+            fontSize={LABEL_SIZE}
             fill="rgba(255,255,255,0.72)"
             fontFamily="monospace"
           >
