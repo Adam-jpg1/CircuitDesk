@@ -187,3 +187,57 @@ export function newCustomBoard(name: string): CustomBoardDefinition {
     createdAt: new Date().toISOString(),
   };
 }
+
+/**
+ * Rebuilds every embedded board's definition from the spec it was made from.
+ *
+ * A project file is untrusted input in exactly the way a board file is — it
+ * arrives by email, by link, by clone — and a custom board entry carries two
+ * things: the `spec`, which is a description, and the `definition`, which is
+ * capability DERIVED from that description. Trusting the second is how a
+ * hand-edited project claims to be simulated with no processor on it: the
+ * canvas, the compiler client and the runner all read the definition, and none
+ * of them re-derives it.
+ *
+ * So it is re-derived here, on the way in, every time. The spec is validated
+ * and resolved exactly as it would be on import, and the result replaces
+ * whatever the file said. Nothing is lost by this — the spec is the thing a
+ * user edits and exports — and a project that has been tampered with quietly
+ * comes back saying what it really is.
+ *
+ * A spec that no longer validates is not deleted, because deleting it would
+ * take every wire attached to that board with it. It keeps its geometry and its
+ * pins and loses every capability claim, which is the honest reading of "we
+ * cannot tell what this board is any more".
+ */
+export function revalidateEmbeddedBoards(project: CircuitProject): {
+  rederived: string[];
+  disarmed: { boardId: string; reason: string }[];
+} {
+  const rederived: string[] = [];
+  const disarmed: { boardId: string; reason: string }[] = [];
+
+  project.customDefinitions = project.customDefinitions.map((entry) => {
+    if (entry.source !== CUSTOM_BOARD_SOURCE) return entry;
+    const spec = (entry as CustomDefinition & { spec?: unknown }).spec;
+    const { board, problems } = validateCustomBoard(spec);
+    if (board) {
+      const { board: resolved } = resolveCustomBoard(board);
+      rederived.push(resolved.id);
+      return { ...entry, definition: resolved, spec: board };
+    }
+    const reason = problems.find(isError)?.message ?? 'the board description could not be read';
+    disarmed.push({ boardId: entry.definition?.id ?? 'unknown', reason });
+    return {
+      ...entry,
+      definition: {
+        ...entry.definition,
+        supportLevel: 'wiring',
+        compiler: { provider: 'none', supported: false, note: reason },
+        simulation: { engine: 'none', supported: false, supportedApis: [], supportedPeripherals: [] },
+      },
+    };
+  });
+
+  return { rederived, disarmed };
+}

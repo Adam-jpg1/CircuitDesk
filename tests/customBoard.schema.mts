@@ -274,8 +274,8 @@ section('6. a board file cannot execute, reach or exhaust anything');
   const fqbnError = errorsOf(arbitraryTarget).find((e) => e.code === 'fqbn-not-in-profile');
   check(fqbnError !== undefined, 'a board may not name an arbitrary build target');
   check(
-    Boolean(fqbnError && /may only build for a target its pipeline declares/.test(fqbnError.message)),
-    'and is told why',
+    Boolean(fqbnError && /That profile builds: /.test(fqbnError.message)),
+    `and is told what the pipeline does build (${fqbnError?.message})`,
   );
 
   // Sizes.
