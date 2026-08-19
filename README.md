@@ -57,6 +57,7 @@ Production: `npm run build && npm start` (serves the built app + API on :3411).
 | **Validation** | 20+ real rules: missing ground/power, LED resistor + polarity, 5V→3.3V conflicts, output shorts, GPIO over-current, floating inputs, I2C/UART pin checks, duplicate I2C devices, code↔circuit mismatches — each with severity, explanation, why-it-matters, suggested fix, click-to-highlight |
 | **Test bench** | Automated tests on a fresh headless emulator: input events (press/toggle/pot/sensor) at scheduled times, assertions (pin becomes HIGH/LOW within, holds, toggles N×, serial contains), pass/fail with expected/actual and timeline |
 | **Import** | Real parsers: CircuitDesk JSON (full restore), CSV pin maps (column mapping), KiCad `.kicad_pcb/.kicad_mod` (s-expressions: outline, footprints, pads, nets), Eagle `.brd/.sch/.lbr` (XML: elements, pads, signals), Fritzing `.fzz/.fzpz` (connectors + SVG mapping), EasyEDA JSON (pads/tracks/parts), Gerber+Excellon (aperture/draw/flash rendering with layer toggles), SVG board art, ZIP part bundles — via a 5-step wizard with graceful fallback to visual reference |
+| **Custom boards** | Board Studio: bring a board CircuitDesk does not have and compile and run it. Choose the processor (never guessed), and the toolchain and runtime follow; pins carry the maker's names mapped to processor pads, so firmware written against `GP15` drives the pin labelled `STATUS`. Import a pin map, drag pins onto the board, save to My Boards, export as one `.cdboard.json`. Capability is derived from the profiles and cannot be typed — a board with no processor is wiring-only and is never built as something else. See [docs/custom-boards.md](docs/custom-boards.md) |
 | **Custom parts** | Board creator: upload SVG/image, set physical size, click-to-place pins with full metadata, save to a cross-project library, edit and export |
 | **Export** | `.cdproj.json`, ZIP package, BOM CSV, pin map CSV, wiring report, validation report, test report, board definition JSON, project image |
 | **Persistence** | IndexedDB for projects and custom parts, localStorage for UI settings; autosave (debounced), refresh-safe |
@@ -77,6 +78,8 @@ src/
   validation/         rule engine
   testing/            headless test runner
   import/             wizard + real format parsers + security hardening
+  custom-boards/      custom board schema, validation, resolution, bundles
+  board-studio/       Board Studio, its store and the My Boards library
   custom-parts/       custom board creator + library store
   project/            models, templates, persistence service, exporters
   persistence/        IndexedDB + settings
@@ -105,6 +108,12 @@ npm run test:leonardo  # ATmega32U4 runtime suite: GPIO in/out, millis, Serial1
                        # native USB Serial is not faked onto the UART
 npm run test:boards    # board profiles, honest badges, no Uno fallbacks
 npm run test:ui        # quick Playwright smoke test
+npx tsx tests/customBoard.demos.mts
+                       # five end-to-end custom-board journeys: a board that
+                       # arrived as a spreadsheet, a board file opened by
+                       # somebody with nothing installed, the wrong chip caught
+                       # and named, a revision priced before it costs a wire,
+                       # and a board with no chip that says so
 npm run test:qa        # full beta QA: create → edit → undo/redo → compiler
                        # errors → compile+run → sim controls → persistence →
                        # export → all 9 import formats → graceful failures
