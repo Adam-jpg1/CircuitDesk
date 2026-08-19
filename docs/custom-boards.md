@@ -23,10 +23,17 @@ somebody designed last week, or on a board that does not exist yet. Splitting
 these four apart is what lets a new board reuse everything CircuitDesk already
 knows without inheriting another product's identity.
 
-The three profile registries are shared by native and custom boards alike.
-There is no custom-board branch anywhere in validation, compilation or
-execution — a native board and a custom board reach the same code by the same
-route.
+The three profile registries are shared by native and custom boards alike. A
+native board and a custom board reach validation, compilation and execution by
+the same route, through the processor they name and the pad map they carry.
+
+There is exactly one place in that path that asks whether a board is custom,
+and it is worth knowing where: `serverTargetFor` in `src/compiler/targets.ts`.
+The compiler service keeps a strict allowlist and refuses board ids it does not
+know, which is a protection worth keeping — so a custom board is asked for by
+the target its compile profile declares rather than by a name the service has
+never heard of. The artifact is still stamped with the custom board's own id.
+Nothing else branches on it.
 
 ## Physical pin ↔ processor pad
 
