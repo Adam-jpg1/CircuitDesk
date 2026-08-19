@@ -261,6 +261,62 @@ try {
     check(placed.embedded[0]?.pins === 6, `with all six pins (${placed.embedded[0]?.pins})`);
   }
 
+  // ============================================ 10. and it stays responsive ==
+  section('10. the things a user does repeatedly are fast');
+  {
+    // Opening the Studio on a fresh board: the first thing anybody does.
+    const openMs = await page.evaluate(() => {
+      const s = (window as unknown as { studio: { getState(): { openNew(n: string): void } } }).studio;
+      const start = performance.now();
+      for (let i = 0; i < 20; i++) s.getState().openNew('Bench');
+      return (performance.now() - start) / 20;
+    });
+    console.log(`   open the studio: ${openMs.toFixed(2)} ms`);
+    check(openMs < 50, `opening is under 50 ms (${openMs.toFixed(2)} ms)`);
+
+    // Sanitising artwork, on a drawing with a few thousand elements.
+    const sanitizeMs = await page.evaluate(async () => {
+      const mod = await import('/src/custom-boards/svgSanitize.ts');
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${
+        Array.from({ length: 3000 }, (_, i) => `<rect x="${i % 100}" y="${i % 50}" width="1" height="1" fill="#123"/>`).join('')
+      }</svg>`;
+      const start = performance.now();
+      for (let i = 0; i < 5; i++) mod.sanitizeBoardSvg(svg);
+      return (performance.now() - start) / 5;
+    });
+    console.log(`   sanitise a 3000-element SVG: ${sanitizeMs.toFixed(2)} ms`);
+    check(sanitizeMs < 500, `artwork is checked in under half a second (${sanitizeMs.toFixed(2)} ms)`);
+
+    // A hundred pins imported and then rendered in the placement editor, which
+    // is the heaviest thing the Studio draws.
+    const importMs = await page.evaluate(() => {
+      const s = (window as unknown as { studio: { getState(): { openNew(n: string): void; setProcessor(id: string): void; importPinCsv(t: string): unknown } } }).studio;
+      const csv = ['label,processor_pin', ...Array.from({ length: 100 }, (_, i) => `SIGNAL_${i},GP${i % 30}`)].join('\n');
+      s.getState().openNew('Hundred');
+      s.getState().setProcessor('proc.rp2040');
+      const start = performance.now();
+      s.getState().importPinCsv(csv);
+      return performance.now() - start;
+    });
+    console.log(`   import 100 pins: ${importMs.toFixed(2)} ms`);
+    check(importMs < 200, `a hundred pins go in under 200 ms (${importMs.toFixed(2)} ms)`);
+
+    await page.click('[data-testid="studio-step-placement"]');
+    await page.waitForSelector('[data-testid="pin-placement"] g[data-pin="SIGNAL_0"]');
+    const drawn = await page.$$eval('[data-testid="pin-placement"] g[data-pin]', (els) => els.length);
+    check(drawn === 100, `all hundred are drawn in the placement editor (${drawn})`);
+
+    // Dragging one of them: the interaction that must not stutter.
+    const dragMs = await page.evaluate(() => {
+      const s = (window as unknown as { studio: { getState(): { movePin(id: string, x: number, y: number): void } } }).studio;
+      const start = performance.now();
+      for (let i = 0; i < 60; i++) s.getState().movePin('SIGNAL_0', 10 + (i % 20), 10 + (i % 30));
+      return (performance.now() - start) / 60;
+    });
+    console.log(`   one drag step with 100 pins on screen: ${dragMs.toFixed(2)} ms`);
+    check(dragMs < 16, `each drag step stays inside a frame (${dragMs.toFixed(2)} ms)`);
+  }
+
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors[0]}` : ''}`);
   await browser.close();
 } finally {
