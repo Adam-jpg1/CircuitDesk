@@ -380,6 +380,63 @@ section('A board with no processor says so, and is still useful');
   );
 }
 
+// ================== a board that asks for a variant of its own chip =========
+section('A board may ask for another target of the same chip, and gets it');
+{
+  const WIFI: CustomBoardDefinition = {
+    schemaVersion: CUSTOM_BOARD_SCHEMA_VERSION,
+    id: 'custom.wifi-rover',
+    revision: 1,
+    identity: { name: 'WiFi Rover', creator: 'Fieldwork Instruments' },
+    outline: { widthMm: 30, heightMm: 44, color: '#123f5e' },
+    pins: [
+      pin('V3', '3V3', null, 0, 'power-3v3'),
+      pin('GND', 'GND', null, 1, 'ground'),
+      pin('LAMP', 'LAMP', 'GP15', 2),
+    ],
+    processorProfileId: 'proc.rp2040',
+    compileProfileId: 'compile.rp2040-arduino',
+    runtimeProfileId: 'runtime.rp2040js',
+    // The Pico W variant: same RP2040, different variant header. A real need,
+    // and the only shape of override that is allowed.
+    fqbnOverride: 'rp2040:rp2040:rpipicow',
+  };
+
+  const { problems, board } = validateCustomBoard(WIFI);
+  check(problems.filter(isError).length === 0, `a declared alternate target is accepted${problems.filter(isError).map((p) => ` — ${p.message}`).join('')}`);
+
+  const rejected = validateCustomBoard({ ...WIFI, fqbnOverride: 'arduino:avr:uno' });
+  check(
+    rejected.problems.some((p) => p.code === 'fqbn-not-in-profile'),
+    'while a target from another chip is refused before it can be sent anywhere',
+  );
+
+  const project = emptyProject('wifi rover');
+  embedBoard(project, board!);
+  const instance: ComponentInstance = {
+    id: 'board1', definitionId: WIFI.id, x: 0, y: 0, rotation: 0, properties: {}, simulationState: {},
+  };
+  project.boardInstances.push(instance);
+  project.codeFiles = [{ id: 'f1', name: 'sketch.ino', content: blink(15), language: 'cpp' }];
+
+  const { targets } = resolveWorkspaceTargets(project);
+  check(targets[0]?.fqbn === 'rp2040:rp2040:rpipicow', `the build asks for the variant (${targets[0]?.fqbn})`);
+  check(
+    targets[0]?.serverBoardId === 'board.raspberry-pi-pico',
+    'through the allowlisted target, which is still what the service is asked for',
+  );
+
+  simulationController.stop();
+  const report = await simulationController.build(project);
+  console.log(`   build: ${report.builds[0]?.detail}`);
+  if (!report.anyRunnable) {
+    skip('the RP2040 toolchain is unavailable here');
+  } else {
+    check(report.builds[0]?.status === 'built', `and the service really builds it as that variant (${report.builds[0]?.status})`);
+  }
+  simulationController.stop();
+}
+
 console.log(
   failures === 0
     ? `\nCustom-board acceptance passed${skipped ? ` (${skipped} skipped)` : ''}.`

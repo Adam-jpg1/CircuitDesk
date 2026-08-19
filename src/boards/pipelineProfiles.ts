@@ -54,6 +54,18 @@ export interface CompileProfile {
    * own id, which the server has correctly never heard of. Boards that pin
    * their own FQBN name their own server target instead.
    */
+  /**
+   * Other build targets this same chip may be built as.
+   *
+   * A real need — an RP2040 board that wants the Pico W variant, a 328P board
+   * that wants the Nano's bootloader — and a deliberately short list. Every
+   * entry must be the SAME processor: a target for another chip would produce
+   * firmware the runtime cannot execute, and an override is a text field, not a
+   * place to redefine what the board is. The compiler service enforces the same
+   * rule independently, because this list is client-side and the service is the
+   * trust boundary.
+   */
+  alternateFqbns?: string[];
   serverTargetId?: string;
   artifactFormat: ArtifactFormat;
   /**
@@ -98,6 +110,7 @@ export const COMPILE_PROFILES: CompileProfile[] = [
     processorProfileIds: ['proc.atmega328p'],
     requiredCore: 'arduino:avr',
     fqbn: 'arduino:avr:uno',
+    alternateFqbns: ['arduino:avr:nano'],
     serverTargetId: 'board.arduino-uno',
     artifactFormat: 'intel-hex',
     libraries: ['Servo'],
@@ -136,6 +149,7 @@ export const COMPILE_PROFILES: CompileProfile[] = [
     processorProfileIds: ['proc.rp2040'],
     requiredCore: 'rp2040:rp2040',
     fqbn: 'rp2040:rp2040:rpipico',
+    alternateFqbns: ['rp2040:rp2040:rpipicow'],
     serverTargetId: 'board.raspberry-pi-pico',
     artifactFormat: 'uf2',
     libraries: ['Servo'],

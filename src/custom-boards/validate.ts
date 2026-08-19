@@ -294,13 +294,18 @@ export function validateCustomBoard(raw: unknown): { problems: BoardProblem[]; b
   // a board file could name any build target on the compiler service.
   if (d.fqbnOverride !== undefined) {
     const override = checkText(d.fqbnOverride, 'fqbnOverride', 120, problems);
-    if (override !== undefined && compile && override !== compile.fqbn) {
+    // The targets this pipeline declares: its own, plus the alternates it lists
+    // for the SAME chip. Anything else is refused here and, independently, by
+    // the compiler service — a board file is untrusted input and this list is
+    // the only thing standing between it and a build target it chose itself.
+    const allowed = compile ? [compile.fqbn, ...(compile.alternateFqbns ?? [])].filter(Boolean) : [];
+    if (override !== undefined && compile && !allowed.includes(override)) {
       problems.push({
         severity: 'error',
         code: 'fqbn-not-in-profile',
         message:
           `${boardName} asks to be built as "${override}", which is not a target of the ${compile.name} profile. ` +
-          'A board may only build for a target its pipeline declares.',
+          `That profile builds: ${allowed.join(', ') || 'nothing'}.`,
       });
     }
   }

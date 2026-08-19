@@ -3,8 +3,27 @@ import { detectArduinoCli, cliCompile } from './arduinoCli.js';
 import { detectGccToolchain, gccCompile, parseDiagnostics, BuildTimeoutError } from './gccToolchain.js';
 import { buildSketchDir, buildCliSketchDir } from './sketchBuilder.js';
 import { cleanupDir, createBuildDir, validateFiles, InputValidationError } from './fileService.js';
-import { findTarget, SUPPORTED_TARGETS, type BoardTarget, type CompileRequest, type CompileResult, type Diagnostic } from './types.js';
+import {
+  findTarget,
+  resolveRequestedFqbn,
+  SUPPORTED_TARGETS,
+  type BoardTarget,
+  type CompileRequest,
+  type CompileResult,
+  type Diagnostic,
+} from './types.js';
+import { PINNED_CORES } from './cores.js';
 import { includeWarnings } from './libraries.js';
+
+/**
+ * Every FQBN this service will build, from the pinned core manifest.
+ *
+ * The manifest rather than "whatever arduino-cli reports installed": the pinned
+ * list is the one the image bootstrap obeyed and the capability endpoint
+ * reports, and a target that appeared on the machine by some other route is not
+ * a target this service is validated for.
+ */
+const ALLOWED_FQBNS: string[] = PINNED_CORES.flatMap((c) => c.targets);
 import { buildKey, buildDirFor, cachedResult, rememberResult, runDeduplicated, evictBuildDirs } from './buildCache.js';
 
 export interface CompilerHealth {
@@ -82,6 +101,22 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
     };
   }
 
+  // The build target, which may be a variant the board asked for. Refused
+  // rather than repaired when it is not one this service is built against —
+  // silently compiling for the default after a user named a different target
+  // produces firmware that does not match what they were told they got.
+  const requested = resolveRequestedFqbn(target, req.fqbn, ALLOWED_FQBNS);
+  if ('error' in requested) {
+    return {
+      ...base,
+      success: false,
+      error: requested.error,
+      errorCode: 'UNSUPPORTED_BOARD',
+      durationMs: Date.now() - started,
+    };
+  }
+  const fqbn = requested.fqbn;
+
   try {
     validateFiles(req.files);
   } catch (err) {
@@ -101,7 +136,7 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
   // disk, so it is reported on a failed build as readily as a successful one:
   // a sketch that includes a header this target cannot build should say so
   // even when there are twenty other errors above it.
-  const notes = includeWarnings(req.files.map((f) => f.content).join('\n'), target.fqbn);
+  const notes = includeWarnings(req.files.map((f) => f.content).join('\n'), fqbn);
 
   const cli = await detectArduinoCli();
 
@@ -127,7 +162,7 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
         durationMs: Date.now() - started,
       };
     }
-    return cliBuild(req, target, cli, syntaxOnly, notes, base, started);
+    return cliBuild(req, target, fqbn, cli, syntaxOnly, notes, base, started);
   }
 
   const health = await getCompilerHealth();
@@ -142,7 +177,7 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
   }
 
   if (health.toolchain === 'arduino-cli') {
-    return cliBuild(req, target, cli, syntaxOnly, notes, base, started);
+    return cliBuild(req, target, fqbn, cli, syntaxOnly, notes, base, started);
   }
 
   // The local avr-g++ fallback. Not the deployed path, and not cached: it exists
@@ -186,6 +221,7 @@ function failure(err: unknown, base: Omit<CompileResult, 'success'>, started: nu
 async function cliBuild(
   req: CompileRequest,
   target: BoardTarget,
+  fqbn: string,
   cli: { version: string; coreVersions: Record<string, string> },
   syntaxOnly: boolean,
   notes: CompileResult['simulationNotes'],
@@ -193,7 +229,7 @@ async function cliBuild(
   started: number,
 ): Promise<CompileResult> {
   const key = buildKey({
-    fqbn: target.fqbn,
+    fqbn,
     toolchainVersion: cli.version,
     coreVersion: cli.coreVersions[target.core] ?? 'unknown',
     syntaxOnly,
@@ -212,7 +248,7 @@ async function cliBuild(
       const prepareMs = Date.now() - prepareStart;
 
       const compileStart = Date.now();
-      const out = await cliCompile(sketchDir, outDir, target.fqbn, syntaxOnly, target.arch);
+      const out = await cliCompile(sketchDir, outDir, fqbn, syntaxOnly, target.arch);
       const compileMs = Date.now() - compileStart;
 
       // The handoff directories are read and finished with. An ESP32 build

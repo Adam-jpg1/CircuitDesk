@@ -250,3 +250,69 @@ export function findTarget(idOrFqbn: string, boardId?: string): BoardTarget | un
   }
   return SUPPORTED_TARGETS.find((t) => t.id === idOrFqbn) ?? SUPPORTED_TARGETS.find((t) => t.fqbn === idOrFqbn);
 }
+
+/**
+ * The FQBN a request is actually compiled with.
+ *
+ * A board may ask for a build target other than its allowlisted default — an
+ * RP2040 board that wants the Pico W variant, say — and that is a genuine
+ * need. It is also the most dangerous string in the whole custom-board feature,
+ * because it is user input that ends up in a compiler invocation, so it passes
+ * four gates and none of them is "looks fine":
+ *
+ *   1. shape. Three colon-separated segments of a restricted alphabet, and
+ *      nothing else. No board options, no spaces, no separators of any kind —
+ *      an FQBN that could be read as two arguments is refused rather than
+ *      trimmed.
+ *   2. membership. It must be one of the FQBNs the PINNED cores declare. Not
+ *      "a core that happens to be installed": the pinned manifest, which is the
+ *      same list the image bootstrap obeyed.
+ *   3. same core. It must come from the core the allowlisted target already
+ *      uses. Otherwise an RP2040 board could ask for an AVR build and receive
+ *      an artifact its runtime cannot execute — and the artifact-format
+ *      contract the whole pipeline rests on would be broken by a text field.
+ *   4. refusal, not repair. A request that fails any of these is answered with
+ *      an error naming what was allowed. It is never quietly compiled as the
+ *      default, because a user who asked for one target and silently got
+ *      another has been lied to.
+ *
+ * Note what is NOT a gate: escaping. Nothing here is escaped, because nothing
+ * is interpolated — arduino-cli is invoked through execFile with an argument
+ * array, so a shell never sees any of this. The gates exist to keep the value
+ * meaningful, not to make a dangerous string safe.
+ */
+export function resolveRequestedFqbn(
+  target: BoardTarget,
+  requested: string | undefined,
+  allowedFqbns: string[],
+): { fqbn: string } | { error: string } {
+  if (!requested || requested === target.fqbn) return { fqbn: target.fqbn };
+
+  // What the message offers: targets for the SAME chip, which is the set that
+  // could actually produce firmware this board's runtime can execute.
+  const sameChip = SUPPORTED_TARGETS
+    .filter((t) => allowedFqbns.includes(t.fqbn) && t.core === target.core && t.arch === target.arch && t.mcu === target.mcu)
+    .map((t) => t.fqbn);
+  const refuse = (why: string) => ({
+    error:
+      `Build target "${String(requested).slice(0, 80)}" was refused: ${why}. ` +
+      `${target.name} may be built as: ${sameChip.join(', ') || target.fqbn}.`,
+  });
+
+  if (!/^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/.test(requested)) {
+    return refuse('an FQBN is three colon-separated names and nothing else');
+  }
+  if (!allowedFqbns.includes(requested)) {
+    return refuse('it is not a target of any core this service is built against');
+  }
+  const other = SUPPORTED_TARGETS.find((t) => t.fqbn === requested);
+  if (!other || other.core !== target.core) {
+    return refuse(`it belongs to a different core (this board builds with ${target.core})`);
+  }
+  if (other.arch !== target.arch || other.mcu !== target.mcu) {
+    return refuse(
+      `it is a different chip (${other.name} is ${other.mcu ?? other.arch}, this board is ${target.mcu ?? target.arch})`,
+    );
+  }
+  return { fqbn: requested };
+}
