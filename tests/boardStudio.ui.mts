@@ -261,8 +261,44 @@ try {
     check(placed.embedded[0]?.pins === 6, `with all six pins (${placed.embedded[0]?.pins})`);
   }
 
-  // ============================================ 10. and it stays responsive ==
-  section('10. the things a user does repeatedly are fast');
+  // ================================ 10. an older project copy can be updated =
+  section('10. the project is offered the newer revision, priced first');
+  {
+    await page.click('[data-testid="studio-step-review"]');
+    check(
+      await page.isVisible('[data-testid="studio-project-revision"]'),
+      'while nothing has changed, the studio simply says which revision the project is on',
+    );
+
+    // Edit the board: drop a pin the project has a definition for.
+    await page.click('[data-testid="studio-step-pins"]');
+    const removeButtons = page.locator('[data-testid="studio-pin-table"] button');
+    await removeButtons.last().click();
+    await page.click('[data-testid="studio-step-review"]');
+    await page.waitForSelector('[data-testid="studio-upgrade"]');
+
+    const offer = (await page.textContent('[data-testid="studio-upgrade"]')) ?? '';
+    check(/revision 1/.test(offer), `the offer names the revision the project is on (${offer.replace(/\s+/g, ' ').slice(0, 100)})`);
+    check(/pin\(s\) go|nothing on the canvas is lost/.test(offer), 'and what updating would cost');
+
+    await page.click('[data-testid="studio-upgrade-apply"]');
+    await page.waitForFunction(() => {
+      const editor = (window as unknown as { editor: { getState(): { project: { customDefinitions: { spec?: { revision: number } }[] } | null } } }).editor;
+      return editor.getState().project?.customDefinitions[0]?.spec?.revision === 2;
+    });
+    const after = await page.evaluate(() => {
+      const editor = (window as unknown as {
+        editor: { getState(): { project: { customDefinitions: { spec?: { revision: number; pins: unknown[] } }[] } | null } };
+      }).editor;
+      const entry = editor.getState().project!.customDefinitions[0];
+      return { revision: entry.spec?.revision, pins: entry.spec?.pins.length };
+    });
+    check(after.revision === 2, `the project is moved to revision 2 (${after.revision})`);
+    check(after.pins === 5, `with the edited pin map (${after.pins})`);
+  }
+
+  // ============================================ 11. and it stays responsive ==
+  section('11. the things a user does repeatedly are fast');
   {
     // Opening the Studio on a fresh board: the first thing anybody does.
     const openMs = await page.evaluate(() => {

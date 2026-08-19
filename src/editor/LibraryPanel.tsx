@@ -131,10 +131,7 @@ export function LibraryPanel() {
           className="btn sm"
           data-testid="library-open-board"
           title="Open a .cdboard.json somebody sent you"
-          onClick={() => {
-            useStudioStore.getState().openNew('My board');
-            useStudioStore.getState().goTo('start');
-          }}
+          onClick={() => useStudioStore.getState().openStart()}
         >
           Open board file
         </button>

@@ -18,7 +18,7 @@ import { PinPlacementEditor } from './PinPlacementEditor';
 import { libraryEntryFor } from './boardLibrary';
 import { useCustomPartsStore } from '../custom-parts/customPartsStore';
 import { useEditorStore } from '../app/editorStore';
-import { embedBoard } from '../custom-boards/projectBoards';
+import { embedBoard, embeddedBoards, previewUpgrade, upgradeEmbeddedBoard } from '../custom-boards/projectBoards';
 import { exportBoardBundle, bundleFileName } from '../custom-boards/bundle';
 import { PROCESSOR_PROFILES } from '../boards/processorProfiles';
 import { COMPILE_PROFILES, RUNTIME_PROFILES } from '../boards/pipelineProfiles';
@@ -784,6 +784,7 @@ function SaveControls() {
   return (
     <div className="studio-save">
       {message && <span className="studio-muted" data-testid="studio-save-message">{message}</span>}
+      <UpgradeControl onMessage={setMessage} />
       {savedRevision !== null && <span className="badge">revision {savedRevision} saved</span>}
       <button className="btn" onClick={exportBundle} disabled={!draft || blocking.length > 0} data-testid="studio-export">
         Export file
@@ -800,5 +801,65 @@ function SaveControls() {
         Add to this project
       </button>
     </div>
+  );
+}
+
+/**
+ * "This project is on an older revision of this board."
+ *
+ * The other half of revisioning, and the half that is easy to leave out: a
+ * library edit deliberately does NOT reach into projects already built with the
+ * board, so unless the user is offered the upgrade somewhere, the snapshot
+ * becomes a trap rather than a protection.
+ *
+ * The cost is quoted before it is charged. Dropping a pin drops the wires on
+ * it, and a person deciding whether to upgrade needs that number in front of
+ * them, not afterwards.
+ */
+function UpgradeControl({ onMessage }: { onMessage: (m: string) => void }) {
+  const draft = useStudioStore((s) => s.draft);
+  const project = useEditorStore((s) => s.project);
+  if (!draft || !project) return null;
+
+  const embedded = embeddedBoards(project).get(draft.id);
+  if (!embedded) return null;
+
+  const ready = useStudioStore.getState().readyToSave();
+  if (!ready || ready.revision === embedded.revision) {
+    return <span className="badge" data-testid="studio-project-revision">project on revision {embedded.revision}</span>;
+  }
+
+  const cost = previewUpgrade(project, ready);
+  const wires = cost?.droppedPins.reduce((n, d) => n + d.connectionIds.length, 0) ?? 0;
+  const summary =
+    cost && cost.droppedPins.length > 0
+      ? `${cost.droppedPins.length} pin(s) go, taking ${wires} wire(s)`
+      : 'nothing on the canvas is lost';
+
+  return (
+    <span className="studio-upgrade" data-testid="studio-upgrade">
+      <span className="studio-muted">
+        This project is on revision {embedded.revision}. Updating it to {ready.revision}: {summary}.
+      </span>
+      <button
+        className="btn sm"
+        data-testid="studio-upgrade-apply"
+        onClick={() => {
+          const editor = useEditorStore.getState();
+          let applied: ReturnType<typeof previewUpgrade> = null;
+          editor.mutateCircuit((p) => {
+            applied = upgradeEmbeddedBoard(p, ready).report;
+          });
+          const lost = applied?.droppedPins.reduce((n, d) => n + d.connectionIds.length, 0) ?? 0;
+          useStudioStore.getState().markSaved(ready);
+          onMessage(
+            `This project now uses revision ${ready.revision}` +
+            (lost > 0 ? `, and ${lost} wire(s) were removed with the pins that went.` : '.'),
+          );
+        }}
+      >
+        Update in this project
+      </button>
+    </span>
   );
 }

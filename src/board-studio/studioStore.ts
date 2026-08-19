@@ -113,6 +113,8 @@ interface StudioState {
   savedRevision: number | null;
 
   openNew(name?: string): void;
+  /** Opens the Studio on the first step, with no draft — "I have a file". */
+  openStart(): void;
   openEdit(board: CustomBoardDefinition): void;
   openDuplicate(board: CustomBoardDefinition, name: string): void;
   openBundle(text: string): boolean;
@@ -236,6 +238,10 @@ export const useStudioStore = create<StudioState>((set, get) => {
         savedRevision: null,
         ...derive(draft),
       });
+    },
+
+    openStart() {
+      set({ open: true, step: 'start', mode: get().mode, ...EMPTY });
     },
 
     openEdit(board) {
