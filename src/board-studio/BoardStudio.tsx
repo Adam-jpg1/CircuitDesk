@@ -546,6 +546,7 @@ function PipelineStep() {
   const draft = useStudioStore((s) => s.draft);
   const mismatches = useStudioStore((s) => s.mismatches);
   if (!draft) return <NoDraft />;
+  const selected = COMPILE_PROFILES.find((c) => c.id === draft.compileProfileId);
   const compiles = COMPILE_PROFILES.filter(
     (c) => c.adapter === 'none' || !draft.processorProfileId || c.processorProfileIds.includes(draft.processorProfileId),
   );
@@ -590,17 +591,20 @@ function PipelineStep() {
 
       <label className="studio-field">
         <span>Build target (FQBN)</span>
-        <input
+        <select
           value={draft.fqbnOverride ?? ''}
-          placeholder={COMPILE_PROFILES.find((c) => c.id === draft.compileProfileId)?.fqbn ?? 'none'}
           data-testid="studio-fqbn"
-          onChange={(e) => useStudioStore.getState().setFqbnOverride(e.target.value)}
-        />
+          onChange={(e) => useStudioStore.getState().setFqbnOverride(e.target.value || undefined)}
+        >
+          <option value="">{selected?.fqbn ? `${selected.fqbn} (the toolchain's own target)` : 'none'}</option>
+          {(selected?.alternateFqbns ?? []).map((f) => <option key={f} value={f}>{f}</option>)}
+        </select>
       </label>
       <p className="studio-muted">
-        Leave it blank to use the toolchain's own target, which is what nearly every board wants. A value here is
-        checked against the cores actually installed and is passed to the compiler as an argument, never as a command —
-        an FQBN cannot become something the server runs.
+        A list rather than a text box, and a short one: every entry is a target for the same chip, because a target for
+        a different chip would produce firmware this board's runtime cannot execute. The compiler service checks the
+        same rule again on its own side, and passes the value to the toolchain as an argument rather than as a command —
+        an FQBN never reaches a shell.
       </p>
 
       {mismatches.length > 0 && (
