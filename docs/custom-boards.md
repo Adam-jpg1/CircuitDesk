@@ -115,6 +115,72 @@ The request passes four gates on the server (`resolveRequestedFqbn`):
 Nothing is escaped, because nothing is interpolated: `arduino-cli` is invoked
 through `execFile` with an argument array and a shell is never involved.
 
+## Custom pipelines: what v1 does, and what it deliberately does not
+
+The obvious next request after "my board" is "my toolchain". The obvious
+implementation of it is remote code execution, so v1 draws the line
+explicitly rather than leaving it to be discovered.
+
+**What a board may choose today**
+
+- one of the compile profiles CircuitDesk ships, which are the toolchains the
+  service is actually built against and has cores pinned for;
+- one of the runtime profiles, which are the emulators that exist;
+- a build target within its own chip's declared alternates.
+
+That is a *selection* problem. Every value is an id or a member of a fixed
+list, and the worst a malicious board file can do with it is name a
+combination that does not work — which is reported, not executed.
+
+**What a board may never do**
+
+- supply a command, a script, a hook, an interpreter or a path;
+- name a compiler executable, a build recipe, or an arbitrary build property;
+- cause anything to be installed, downloaded or fetched;
+- widen what the service will run.
+
+There is no field for any of these, and there is no code path that would read
+one. `compileCommand: "anything the user wants"` is not an unimplemented
+feature, it is remote code execution on a shared server, and it is not coming.
+
+**What a genuine custom toolchain would require**
+
+If CircuitDesk ever supports a toolchain it does not ship, the work is not in
+the board schema — it is in the execution model, and the schema is the last
+part to change. What would have to exist first:
+
+1. **A sandbox with no network and no filesystem outside its own build tree.**
+   A container per build, not a process; an image the service controls, not one
+   a manifest names.
+2. **A declarative manifest, not a script.** A toolchain would be described the
+   way a compile profile already is — a core id, a version, a target, an
+   artifact format — and the *service* would decide how to invoke it. A
+   manifest that can only describe cannot execute.
+3. **A pinned, reviewed registry.** The same rule the shipped cores live under:
+   versions pinned, changes deliberate, runtime tests re-run. An unpinned
+   toolchain moves under the emulator.
+4. **Resource limits that are enforced by the sandbox**, not requested from the
+   build: wall clock, memory, disk, and a concurrency budget that cannot be
+   spent by one user.
+5. **An artifact contract.** Whatever comes out has to be a format a runtime
+   profile declares it accepts, or the result is a file nothing can execute —
+   which `checkArtifactRuntime()` already exists to prevent.
+
+**And a custom runtime**
+
+Same shape, harder problem. A runtime profile today names an emulator that is
+part of the application. A user-supplied one would mean executing somebody's
+code in the user's browser tab, next to their projects. If it is ever done it
+belongs in a worker with no DOM access, no storage access and no network, with
+the runtime profile declaring exactly which APIs and peripherals it models —
+because `supportedApis` is what the honesty badges are computed from, and a
+runtime that could claim anything would make every badge in the application
+meaningless.
+
+Until all of that exists, the honest answer to "can I bring my own compiler"
+is no, and the useful answer to what people actually want — "can I bring my own
+board" — is yes, and is what this milestone delivers.
+
 ## Security
 
 A `.cdboard.json` is untrusted input. It cannot:

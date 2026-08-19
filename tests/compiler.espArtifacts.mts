@@ -107,14 +107,23 @@ section('2. the artifacts are the same with the step and without it');
   } else {
     const dir = await mkdtemp(path.join(tmpdir(), 'cd-esp-eq-'));
     try {
-      // Three builds of one sketch from one path, all forced clean: two with
-      // the core's own recipe, one with the hook skipped. Two are needed
-      // unmodified because an ESP32 build is NOT byte-reproducible — the image
+      // Four builds of one sketch from one path, all forced clean: three with
+      // the core's own recipe, one with the hook skipped. The unmodified ones
+      // are needed because an ESP32 build is NOT byte-reproducible — the image
       // carries a build timestamp and two hashes computed over it — so "did
       // skipping the hook change the firmware" can only be answered against how
       // much an unchanged build varies from itself.
+      //
+      // THREE unmodified builds rather than two, because one pair understates
+      // the varying fields: two timestamps a second apart share most of their
+      // digits, and a hash byte can coincide by chance, so a single pair's
+      // differing bytes are a lower bound on the field. Taking the union over
+      // independent pairs converges on the real extent — which is exactly the
+      // flake this suite produced when a byte two positions inside the
+      // timestamp happened to match in the pair that defined the region.
       const first = await buildInto(dir, 'esp32:esp32:esp32c6', false, 'one');
       const second = await buildInto(dir, 'esp32:esp32:esp32c6', false, 'two');
+      const third = await buildInto(dir, 'esp32:esp32:esp32c6', false, 'three');
       const skippedBuild = await buildInto(dir, 'esp32:esp32:esp32c6', true, 'skip');
 
       check(first.has('sketch.merged.bin'), 'the unmodified build writes the merged flash image');
@@ -143,11 +152,17 @@ section('2. the artifacts are the same with the step and without it');
           for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) out.add(i);
           return out;
         };
-        // How much an ESP32 build varies from itself, with nothing changed.
-        const stamp = differing(a, b);
+        // How much an ESP32 build varies from itself, with nothing changed —
+        // over every unmodified pair, not one of them.
+        const d = third.get('sketch.bin');
+        const stamp = new Set<number>([
+          ...differing(a, b),
+          ...(d ? differing(a, d) : []),
+          ...(d && b ? differing(b, d) : []),
+        ]);
         const withSkip = differing(a, c);
         console.log(
-          `   two identical ESP32 builds already differ in ${stamp.size} bytes ` +
+          `   identical ESP32 builds already differ in ${stamp.size} bytes ` +
           `(build stamp and the hashes over it); skipping the hook differs in ${withSkip.size}`,
         );
         check(stamp.size > 0, 'an ESP32 image is not byte-reproducible even with nothing changed');
