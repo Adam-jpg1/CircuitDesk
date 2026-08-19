@@ -24,6 +24,7 @@ import { withNextRevision, boardChanged, libraryEntryFor, libraryBoards, compare
 import { isError } from '../src/custom-boards/validate';
 import { CUSTOM_BOARD_LIMITS } from '../src/custom-boards/schema';
 import { exportBoardBundle } from '../src/custom-boards/bundle';
+import { boardDefinitionForStudio } from '../src/import/convert';
 import type { CustomDefinition } from '../src/types';
 
 let failures = 0;
@@ -340,6 +341,46 @@ section('11. a board file opens as a board, and a bad one does not');
   check(
     studio().problems.some((p) => p.code === 'not-a-board-bundle'),
     `and a reason (${studio().problems.map((p) => p.code).join(', ')})`,
+  );
+}
+
+// ================== 11b. an importer hands a board over, chip unnamed =======
+section('11b. a board from an importer arrives complete except for the one thing it cannot know');
+{
+  const draft = boardDefinitionForStudio(
+    {
+      format: 'kicad',
+      svg: undefined,
+      pins: [],
+      widthMm: 40,
+      heightMm: 60,
+    } as never,
+    { name: 'Milled Board', widthMm: 40, heightMm: 60, target: 'board-studio', supportLevel: 'wiring' } as never,
+    [
+      { id: 'PAD1', label: 'MOTOR_A', xMm: 3, yMm: 4 },
+      { id: 'PAD2', label: 'MOTOR_B', xMm: 3, yMm: 8 },
+      { id: 'PAD3', label: 'SENSE', xMm: 37, yMm: 4 },
+    ] as never,
+  );
+  check(draft.pins.length === 3, `the pins the parser found come across (${draft.pins.length})`);
+  check(draft.pins.every((p) => p.pad === null), 'with NO pad mapping, because a PCB file does not carry one');
+  check(draft.processorProfileId === null, 'and no processor, because a PCB file does not carry that either');
+  check(draft.outline.widthMm === 40 && draft.outline.heightMm === 60, 'the outline is the one that was measured');
+
+  studio().openImported(draft, 'kicad');
+  check(studio().open, 'the studio opens on it');
+  check(studio().step === 'processor', `at the chip question, which is the only one left (${studio().step})`);
+  check(
+    studio().notes.some((n) => /copper is, not what is soldered/.test(n.text)),
+    'saying why that question is being asked',
+  );
+  check(draftCapability(studio().draft)?.supportLevel === 'wiring', 'and the board is wiring-only until it is answered');
+
+  studio().setProcessor('proc.rp2040');
+  check(draftCapability(studio().draft)?.supportLevel === 'simulated', 'answering it makes the board simulated');
+  check(
+    studio().problems.filter(isError).length === 0,
+    'and unmapped pins are not an error — a pin that goes nowhere on the chip is a real pin',
   );
 }
 

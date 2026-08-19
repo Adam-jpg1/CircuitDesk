@@ -118,6 +118,8 @@ interface StudioState {
   openEdit(board: CustomBoardDefinition): void;
   openDuplicate(board: CustomBoardDefinition, name: string): void;
   openBundle(text: string): boolean;
+  /** Opens a draft an importer assembled, with a note about where it came from. */
+  openImported(draft: CustomBoardDefinition, format: string): void;
   close(): void;
 
   setMode(mode: StudioMode): void;
@@ -315,6 +317,32 @@ export const useStudioStore = create<StudioState>((set, get) => {
         ...derive(board),
       });
       return true;
+    },
+
+    openImported(draft, format) {
+      const suggestions = suggestProcessors(
+        `${draft.identity.name} ${draft.identity.description ?? ''}`,
+        draft.pins.map((p) => p.label),
+      );
+      set({
+        open: true,
+        // Straight to the chip: identity, outline and pins all came from the
+        // file, and the chip is the one thing the file could not say.
+        step: 'processor',
+        draft,
+        baseline: null,
+        notes: [{
+          kind: 'info',
+          text:
+            `Imported from ${format}: ${draft.pins.length} pin(s), ${draft.outline.widthMm}×${draft.outline.heightMm} mm` +
+            `${draft.outline.artworkSvg ? ', with artwork' : ''}. ` +
+            'A board file says where the copper is, not what is soldered to it, so the chip is yours to name.',
+        }],
+        suggestions,
+        selectedPinId: null,
+        savedRevision: null,
+        ...derive(draft),
+      });
     },
 
     close() {

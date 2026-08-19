@@ -1,5 +1,7 @@
 // Converts parse results into CircuitDesk definitions/projects.
 
+import { boardFromImport } from '../custom-boards/import';
+import type { CustomBoardDefinition, CustomBoardPin } from '../custom-boards/schema';
 import { uid, type BoardDefinition, type ComponentDefinition, type CustomDefinition, type PinDefinition, type SupportLevel, type CircuitProject } from '../types';
 import { MM } from '../boards/pinHelpers';
 import { emptyProject } from '../project/templates';
@@ -10,7 +12,7 @@ export interface ImportOptions {
   widthMm: number;
   heightMm: number;
   supportLevel: SupportLevel;
-  target: 'new-project' | 'existing-project' | 'custom-board' | 'custom-component' | 'visual-reference';
+  target: 'new-project' | 'existing-project' | 'custom-board' | 'custom-component' | 'visual-reference' | 'board-studio';
 }
 
 export function pinsToDefinitions(pins: ImportedPin[]): PinDefinition[] {
@@ -111,4 +113,46 @@ export function buildProjectFromImport(result: ImportParseResult, options: Impor
   if (custom.kind === 'board') project.boardInstances.push(inst);
   else project.componentInstances.push(inst);
   return project;
+}
+
+/**
+ * The imported result as a CUSTOM BOARD definition, for the Board Studio.
+ *
+ * The wizard's own output is a finished `BoardDefinition` — a picture with
+ * pins, permanently wiring-only, with no way to ever say what chip is on it.
+ * That is the right answer for "import a reference" and the wrong one for
+ * "this is my board", and until now it was the only answer available.
+ *
+ * This is the other door. Everything the parser genuinely extracted comes
+ * across — outline, artwork, pins with their positions and roles — and
+ * nothing else does. In particular no processor: a KiCad file says where the
+ * copper is, not what is soldered to it, so the board arrives wiring-only and
+ * the Studio asks. That is the same rule every other import path follows.
+ */
+export function boardDefinitionForStudio(
+  result: ImportParseResult,
+  options: ImportOptions,
+  pins: ImportedPin[],
+): CustomBoardDefinition {
+  const svg = result.svg ?? (result.layers ? gerberToSvg(result.layers, options.widthMm, options.heightMm) : undefined);
+  return boardFromImport({
+    name: options.name,
+    description: `Imported from ${result.format}.`,
+    widthMm: options.widthMm,
+    heightMm: options.heightMm,
+    ...(svg ? { artworkSvg: svg } : {}),
+    pins: pins.map((p) => ({
+      id: p.id,
+      label: p.label || p.id,
+      // A pad mapping is exactly what these formats do not carry, so none is
+      // invented here. The Studio's pin table is where it gets filled in.
+      pad: null,
+      xMm: p.xMm,
+      yMm: p.yMm,
+      type: (p.type ?? 'digital') as CustomBoardPin['type'],
+      capabilities: [],
+      ...(p.voltage !== undefined ? { voltage: p.voltage } : {}),
+      ...(p.notes ? { description: p.notes } : {}),
+    })),
+  });
 }
