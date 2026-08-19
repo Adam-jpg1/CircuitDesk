@@ -17,7 +17,7 @@
 
 import { CUSTOM_BOARD_SCHEMA_VERSION, CUSTOM_BOARD_LIMITS, type CustomBoardDefinition } from './schema';
 import { validateCustomBoard, isError, type BoardProblem } from './validate';
-import { looksHostile } from './svgSanitize';
+import { looksHostile, sanitizeBoardSvg } from './svgSanitize';
 
 /** Marks the document so a stray JSON file is refused with a clear reason. */
 export const BUNDLE_KIND = 'circuitdesk-board';
@@ -149,6 +149,36 @@ export function importBoardBundle(text: string): { board?: CustomBoardDefinition
   const { problems: validation, board } = validateCustomBoard(bundle.board);
   problems.push(...validation);
   if (!board) return { problems };
+
+  // Where there is a DOM, the artwork is also rebuilt from the allowlist rather
+  // than merely checked — the same treatment a file dropped into the Studio
+  // gets, so a board that arrives as a file is not held to a lower standard
+  // than one that arrives as a drop. Outside a browser there is no parser and
+  // nothing renders, so `looksHostile` above stays the whole gate and the
+  // artwork travels unmodified; rebuilding it there would mean a board losing
+  // its face every time it passed through a script.
+  if (board.outline.artworkSvg && typeof DOMParser !== 'undefined') {
+    const clean = sanitizeBoardSvg(board.outline.artworkSvg);
+    if (!clean.svg) {
+      return {
+        problems: [{
+          severity: 'error',
+          code: 'artwork-unreadable',
+          message: `The board's artwork could not be read as a drawing: ${clean.removed[0] ?? 'nothing in it was drawable'}.`,
+        }],
+      };
+    }
+    if (clean.svg !== board.outline.artworkSvg) {
+      board.outline = { ...board.outline, artworkSvg: clean.svg };
+      problems.push({
+        severity: 'warning',
+        code: 'artwork-cleaned',
+        message:
+          `${clean.removed.length} thing(s) were removed from this board's artwork because artwork may only draw: ` +
+          `${clean.removed.slice(0, 3).join('; ')}.`,
+      });
+    }
+  }
 
   if (board.schemaVersion !== CUSTOM_BOARD_SCHEMA_VERSION) {
     problems.push({

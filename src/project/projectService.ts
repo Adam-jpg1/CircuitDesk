@@ -2,6 +2,7 @@ import { dbGetProject, dbListProjects, dbPutProject, dbDeleteProject } from '../
 import { resolveDefinition } from './partsRegistry';
 import { ensureSketchAssignments } from './sketches';
 import { migratePinIds } from './pinMigrations';
+import { revalidateEmbeddedBoards } from '../custom-boards/projectBoards';
 import {
   PROJECT_SCHEMA_VERSION,
   uid,
@@ -104,6 +105,18 @@ export function normalizeProject(raw: unknown): CircuitProject {
       migrated.moved.map((m) => `${m.definitionId} ${m.from}→${m.to}`).join(', '),
     );
   }
+  // Custom boards are re-derived from their descriptions before anything reads
+  // them. A project file can say a board is simulated; only the profiles decide
+  // whether it is, and this is where the file's opinion is discarded.
+  const boards = revalidateEmbeddedBoards(project);
+  if (boards.disarmed.length > 0) {
+    console.warn(
+      `[CircuitDesk] ${boards.disarmed.length} custom board(s) in this project no longer describe a valid board ` +
+      'and have been reduced to wiring only: ' +
+      boards.disarmed.map((d) => `${d.boardId} — ${d.reason}`).join('; '),
+    );
+  }
+
   // The project has now been brought up to this build's schema, so it is saved
   // as such — which is also what stops a rename rule firing twice.
   project.version = PROJECT_SCHEMA_VERSION;
