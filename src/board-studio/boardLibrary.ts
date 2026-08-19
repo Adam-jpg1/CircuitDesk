@@ -121,3 +121,35 @@ export function compareRevisions(
   if (library.revision === embedded.revision) return 'same';
   return library.revision > embedded.revision ? 'library-newer' : 'project-newer';
 }
+
+/**
+ * A stored library entry, with its board re-derived from its description.
+ *
+ * The same rule projects live under: the `spec` is a description and the
+ * `definition` is a conclusion drawn from it, and only the first is a fact.
+ * IndexedDB is not a trust boundary — an entry can be edited in a browser's
+ * dev tools as easily as a project file can be edited in a text editor — so
+ * the conclusion is drawn again on every load rather than read back.
+ *
+ * An entry whose description no longer validates keeps its geometry and loses
+ * every capability claim, rather than vanishing from the library: a board a
+ * user made and can still see is recoverable, and one that silently
+ * disappeared is not.
+ */
+export function rederivedLibraryEntry(entry: CustomDefinition): CustomDefinition {
+  if (entry.kind !== 'board' || entry.source !== CUSTOM_BOARD_SOURCE) return entry;
+  const { board } = validateCustomBoard((entry as CustomDefinition & { spec?: unknown }).spec);
+  if (!board) {
+    return {
+      ...entry,
+      definition: {
+        ...entry.definition,
+        supportLevel: 'wiring',
+        compiler: { provider: 'none', supported: false, note: 'This board\'s description could not be read.' },
+        simulation: { engine: 'none', supported: false, supportedApis: [], supportedPeripherals: [] },
+      },
+    };
+  }
+  const { board: resolved } = resolveCustomBoard(board);
+  return { ...entry, definition: resolved, spec: board } as CustomDefinition;
+}

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { CustomDefinition } from '../types';
 import { dbDeleteCustomPart, dbListCustomParts, dbPutCustomPart } from '../persistence/db';
 import { setLibraryCustomParts } from '../project/partsRegistry';
+import { rederivedLibraryEntry } from '../board-studio/boardLibrary';
 
 interface CustomPartsState {
   parts: CustomDefinition[];
@@ -16,7 +17,11 @@ export const useCustomPartsStore = create<CustomPartsState>((set, get) => ({
   loaded: false,
   async refresh() {
     try {
-      const parts = await dbListCustomParts();
+      // Custom boards are re-derived from their descriptions on the way in,
+      // for the reason a project's are: what is stored contains both a
+      // description and a conclusion drawn from it, and the store is not a
+      // trust boundary.
+      const parts = (await dbListCustomParts()).map(rederivedLibraryEntry);
       setLibraryCustomParts(parts);
       set({ parts, loaded: true });
     } catch (err) {
