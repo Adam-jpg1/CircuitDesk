@@ -19,11 +19,13 @@
 import { resolveRequestedFqbn, SUPPORTED_TARGETS, findTarget } from '../server/compiler/types.js';
 import { PINNED_CORES } from '../server/compiler/cores.js';
 import { validateCustomBoard, isError } from '../src/custom-boards/validate';
+import { libraryEntryFor, rederivedLibraryEntry } from '../src/board-studio/boardLibrary';
 import { importBoardBundle, exportBoardBundle } from '../src/custom-boards/bundle';
 import { sanitizeBoardSvg, looksHostile } from '../src/custom-boards/svgSanitize';
 import { resolveCustomBoard } from '../src/custom-boards/resolve';
 import { CUSTOM_BOARD_LIMITS, CUSTOM_BOARD_SCHEMA_VERSION, type CustomBoardDefinition } from '../src/custom-boards/schema';
 import { readFileSync } from 'node:fs';
+import type { CustomDefinition } from '../src/types';
 
 let failures = 0;
 function check(cond: boolean, msg: string) {
@@ -286,6 +288,32 @@ section('7. capability comes from the profiles, never from the file');
     !resolvedReal.simulation?.supportedApis.includes('everything'),
     `a made-up API name does not reach the board (${resolvedReal.simulation?.supportedApis.join(', ')})`,
   );
+}
+
+// ================ 7b. and the same is true of the user's own library ========
+section('7b. a tampered library entry is re-derived, not believed');
+{
+  const honest = base({ processorProfileId: null, compileProfileId: 'compile.none', runtimeProfileId: 'runtime.none' });
+  const { entry } = libraryEntryFor(honest);
+  check(entry !== undefined, 'a wiring-only board stores');
+
+  // IndexedDB is not a trust boundary: an entry is as editable as a file.
+  const tampered = {
+    ...entry!,
+    definition: {
+      ...entry!.definition,
+      supportLevel: 'simulated',
+      simulation: { engine: 'rp2040js', supported: true, supportedApis: ['everything'], supportedPeripherals: ['all'] },
+      compiler: { provider: 'arduino-cli', fqbn: 'attacker:core:whatever', supported: true },
+    },
+  } as CustomDefinition;
+
+  const back = rederivedLibraryEntry(tampered);
+  check(back.definition.supportLevel === 'wiring', `it comes back wiring-only (${back.definition.supportLevel})`);
+  check(back.definition.simulation?.supported === false, 'its claim to be simulated did not survive the load');
+  check(back.definition.compiler?.supported === false, 'nor its claim to compile');
+  check(back.definition.compiler?.fqbn === undefined, 'nor the build target it invented');
+  check(back.definition.name === honest.identity.name, 'while the board itself is still there');
 }
 
 // ============================== 8. the compile allowlist still holds =========
