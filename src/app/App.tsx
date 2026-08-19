@@ -7,6 +7,7 @@ import { CustomPartsPage } from '../custom-parts/CustomPartsPage';
 import { AboutPage } from './AboutPage';
 import { LicensesPage } from './LicensesPage';
 import { useCustomPartsStore } from '../custom-parts/customPartsStore';
+import { BoardStudio } from '../board-studio/BoardStudio';
 
 export function App() {
   const route = useHashRoute();
@@ -45,6 +46,13 @@ export function App() {
           <Dashboard />
         </ErrorBoundary>
       )}
+      {/* Mounted above the route rather than inside the editor: a board can be
+          started from the library, opened from a file on the dashboard, or
+          handed over by the import wizard, and it should not vanish because
+          the route changed underneath it. */}
+      <ErrorBoundary name="board studio">
+        <BoardStudio />
+      </ErrorBoundary>
       <ToastHost />
     </>
   );

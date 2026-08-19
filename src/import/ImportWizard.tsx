@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { IMPORT_FORMATS, detectAndParse, autoMapCsvPins } from './importService';
 import { ImportError, type ImportParseResult, type ImportedPin } from './types';
-import { buildCustomDefinition, buildProjectFromImport, type ImportOptions } from './convert';
+import { buildCustomDefinition, buildProjectFromImport, boardDefinitionForStudio, type ImportOptions } from './convert';
+import { useStudioStore } from '../board-studio/studioStore';
 import { saveProject, listProjectMetas, loadProject } from '../project/projectService';
 import { useCustomPartsStore } from '../custom-parts/customPartsStore';
 import { navigate, toast, SupportBadge } from '../ui/primitives';
@@ -70,6 +71,16 @@ export function ImportWizard() {
         await saveProject(project);
         toast(`Imported project “${project.name}”`, 'success');
         navigate(`#/editor/${project.id}`);
+        return;
+      }
+      if (options.target === 'board-studio') {
+        // Everything the parser genuinely found, handed to the Studio so the
+        // user can say what chip is on it. No processor is guessed on the way:
+        // a PCB file says where the copper is, not what is soldered to it.
+        const draft = boardDefinitionForStudio(effectiveResult, options, pins);
+        useStudioStore.getState().openImported(draft, effectiveResult.format);
+        toast(`“${draft.identity.name}” is open in the Board Studio — tell it what chip is on it.`, 'success');
+        navigate('#/');
         return;
       }
       const custom = buildCustomDefinition(effectiveResult, options, pins);
@@ -455,7 +466,8 @@ function ImportStep({ result, pins, options, setOptions, importing, onBack, onIm
     const list: { id: ImportOptions['target']; label: string; desc: string; disabled?: boolean }[] = [
       { id: 'new-project', label: 'Import as new project', desc: result.project ? 'Restores the full project.' : 'Creates a project containing the imported part.' },
       { id: 'existing-project', label: 'Import into existing project', desc: 'Adds the imported part (and its definition) to a project you pick.', disabled: Boolean(result.project) },
-      { id: 'custom-board', label: 'Import as custom board', desc: 'Saved to your board library, reusable across projects.', disabled: Boolean(result.project) },
+      { id: 'board-studio', label: 'Open in the Board Studio', desc: 'Bring it in as YOUR board: say what chip is on it, map its pins to processor pads, and compile and run firmware for it.', disabled: Boolean(result.project) },
+      { id: 'custom-board', label: 'Import as custom board', desc: 'Saved to your board library as a wiring-only part, reusable across projects.', disabled: Boolean(result.project) },
       { id: 'custom-component', label: 'Import as custom component', desc: 'Saved to the component library.', disabled: Boolean(result.project) },
       { id: 'visual-reference', label: 'Import as visual reference', desc: 'Artwork only, honestly badged “visual only”.', disabled: Boolean(result.project) },
     ];

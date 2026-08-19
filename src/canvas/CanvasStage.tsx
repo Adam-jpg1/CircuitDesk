@@ -4,6 +4,7 @@ import { useSimulationStore } from '../simulation/simulationStore';
 import { resolveDefinition, resolvePin } from '../project/partsRegistry';
 import { buildCircuitGraph } from '../circuit/nets';
 import { arduinoPinNumber } from '../boards/pinMaps';
+import { runnerPinIndex } from '../simulation/boardRunner';
 import { pinAbsolute, partBounds, partSize, wirePath, snap, type Pt } from './geometry';
 import { ComponentArtwork } from '../components-library/artwork/componentArtwork';
 import { UnoArtwork } from '../boards/artwork/UnoArtwork';
@@ -537,8 +538,12 @@ const WiresLayer = memo(function WiresLayer({
         const [instId, pinId] = node.split(/:(.+)/s) as unknown as [string, string];
         if (instId === board.id) {
           const boardDef = graph.definitions.get(board.id);
-          const arduinoPin = boardDef?.isBoard ? arduinoPinNumber(boardDef, pinId) : undefined;
-          if (arduinoPin !== undefined && snapshot.states[arduinoPin] === 'high') {
+          // The runner's own index, not the Arduino pin number: they are the
+          // same on AVR and nothing else, so asking for the Arduino number is
+          // why wire activity never lit up on an RP2040 or an ESP32 — and
+          // would never light up on a custom board of any architecture.
+          const index = boardDef?.isBoard ? runnerPinIndex(boardDef, pinId) : undefined;
+          if (index !== undefined && snapshot.states[index] === 'high') {
             map.set(conn.id, true);
             break;
           }
@@ -837,7 +842,7 @@ function PinTooltip({ toWorldRect }: { toWorldRect: () => DOMRect | null }) {
     );
     let simState: string | null = null;
     if (def.isBoard && simStatus !== 'stopped' && pinSnapshot) {
-      const n = arduinoPinNumber(def, pin.id);
+      const n = runnerPinIndex(def, pin.id);
       if (n !== undefined && n < pinSnapshot.states.length) {
         const st = pinSnapshot.states[n];
         const duty = pinSnapshot.duty[n];

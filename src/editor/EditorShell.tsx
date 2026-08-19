@@ -9,7 +9,6 @@ import { LibraryPanel } from './LibraryPanel';
 import { Inspector } from './Inspector';
 import { BottomPanel } from './BottomPanel';
 import { KeyMatrixOverlay } from './KeyMatrixOverlay';
-import { BoardStudio } from '../board-studio/BoardStudio';
 import { layoutCodeEditor } from './CodePanel';
 import { ErrorBoundary, ResizeHandle, navigate } from '../ui/primitives';
 import { PANEL_LIMITS } from '../persistence/settings';
@@ -140,9 +139,6 @@ export function EditorShell({ projectId }: { projectId: string }) {
         )}
       </div>
       <StatusBar />
-      <ErrorBoundary name="board studio">
-        <BoardStudio />
-      </ErrorBoundary>
     </div>
   );
 }
