@@ -161,7 +161,16 @@ function InstanceInspector({ inst }: { inst: ComponentInstance }) {
               const refs = arduinoPin !== undefined ? codeUsage.refs.filter((r) => r.pin === arduinoPin) : [];
               return (
                 <tr key={pin.id} className={conns.length > 0 ? 'connected' : ''}>
-                  <td>{pin.label}</td>
+                  {/* The maker's name, and the processor pad behind it. Both
+                      are true, and the pad is what firmware is written
+                      against — a person reading this table is usually holding
+                      a sketch that says GP15. */}
+                  <td>
+                    {pin.label}
+                    {def.padMap?.[pin.id] && def.padMap[pin.id] !== pin.label && (
+                      <span style={{ color: 'var(--text-2)' }}> · {def.padMap[pin.id]}</span>
+                    )}
+                  </td>
                   <td style={{ color: 'var(--text-2)' }}>{pin.type}{pin.voltage != null ? ` ${pin.voltage}V` : ''}</td>
                   <td>{conns.length || '—'}</td>
                   <td>
