@@ -48,12 +48,13 @@ try {
   const tabs = await page.$$eval('.site-tab', (els) => els.map((e) => e.textContent?.trim() ?? ''));
   check(['Projects', 'Templates', 'Community'].every((t) => tabs.includes(t)), `the header offers Projects, Templates and Community (${tabs.join(' | ')})`);
   check((await page.locator('.site-tab.active').innerText()).trim() === 'Projects', 'and marks where you are');
-  const teaser = await page.locator('.template-card').count();
-  check(teaser >= 3 && teaser <= 6, `the projects page shows a few templates, not the whole gallery (${teaser})`);
-  check(await page.getByRole('button', { name: /All templates/ }).isVisible(), 'with a way to the rest');
+  // The projects page is about the user's projects; templates live on their
+  // own page, reached from the header (and, on a first visit, a button).
+  check((await page.locator('.template-card').count()) === 0, 'the projects page carries no template cards');
+  check(await page.getByRole('button', { name: /Browse templates/ }).isVisible(), 'a first visit offers a way to the templates');
 
   // ----------------------------------------------------------- templates
-  await page.getByRole('button', { name: /All templates/ }).click();
+  await page.locator('.site-tab', { hasText: 'Templates' }).click();
   await page.waitForSelector('.site-hero');
   check(page.url().endsWith('#/templates'), 'which is a page of its own');
   const sections = await page.$$eval('.dash-section-title', (els) => els.map((e) => e.textContent?.trim() ?? ''));

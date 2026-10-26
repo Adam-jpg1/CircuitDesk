@@ -5,6 +5,10 @@ services:
     plan: starter
     healthCheckPath: /health
     autoDeploy: true
+    # Deploy from main, explicitly. The service was once left tracking a
+    # working branch, and when that branch was renamed it silently stopped
+    # deploying anything at all.
+    branch: main
     envVars:
       - key: NODE_ENV
         value: production

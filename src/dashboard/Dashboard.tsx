@@ -2,9 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listProjectMetas, saveProject, deleteProject, duplicateProject, loadProject } from '../project/projectService';
 import { buildBlinkProject, emptyProject } from '../project/templates';
 import { navigate, ContextMenu, Modal, SupportBadge, timeAgo, toast } from '../ui/primitives';
-import { LogoIcon, ImportIcon, PlusIcon, ChipIcon, LayersIcon, UsersIcon } from '../ui/icons';
+import { LogoIcon, ImportIcon, PlusIcon, ChipIcon, LayersIcon } from '../ui/icons';
 import { SiteHeader } from '../site/SiteHeader';
-import { TemplateCard, templateViews } from '../site/TemplatesPage';
 import { loadSetting } from '../persistence/settings';
 import { svgDataUrl } from '../canvas/thumbnail';
 import type { CircuitProject, ProjectMeta } from '../types';
@@ -102,11 +101,12 @@ export function Dashboard() {
               <button className="btn primary" onClick={() => void createProject(() => buildBlinkProject('My First Project'))}>
                 Create First Project
               </button>
+              <button className="btn" onClick={() => navigate('#/templates')}>
+                <LayersIcon style={{ width: 14, height: 14 }} /> Browse templates
+              </button>
               <button className="btn" onClick={() => navigate('#/import')}>Import Project</button>
             </div>
-            <div style={{ marginTop: 26, width: '100%', textAlign: 'left' }}>
-              <TemplateTeaser onPick={(build) => void createProject(build)} />
-            </div>
+
           </div>
         ) : (
           <>
@@ -137,7 +137,6 @@ export function Dashboard() {
               {filtered.length === 0 && <div className="empty-state">No projects match “{query}”.</div>}
             </div>
 
-            <TemplateTeaser onPick={(build) => void createProject(build)} />
           </>
         )}
       </div>
@@ -256,34 +255,6 @@ function ProjectCard({ meta, onMenu }: { meta: ProjectMeta; onMenu: (m: { x: num
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * A taste of the templates, with the way to the rest.
- *
- * The full gallery has its own page; here it is four cards and two doors, so
- * the projects list is about the user's projects.
- */
-const TEASER_IDS = ['tpl.blink', 'tpl.ultrasonic', 'show.i2c-sensor-bus', 'tpl.pico-blink'];
-function TemplateTeaser({ onPick }: { onPick: (build: () => CircuitProject) => void }) {
-  const views = templateViews().filter((v) => TEASER_IDS.includes(v.template.id));
-  return (
-    <>
-      <div className="dash-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        Start from a template
-        <span style={{ flex: 1 }} />
-        <button className="btn sm" onClick={() => navigate('#/templates')}>
-          <LayersIcon style={{ width: 13, height: 13 }} /> All templates →
-        </button>
-        <button className="btn sm" onClick={() => navigate('#/community')}>
-          <UsersIcon style={{ width: 13, height: 13 }} /> Community →
-        </button>
-      </div>
-      <div className="tpl-grid">
-        {views.map((v) => <TemplateCard key={v.template.id} view={v} onPick={() => onPick(v.template.build)} />)}
-      </div>
-    </>
   );
 }
 
