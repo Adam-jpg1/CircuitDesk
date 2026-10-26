@@ -5,6 +5,9 @@ import {
   type CodeFile,
   type ComponentInstance,
   type Connection,
+  type TestAssertion,
+  type TestCase,
+  type TestInputEvent,
 } from '../types';
 
 function inst(definitionId: string, x: number, y: number, properties: Record<string, unknown> = {}, rotation = 0): ComponentInstance {
@@ -31,6 +34,31 @@ function wire(
 
 function code(name: string, content: string): CodeFile {
   return { id: uid('file'), name, content, language: 'cpp' };
+}
+
+/**
+ * A test bench for a starter.
+ *
+ * Every starter has one, for a reason that is not ceremony: a starter is the
+ * first thing a new user opens, and the only way to know it still does what its
+ * description says is for something to assert it. These run on a fresh headless
+ * emulator against the real compiled firmware, so a bench that passes is proof
+ * the circuit and the sketch still agree.
+ */
+function bench(
+  name: string,
+  description: string,
+  assertions: TestAssertion[],
+  opts: { events?: TestInputEvent[]; timeoutMs?: number } = {},
+): TestCase {
+  return {
+    id: uid('test'),
+    name,
+    description,
+    events: opts.events ?? [],
+    assertions: assertions.map((a) => ({ ...a, id: uid('as') })),
+    timeoutMs: opts.timeoutMs ?? 4000,
+  };
 }
 
 export function emptyProject(name: string): CircuitProject {
@@ -192,6 +220,17 @@ void loop() {
   delay(250);
 }
 `)];
+      p.tests = [
+        bench(
+          'Wiper position reaches the sketch',
+          'With the wiper at the top of its travel the ADC must read near full scale, and the sketch must print it.',
+          [
+            { kind: 'serial-contains', text: 'A0 = ', withinMs: 1200 },
+            { kind: 'serial-contains', text: '1023', withinMs: 2500 },
+          ],
+          { events: [{ atMs: 200, action: 'set-analog', componentId: pot.id, value: 1 }], timeoutMs: 4000 },
+        ),
+      ];
       return p;
     },
   },
@@ -229,6 +268,18 @@ void loop() {
   for (int i = 0; i < 256; i += 4) { analogWrite(B, 255 - i); analogWrite(R, i); delay(10); }
 }
 `)];
+      p.tests = [
+        bench(
+          'All three channels are driven',
+          'Each colour pin must be switching, which is what PWM is — a steady level would mean one channel is dead.',
+          [
+            { kind: 'pin-toggles', pin: 9, minToggles: 10, withinMs: 1500 },
+            { kind: 'pin-toggles', pin: 10, minToggles: 10, withinMs: 1500 },
+            { kind: 'pin-toggles', pin: 11, minToggles: 10, withinMs: 1500 },
+          ],
+          { timeoutMs: 3000 },
+        ),
+      ];
       return p;
     },
   },
@@ -268,6 +319,14 @@ void loop() {
   for (int us = 2000; us >= 1000; us -= 20) pulse(us);
 }
 `)];
+      p.tests = [
+        bench(
+          'A 50 Hz pulse train reaches the servo',
+          'The signal pin must pulse about 50 times a second. The horn angle follows the measured width, so no pulses means no movement.',
+          [{ kind: 'pin-toggles', pin: 9, minToggles: 40, withinMs: 1000 }],
+          { timeoutMs: 2500 },
+        ),
+      ];
       return p;
     },
   },
@@ -318,6 +377,17 @@ void loop() {
   delay(200);
 }
 `)];
+      p.tests = [
+        bench(
+          'Close object lights the LED',
+          'With the target moved to 10 cm the sketch must measure it and switch the LED on; the echo timing comes from the sensor protocol, not from a number we hand it.',
+          [
+            { kind: 'serial-contains', text: 'cm', withinMs: 1500 },
+            { kind: 'pin-becomes-high', pin: 13, withinMs: 2500 },
+          ],
+          { events: [{ atMs: 200, action: 'set-value', componentId: sonar.id, value: 10 }], timeoutMs: 4000 },
+        ),
+      ];
       return p;
     },
   },
@@ -329,14 +399,22 @@ void loop() {
     build: () => {
       const p = emptyProject('7-Segment Counter');
       const uno = inst('board.arduino-uno', 120, 160);
-      const seg = inst('comp.seven-segment', 520, 130);
-      p.boardInstances = [uno];
-      p.componentInstances = [seg];
+      const seg = inst('comp.seven-segment', 620, 130);
       const segPins: [string, string][] = [
         ['D2', 'a'], ['D3', 'b'], ['D4', 'c'], ['D5', 'd'], ['D6', 'e'], ['D7', 'f'], ['D8', 'g'], ['D9', 'dp'],
       ];
+      // One resistor per segment, because a seven-segment display is eight
+      // LEDs and each one needs its own. Sharing a single resistor on the
+      // common cathode is the usual shortcut and it is wrong: the brightness
+      // would then change with how many segments are lit.
+      const resistors = segPins.map((_, i) => inst('comp.resistor', 430, 40 + i * 44, { resistance: 220 }));
+      p.boardInstances = [uno];
+      p.componentInstances = [seg, ...resistors];
       p.connections = [
-        ...segPins.map(([d, s]) => wire(uno, d, seg, s, '#7048e8')),
+        ...segPins.flatMap(([d, s], i) => [
+          wire(uno, d, resistors[i], 'p1', '#7048e8'),
+          wire(resistors[i], 'p2', seg, s, '#7048e8'),
+        ]),
         wire(seg, 'com1', uno, 'GND_TOP', '#212529'),
       ];
       p.codeFiles = [code('sketch.ino', `// Segment order: a b c d e f g on D2..D8.
@@ -356,6 +434,17 @@ void loop() {
   }
 }
 `)];
+      p.tests = [
+        bench(
+          'The digit changes as it counts',
+          'Segment a is lit for 0 and dark for 1, so it must switch within the first two digits; segment b is dark only at 5 and 6, which takes three seconds to reach.',
+          [
+            { kind: 'pin-toggles', pin: 2, minToggles: 2, withinMs: 2000 },
+            { kind: 'pin-toggles', pin: 3, minToggles: 1, withinMs: 3500 },
+          ],
+          { timeoutMs: 5000 },
+        ),
+      ];
       return p;
     },
   },
@@ -389,6 +478,17 @@ void loop() {
   }
 }
 `)];
+      p.tests = [
+        bench(
+          'It announces itself and keeps counting',
+          'The banner proves the UART is up; the uptime line proves the sketch is still running a second later.',
+          [
+            { kind: 'serial-contains', text: 'serial demo ready', withinMs: 1000 },
+            { kind: 'serial-contains', text: 'uptime', withinMs: 2500 },
+          ],
+          { timeoutMs: 4000 },
+        ),
+      ];
       return p;
     },
   },
