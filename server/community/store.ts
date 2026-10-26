@@ -102,7 +102,14 @@ export class CommunityStore {
       }
     }
     this.salt = stored?.salt || process.env.COMMUNITY_SALT || randomBytes(24).toString('hex');
-    for (const post of stored?.posts ?? []) this.posts.set(post.id, post);
+    // Built-in posts come from the code, not from the file: one the code no
+    // longer ships (renamed or removed) is dropped rather than kept forever.
+    const shipped = new Set(this.builtIns.map((p) => p.id));
+    for (const post of stored?.posts ?? []) {
+      const fromCode = post.builtIn === true || (post as { seeded?: boolean }).seeded === true;
+      if (fromCode && !shipped.has(post.id)) continue;
+      this.posts.set(post.id, post);
+    }
     // Built-in projects ship with the code, so their text is the code's: one
     // already in the file keeps the likes it has gathered, and takes everything
     // else from the current built-in file.

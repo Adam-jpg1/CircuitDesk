@@ -13,6 +13,7 @@ import { resolveDefinition } from '../src/project/partsRegistry';
 import { validateProject } from '../src/validation/validator';
 import { simulationController } from '../src/simulation/simulationController';
 import { runTest } from '../src/testing/testRunner';
+import { useSimulationStore } from '../src/simulation/simulationStore';
 import { readFileSync } from 'node:fs';
 
 let failures = 0;
@@ -23,7 +24,11 @@ function check(cond: boolean, msg: string) {
 }
 
 check(BUILTIN_PROJECTS.length >= 9, `there are built-in projects (${BUILTIN_PROJECTS.length})`);
-check(BUILTIN_PROJECTS.filter((s) => s.author === 'creator').length >= 3, 'including some from the creator');
+check(BUILTIN_PROJECTS.filter((s) => s.author === 'creator').length >= 5, 'including the creator\'s larger builds');
+for (const c of BUILTIN_PROJECTS.filter((s) => s.author === 'creator')) {
+  const built = c.build();
+  check(built.componentInstances.length >= 3 && built.connections.length >= 12, `"${c.title}" is a real build (${built.componentInstances.length + built.boardInstances.length} parts, ${built.connections.length} wires)`);
+}
 check(new Set(BUILTIN_PROJECTS.map((s) => s.id)).size === BUILTIN_PROJECTS.length, 'with unique ids');
 
 // The server ships the generated file, not this module; they must agree.
@@ -71,8 +76,8 @@ for (const entry of BUILTIN_PROJECTS) {
     skipped++;
     continue;
   }
+  for (const b of report.builds) check(b.status === 'built', `it compiles (${b.detail})`);
   const build = report.builds[0];
-  check(build?.status === 'built', `it compiles (${build?.detail})`);
   const firmware = build?.result?.firmware;
   if (!firmware || !build?.result?.boardId) continue;
   for (const test of p.tests) {
@@ -84,6 +89,27 @@ for (const entry of BUILTIN_PROJECTS) {
     );
   }
   simulationController.stop();
+
+  // A bench runs one board. A project with several is also run whole, every
+  // board at once, and held to what that must produce.
+  if (entry.together && p.boardInstances.length > 1) {
+    simulationController.stop();
+    await simulationController.build(p);
+    const started = await simulationController.start();
+    check(started, `all ${p.boardInstances.length} boards start together`);
+    if (started) {
+      simulationController.pause();
+      for (const key of entry.together.contacts(p)) useSimulationStore.getState().pressButton(key, true);
+      simulationController.advance(entry.together.runMs);
+      simulationController.publishNow();
+      const text = useSimulationStore.getState().serialText;
+      for (const line of entry.together.expectSerial) {
+        check(text.includes(line), `${entry.together.description} — "${line}"`);
+      }
+      useSimulationStore.getState().resetInputs();
+    }
+    simulationController.stop();
+  }
 }
 
 console.log(`\n--- ${failures} failing, ${skipped} skipped`);

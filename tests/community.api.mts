@@ -184,6 +184,10 @@ try {
   check(reopened.get(anon.json.item.id) !== undefined, 'a fresh process reads them back');
   const firstAgain = reopened.summary(reopened.get(first.id)!, me);
   check(firstAgain.likes === first.baseLikes + 1 && firstAgain.liked, 'and a like on a built-in project is kept across the restart');
+  const smaller = new CommunityStore(file, builtinPosts().slice(1));
+  await smaller.load();
+  check(smaller.get(first.id) === undefined, 'a built-in project the code no longer ships is dropped, not kept from the file');
+  check(smaller.get(anon.json.item.id) !== undefined, 'while what visitors published stays');
 } finally {
   server.close();
   await rm(dir, { recursive: true, force: true });

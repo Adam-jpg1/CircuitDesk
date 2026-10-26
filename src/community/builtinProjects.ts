@@ -1,6 +1,7 @@
 // The projects the community page ships with.
 //
-// Six are posted as Anonymous and three under the site creator's name. Every one
+// Nine are posted as Anonymous; the creator's larger builds are in
+// creatorProjects.ts. Every one
 // is a real, wired, validated project with a sketch that compiles and a test
 // bench that passes on the emulator (tests/community.builtin.mts), because "open
 // a copy" on a project that does not work would be the first thing a new user
@@ -10,6 +11,7 @@
 
 import { bench, code, emptyProject, inst, wire } from '../project/templates';
 import type { CircuitProject } from '../types';
+import { CREATOR_PROJECTS } from './creatorProjects';
 
 export interface BuiltinProject {
   id: string;
@@ -21,6 +23,19 @@ export interface BuiltinProject {
   baseLikes: number;
   createdAt: string;
   build: () => CircuitProject;
+  /**
+   * For a project with more than one board: what running them all together
+   * must produce. A test bench runs one board; this is how the others are
+   * held to anything.
+   */
+  together?: {
+    description: string;
+    /** Contacts to close before running (switch keys, from contactStateKey). */
+    contacts: (project: CircuitProject) => string[];
+    runMs: number;
+    /** Lines the combined serial transcript must contain. */
+    expectSerial: string[];
+  };
 }
 
 const RED = '#e03131';
@@ -29,7 +44,7 @@ const SIGNAL = '#1971c2';
 const ORANGE = '#e8590c';
 const GREEN = '#2f9e44';
 
-export const BUILTIN_PROJECTS: BuiltinProject[] = [
+const COMMUNITY_PROJECTS: BuiltinProject[] = [
   {
     id: 'cp_night_light',
     title: 'Automatic night light',
@@ -406,7 +421,6 @@ void loop() {
     },
   },
 
-  // ------------------------------------------------------------ creator
   {
     id: 'cp_desk_climate',
     title: 'Desk climate monitor',
@@ -414,7 +428,7 @@ void loop() {
       'A BMP280 read with raw Wire calls and the datasheet\'s own compensation, no library, and three LEDs for ' +
       'too cold, comfortable and too warm. Set the sensor\'s temperature in the inspector and the right LED ' +
       'lights. A good first look at what a sensor library is doing for you.',
-    author: 'creator',
+    author: 'anonymous',
     tags: ['i2c', 'bmp280', 'weather'],
     baseLikes: 42,
     createdAt: '2026-09-08T11:00:00.000Z',
@@ -502,7 +516,7 @@ void loop() {
       'An MPU6050 as a spirit level: pitch from the accelerometer with the usual atan2, shown as a "bubble" ' +
       'that slides along five LEDs. Tilt it with the Pitch slider in the inspector. Raw registers, no library — ' +
       'waking the chip is one write to 0x6B.',
-    author: 'creator',
+    author: 'anonymous',
     tags: ['mpu6050', 'i2c', 'tilt'],
     baseLikes: 57,
     createdAt: '2026-09-26T15:30:00.000Z',
@@ -576,7 +590,7 @@ void loop() {
       'Traffic lights on a Raspberry Pi Pico with a crossing button: green until someone presses, then amber, ' +
       'then red while it says WALK. A small state machine with no delay() in the button path, so a press is never ' +
       'missed. Output on Serial1, the UART the emulator runs.',
-    author: 'creator',
+    author: 'anonymous',
     tags: ['pico', 'state-machine', 'traffic'],
     baseLikes: 35,
     createdAt: '2026-10-12T10:15:00.000Z',
@@ -652,3 +666,6 @@ void loop() {
     },
   },
 ];
+
+/** Everything the community ships with: the community's own posts, then the creator's. */
+export const BUILTIN_PROJECTS: BuiltinProject[] = [...COMMUNITY_PROJECTS, ...CREATOR_PROJECTS];
