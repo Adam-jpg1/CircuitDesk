@@ -3,7 +3,7 @@
 // the Arduino Uno profile, pins, simulator or compiler.
 
 import { BOARD_DEFINITIONS, getBoardDefinition, findBoardByIdOrAlias } from '../src/boards/definitions';
-import { AVR_BOARD_PROFILES, arduinoPinNumber } from '../src/boards/pinMaps';
+import { AVR_BOARD_PROFILES, avrProfileFor, arduinoPinNumber } from '../src/boards/pinMaps';
 import { getSimulatorAdapter, runnableProcessorProfileIds } from '../src/simulation/adapters';
 import { runnerPinIndex } from '../src/simulation/boardRunner';
 import { resolveDefinition } from '../src/project/partsRegistry';
@@ -58,7 +58,14 @@ function projectWith(boardDefId: string): CircuitProject {
       }
       // An AVR board needs its own avr8js pin profile; an RP2040 board's pins
       // are the GP pads themselves, resolved through runnerPinIndex.
-      if (b.architecture === 'avr' && !AVR_BOARD_PROFILES[b.id]) { ok = false; console.log('  simulated AVR badge without board-specific pin profile:', b.id); }
+      // The machine profile the RUNNER would actually resolve, which is what
+      // decides whether firmware can execute: a board's own variant where it
+      // has one, and its processor's otherwise. A board that builds through
+      // another board's variant — a Pro Mini through the Uno target — runs on
+      // that variant's profile legitimately, and so does a board somebody
+      // brought in themselves. Asking for a per-board entry instead would fail
+      // boards that genuinely run.
+      if (b.architecture === 'avr' && !avrProfileFor(b)) { ok = false; console.log('  simulated AVR badge with no machine profile the runner can resolve:', b.id); }
       if (b.architecture === 'rp2040' && runnerPinIndex(b, 'GP0') !== 0) { ok = false; console.log('  simulated RP2040 badge without GP pin resolution:', b.id); }
       if (!getSimulatorAdapter(b)) { ok = false; console.log('  adapter lookup failed:', b.id); }
     }
@@ -73,12 +80,21 @@ function projectWith(boardDefId: string): CircuitProject {
         'board.arduino-leonardo',
         'board.arduino-mega2560',
         'board.arduino-nano',
+        // Simulated on the strength of tests/boards.sameChip.mts: the Pro Mini
+        // is an ATmega328P at 16 MHz, built through the Uno target because the
+        // arduino:avr core has no entry of its own for it, and proven to reach
+        // a toggling D13 on real compiled firmware.
+        'board.arduino-pro-mini',
         'board.arduino-uno',
         // Simulated on the strength of tests/esp32c3.firmware.mts and
         // tests/esp32c3.integration.mts: real compiled firmware reaching
         // setup() and repeated loop(), GPIO out on two different pins, GPIO in
         // with a pull-up, and both proven on the canvas through the binding.
         'board.esp32-c3',
+        // Simulated on the strength of tests/boards.sameChip.mts: the same
+        // ESP32-C3 built through the same target, proven to execute its image
+        // and drive the pin its silkscreen calls IO8.
+        'board.esp32-c3-supermini',
         // Simulated on the strength of tests/esp32c6.{startup,gpio,interrupts,
         // multiboard}.mts: real compiled firmware reaching app_main,
         // initArduino, setup() and repeated loop() with a delivered FreeRTOS
@@ -89,6 +105,11 @@ function projectWith(boardDefId: string): CircuitProject {
         'board.esp32-c6-devkitc-1',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
+        // Simulated on the strength of tests/boards.sameChip.mts: an RP2040
+        // built through the Arduino-Pico generic target, with the XIAO's own
+        // D0-D10 labels translated to GP pads by its pad map — the test drives
+        // pad 26 and checks that the pin labelled D0 is the one that moved.
+        'board.seeed-xiao-rp2040',
       ]),
     `only boards with passing runtime tests are Simulated (got: ${simulated.join(', ')})`,
   );

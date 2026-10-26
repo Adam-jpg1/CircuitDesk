@@ -184,6 +184,125 @@ export const PICO = headerBoard({
   ],
 });
 
+/**
+ * Boards that are a different product carrying a chip CircuitDesk already runs.
+ *
+ * These cost almost nothing to support and are the point of keeping board,
+ * processor, toolchain and runtime as four separate things: the RP2040 on a
+ * XIAO is the RP2040 on a Pico, so the emulator, the toolchain and every
+ * device model already work. What differs is the product — its name, its
+ * outline, its pin count, and the names printed beside the pads.
+ *
+ * The XIAO is the interesting one. Its silkscreen says D0-D10, but those pads
+ * are GP26, GP27, GP28, GP29, GP6, GP7, GP0, GP1, GP2, GP4 and GP3. Firmware
+ * is written against the pad; the user wires to the label; `padMap` is what
+ * keeps the two attached, exactly as it does for a board somebody brought in
+ * themselves.
+ */
+export const XIAO_RP2040 = headerBoard({
+  id: 'board.seeed-xiao-rp2040',
+  name: 'Seeed XIAO RP2040',
+  family: 'Seeed Studio',
+  processor: 'RP2040',
+  widthMm: 17.5,
+  heightMm: 21,
+  supportLevel: 'validation',
+  logicVoltage: 3.3,
+  color: '#1d1f22',
+  description:
+    'A thumbnail-sized RP2040 board. The silkscreen numbers its pins D0-D10; the pads behind them are GP26, GP27, '
+    + 'GP28, GP29, GP6, GP7, GP0, GP1, GP2, GP4 and GP3, which is what firmware addresses. Runs real RP2040 '
+    + 'firmware on the same emulator a Pico does.',
+  left: [
+    a3('D0', 'D0'), a3('D1', 'D1'), a3('D2', 'D2'), a3('D3', 'D3'),
+    g3('D4', 'D4', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }),
+    g3('D5', 'D5', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }),
+    g3('D6', 'D6', { caps: ['digital-in', 'digital-out', 'uart-tx'] }),
+  ],
+  right: [
+    { ...p5v('V5', '5V'), voltage: 5 },
+    gnd('GND1'),
+    p3v3('3V3'),
+    g3('D10', 'D10', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }),
+    g3('D9', 'D9', { caps: ['digital-in', 'digital-out', 'spi-miso'] }),
+    g3('D8', 'D8', { caps: ['digital-in', 'digital-out', 'spi-sck'] }),
+    g3('D7', 'D7', { caps: ['digital-in', 'digital-out', 'uart-rx'] }),
+  ],
+});
+
+export const ESP32_C3_SUPERMINI = headerBoard({
+  id: 'board.esp32-c3-supermini',
+  name: 'ESP32-C3 SuperMini',
+  family: 'Espressif',
+  processor: 'ESP32-C3',
+  widthMm: 18,
+  heightMm: 22.5,
+  supportLevel: 'validation',
+  logicVoltage: 3.3,
+  color: '#1b2a36',
+  description:
+    'A widely cloned ESP32-C3 board the size of a postage stamp. The RISC-V core executes the compiled '
+    + 'application image for real; Wi-Fi, Bluetooth, the ADC, PWM, I2C, SPI and the hardware UART are not simulated.',
+  left: [
+    g3('IO5', 'IO5'), g3('IO6', 'IO6'), g3('IO7', 'IO7'),
+    g3('IO8', 'IO8', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }),
+    g3('IO9', 'IO9', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }),
+    g3('IO10', 'IO10'),
+    g3('IO20', 'IO20', { caps: ['digital-in', 'digital-out', 'uart-rx'] }),
+    g3('IO21', 'IO21', { caps: ['digital-in', 'digital-out', 'uart-tx'] }),
+  ],
+  right: [
+    gnd('GND1'),
+    p3v3('3V3'),
+    { ...p5v('V5', '5V'), voltage: 5 },
+    a3('IO4', 'IO4'), a3('IO3', 'IO3'), a3('IO2', 'IO2'),
+    g3('IO1', 'IO1'), g3('IO0', 'IO0'),
+  ],
+});
+
+export const PRO_MINI = headerBoard({
+  id: 'board.arduino-pro-mini',
+  name: 'Arduino Pro Mini (5V, 16 MHz)',
+  family: 'Arduino',
+  processor: 'ATmega328P',
+  widthMm: 18,
+  heightMm: 33,
+  supportLevel: 'validation',
+  logicVoltage: 5,
+  color: '#1c3f5a',
+  description:
+    'The same ATmega328P an Uno carries, with no USB and no regulator worth speaking of. Runs real AVR firmware '
+    + 'on the same emulator; the 5 V 16 MHz variant builds through the Uno target, which is the same fuses and '
+    + 'the same clock.',
+  left: [
+    gpio('D1', 'TXO', ['digital-in', 'digital-out', 'uart-tx']),
+    gpio('D0', 'RXI', ['digital-in', 'digital-out', 'uart-rx']),
+    { id: 'RST1', label: 'RST', type: 'reset' as const, caps: ['digital-in' as const] },
+    gnd('GND1'),
+    gpio('D2', 'D2', ['digital-in', 'digital-out', 'interrupt']),
+    gpio('D3', 'D3', ['digital-in', 'digital-out', 'pwm', 'interrupt']),
+    gpio('D4', 'D4'),
+    gpio('D5', 'D5', ['digital-in', 'digital-out', 'pwm']),
+    gpio('D6', 'D6', ['digital-in', 'digital-out', 'pwm']),
+    gpio('D7', 'D7'),
+    gpio('D8', 'D8'),
+    gpio('D9', 'D9', ['digital-in', 'digital-out', 'pwm']),
+  ],
+  right: [
+    { ...p5v('VCC', 'VCC'), voltage: 5 },
+    gnd('GND2'),
+    { ...p5v('RAW', 'RAW'), voltage: 5 },
+    analog('A3', 'A3'), analog('A2', 'A2'), analog('A1', 'A1'), analog('A0', 'A0'),
+    gpio('D13', 'D13', ['digital-in', 'digital-out', 'spi-sck']),
+    gpio('D12', 'D12', ['digital-in', 'digital-out', 'spi-miso']),
+    gpio('D11', 'D11', ['digital-in', 'digital-out', 'pwm', 'spi-mosi']),
+    gpio('D10', 'D10', ['digital-in', 'digital-out', 'pwm', 'spi-ss']),
+    // A4/A5 carry the TWI lines on this chip, as they do on an Uno.
+    analog('A5', 'A5', 5, { caps: ['analog-in', 'digital-in', 'digital-out', 'i2c-scl'] }),
+    analog('A4', 'A4', 5, { caps: ['analog-in', 'digital-in', 'digital-out', 'i2c-sda'] }),
+  ],
+});
+
 function simpleWiringBoard(
   id: string,
   name: string,
@@ -217,6 +336,9 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   ARDUINO_NANO,
   ARDUINO_MEGA,
   ARDUINO_LEONARDO,
+  PRO_MINI,
+  XIAO_RP2040,
+  ESP32_C3_SUPERMINI,
   simpleWiringBoard(
     'board.arduino-due', 'Arduino Due', 'Arduino ARM', 'AT91SAM3X8E', 101.5, 53.3, 3.3,
     [...seqPins('D', 22, 39, 3.3).slice(0, 16), gnd('GNDL'), p3v3('3V3L')],
@@ -424,6 +546,8 @@ function applyCapabilities(raw: BoardDefinition): BoardDefinition {
     ...(caps.processorProfileId ? { processorProfileId: caps.processorProfileId } : {}),
     ...(caps.compileProfileId ? { compileProfileId: caps.compileProfileId } : {}),
     ...(caps.runtimeProfileId ? { runtimeProfileId: caps.runtimeProfileId } : {}),
+    ...(caps.serverTargetId ? { serverTargetId: caps.serverTargetId } : {}),
+    ...(caps.padMap ? { padMap: caps.padMap } : {}),
     ...(caps.manufacturer ? { manufacturer: caps.manufacturer } : {}),
     compiler: caps.compiler ?? { provider: 'none', supported: false },
     simulation:

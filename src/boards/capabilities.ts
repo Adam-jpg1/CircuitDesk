@@ -32,6 +32,26 @@ export interface BoardCapabilityEntry {
   processorProfileId?: string;
   compileProfileId?: string;
   runtimeProfileId?: string;
+  /**
+   * The id the COMPILER SERVICE knows this board by, when it is not this board.
+   *
+   * The service keeps a strict allowlist and refuses ids it has never heard
+   * of. Most boards are on it under their own name and leave this unset. A
+   * board that is a different product carrying a chip we already build for —
+   * a XIAO RP2040, a Pro Mini — names the target its pipeline uses instead,
+   * and the artifact is still stamped with this board.
+   *
+   * Deliberately per-board and explicit rather than derived from the compile
+   * profile: the Uno and the Nano share a profile whose target is the Uno, and
+   * a rule that preferred the profile would quietly build Nano firmware for an
+   * Uno — wrong FQBN, and two pins that do not exist there.
+   */
+  serverTargetId?: string;
+  /**
+   * Physical pin id -> processor pad, where a board labels its pins something
+   * other than the pad behind them. A XIAO's D0 is GP26.
+   */
+  padMap?: Record<string, string>;
   aliases: string[];
   compiler?: BoardCompilerInfo;
   simulation?: BoardSimulationInfo;
@@ -291,6 +311,107 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
   },
 
   // ---------------- SAM / SAMD / Renesas ----------------
+  // ---------------- same chips, different products ----------------
+  //
+  // These cost almost nothing, and that is the point of keeping board,
+  // processor, toolchain and runtime separate: the chip is one we already
+  // execute, so the emulator, the toolchain and every device model work
+  // unchanged. Each names the service target its pipeline uses, because the
+  // service's allowlist has never heard of these products.
+  'board.arduino-pro-mini': {
+    processorProfileId: 'proc.atmega328p',
+    compileProfileId: 'compile.avr-arduino',
+    runtimeProfileId: 'runtime.avr8js-328p',
+    serverTargetId: 'board.arduino-uno',
+    manufacturer: 'Arduino',
+    architecture: 'avr',
+    analogPinBase: 14,
+    aliases: ['pro-mini', 'arduino pro mini', 'promini'],
+    // The Uno's FQBN, deliberately. The Pro Mini has no entry of its own in
+    // arduino:avr; the 5 V 16 MHz variant IS an ATmega328P at 16 MHz with the
+    // Uno's fuses, so the Uno target is the honest build for it rather than a
+    // substitution. The artifact is still stamped with this board.
+    compiler: {
+      ...avrCliCompiler('arduino:avr:uno'),
+      note: 'Built through the Arduino Uno target (arduino:avr:uno) — the same ATmega328P at the same clock. '
+        + 'The Pro Mini has no separate entry in the arduino:avr core.',
+    },
+    simulation: {
+      engine: 'avr8js',
+      supported: true,
+      supportedApis: AVR_SIM_APIS,
+      supportedPeripherals: AVR_SIM_PERIPHERALS,
+    },
+    limitation:
+      'The 5 V 16 MHz variant builds through the Uno target — same chip, same clock, same fuses. The 3.3 V '
+      + '8 MHz variant is a different build and is not offered here.',
+  },
+  'board.seeed-xiao-rp2040': {
+    processorProfileId: 'proc.rp2040',
+    compileProfileId: 'compile.rp2040-arduino',
+    runtimeProfileId: 'runtime.rp2040js',
+    serverTargetId: 'board.raspberry-pi-pico',
+    manufacturer: 'Seeed Studio',
+    architecture: 'rp2040',
+    aliases: ['xiao-rp2040', 'seeed xiao rp2040', 'xiao rp2040'],
+    // The silkscreen and the silicon disagree, and both are right. D0 is the
+    // label beside the pad; GP26 is what digitalWrite() addresses. This is the
+    // same mechanism a board somebody brought in themselves uses, which is
+    // why it needed no new code.
+    padMap: {
+      D0: 'GP26', D1: 'GP27', D2: 'GP28', D3: 'GP29',
+      D4: 'GP6', D5: 'GP7', D6: 'GP0', D7: 'GP1',
+      D8: 'GP2', D9: 'GP4', D10: 'GP3',
+    },
+    extraPinCaps: [{ pattern: /^D\d+$/, add: ['pwm'] }],
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'rp2040:rp2040:rpipico',
+      requiredCore: 'rp2040:rp2040',
+      supported: true,
+      note: 'Built through the Arduino-Pico core\'s Pico target (rp2040:rp2040:rpipico) — the same RP2040 and the '
+        + 'same 2 MB flash layout. The XIAO\'s own labels are translated to GP pads by this board\'s pad map, so a '
+        + 'sketch written for D0 drives the pad D0 is printed beside.',
+    },
+    simulation: {
+      engine: 'rp2040js',
+      supported: true,
+      supportedApis: RP2040_SIM_APIS,
+      supportedPeripherals: RP2040_SIM_PERIPHERALS,
+    },
+    limitation:
+      'Builds through the core\'s generic RP2040 target. The on-board WS2812 and the user LED are not wired '
+      + 'to the canvas, and USB is not simulated — Serial1 on D6/D7 is the UART that works.',
+  },
+  'board.esp32-c3-supermini': {
+    processorProfileId: 'proc.esp32c3',
+    compileProfileId: 'compile.esp32c3-arduino',
+    runtimeProfileId: 'runtime.esp32c3',
+    serverTargetId: 'board.esp32-c3',
+    manufacturer: MULTI_VENDOR_DESIGN,
+    architecture: 'esp32',
+    variant: 'esp32c3',
+    aliases: ['esp32-c3-supermini', 'c3-supermini', 'esp32c3 supermini'],
+    identityNote:
+      'A widely cloned third-party design rather than an Espressif product, so no single manufacturer is claimed.',
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'esp32:esp32:esp32c3',
+      requiredCore: 'esp32:esp32',
+      supported: true,
+      note: 'Built through the esp32:esp32 core\'s ESP32-C3 target — the same RISC-V chip and the same 4 MB flash '
+        + 'layout as the DevKitM-1 entry. Never compiled through an Xtensa or AVR core.',
+    },
+    simulation: {
+      engine: 'esp32c3',
+      supported: true,
+      supportedApis: ESP32C3_SIM_APIS,
+      supportedPeripherals: ESP32C3_SIM_PERIPHERALS,
+    },
+    limitation:
+      'Real RISC-V execution of the compiled image, with GPIO. Wi-Fi, Bluetooth, the ADC, PWM, I2C, SPI and the '
+      + 'hardware UART are not simulated — sketches using them compile, run, and do nothing.',
+  },
   'board.arduino-due': {
     manufacturer: 'Arduino',
     architecture: 'sam',

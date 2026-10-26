@@ -200,11 +200,19 @@ const parsed = parseNotices(NOTICES);
         'board.arduino-leonardo',
         'board.arduino-mega2560',
         'board.arduino-nano',
+        // The three boards added because they carry a chip CircuitDesk already
+        // executes. The badge is justified in tests/boards.profile.mts and
+        // earned in tests/boards.sameChip.mts, which compiles and runs each of
+        // them; they are listed here so that renaming or re-licensing work
+        // still has to notice if it changes a capability claim.
+        'board.arduino-pro-mini',
         'board.arduino-uno',
         'board.esp32-c3',
+        'board.esp32-c3-supermini',
         'board.esp32-c6-devkitc-1',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
+        'board.seeed-xiao-rp2040',
       ]),
     `the set of Simulated boards is unchanged (${simulated.join(', ')})`,
   );

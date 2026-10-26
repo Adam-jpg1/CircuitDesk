@@ -148,6 +148,8 @@ export interface BoardDefinition {
   runtimeProfileId?: string;
   /** Physical pin id -> processor pad. Absent means the board uses pad names directly. */
   padMap?: Record<string, string>;
+  /** The id the compiler service knows this board by, when it is not its own. */
+  serverTargetId?: string;
   /** @deprecated use `compiler` */
   compilerTarget?: CompilerTarget;
   /** @deprecated use `simulation` */

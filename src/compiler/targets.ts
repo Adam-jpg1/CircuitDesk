@@ -98,6 +98,13 @@ function serverTargetFor(def: BoardDefinition): string {
   return profile?.serverTargetId ?? def.id;
 }
 
+/** The compile-service id for any board, custom or not. */
+function serviceIdFor(def: BoardDefinition): string {
+  // A board that states its own service target has said the thing that matters
+  // and is believed; everything else keeps the behaviour it had.
+  return def.serverTargetId ?? serverTargetFor(def);
+}
+
 /** A board instance the workspace cannot build for, and why. */
 export interface UnbuildableBoard {
   instanceId: string;
@@ -170,7 +177,7 @@ export function resolveWorkspaceTargets(project: CircuitProject): WorkspaceTarge
       byBuild.set(key, {
         fqbn: compiler.fqbn,
         boardId: def.id,
-        serverBoardId: serverTargetFor(def),
+        serverBoardId: serviceIdFor(def),
         board: def,
         sketchId,
         sketchName: sketch.name,
