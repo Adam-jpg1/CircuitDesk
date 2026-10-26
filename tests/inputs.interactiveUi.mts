@@ -54,7 +54,8 @@ try {
     page.on('response', (r) => r.url().includes('/api/') && console.log('   api:', r.status(), r.url()));
     page.on('console', (m) => m.type() === 'error' && console.log('   console:', m.text().slice(0, 200)));
   }
-  await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
+  // Templates live on their own page.
+  await page.goto(`http://localhost:${PORT}/#/templates`, { waitUntil: 'networkidle' });
 
   const showcase = SHOWCASE_TEMPLATES().find((t) => t.id === 'show.i2c-sensor-bus')!;
   await page.locator('.template-card', { hasText: showcase.name }).first().click();
