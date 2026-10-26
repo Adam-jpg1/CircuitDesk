@@ -2688,7 +2688,49 @@ export class CircuitBinding {
       return netId ? levels.get(netId)?.volts ?? null : null;
     };
 
-    // Edges first, using the previous settle's levels — one pulse, one edge.
+    // Combinational logic settles first, then clock edges are applied, then
+    // it settles again. That order is what a register does in hardware: at the
+    // edge it samples whatever its D inputs hold just before it, and those
+    // are the outputs of the gates feeding it — so they have to have been
+    // evaluated already. Taking edges first, from levels the logic had not
+    // yet driven this frame, made every register fed by another chip latch
+    // "unknown": a 74HC574 behind a 74HC157 could never store anything, and a
+    // counter clocked by a gate output never counted.
+    const settle = (): boolean => {
+      const MAX_ROUNDS = 10;
+      let previous = '';
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        let signature = '';
+        for (const [instanceId, device] of this.logicDevices) {
+          if (!this.logicPowered(instanceId, levels)) continue;
+          const outputs = device.evaluate(
+            (p) => levelAt(instanceId, p),
+            (p) => voltsAt(instanceId, p),
+          );
+          for (const [pinId, value] of Object.entries(outputs)) {
+            signature += `${instanceId}:${pinId}=${value};`;
+            // High-Z and unknown drive nothing at all. That is the difference
+            // between a released bus and a bus held low, and collapsing them
+            // would make every tri-state part pointless.
+            if (value === 'z' || value === 'x') continue;
+            const netId = this.netOfInstancePin(instanceId, pinId);
+            if (!netId) continue;
+            setLevel(netId, value === 1 ? device.supply : 0, null, 0);
+            drivenNets.add(netId);
+          }
+        }
+        propagate();
+        if (signature === previous) return true;
+        previous = signature;
+      }
+      return false;
+    };
+
+    let stable = settle();
+
+    // Edges, one pulse one edge, judged against the level each clock pin had
+    // at the end of the previous update.
+    let clocked = false;
     for (const [instanceId, device] of this.logicDevices) {
       if (!this.logicPowered(instanceId, levels)) continue;
       for (const { pin, edge } of device.clockPins) {
@@ -2702,37 +2744,14 @@ export class CircuitBinding {
         const fell = before === 1 && now === 0;
         if ((edge === 'rising' && rose) || (edge === 'falling' && fell)) {
           device.clockEdge(pin, edge, (p) => levelAt(instanceId, p), (p) => voltsAt(instanceId, p));
+          clocked = true;
         }
       }
     }
 
-    // Then combinational settling.
-    const MAX_ROUNDS = 10;
-    let previous = '';
-    for (let round = 0; round < MAX_ROUNDS; round++) {
-      let signature = '';
-      for (const [instanceId, device] of this.logicDevices) {
-        if (!this.logicPowered(instanceId, levels)) continue;
-        const outputs = device.evaluate(
-          (p) => levelAt(instanceId, p),
-          (p) => voltsAt(instanceId, p),
-        );
-        for (const [pinId, value] of Object.entries(outputs)) {
-          signature += `${instanceId}:${pinId}=${value};`;
-          // High-Z and unknown drive nothing at all. That is the difference
-          // between a released bus and a bus held low, and collapsing them
-          // would make every tri-state part pointless.
-          if (value === 'z' || value === 'x') continue;
-          const netId = this.netOfInstancePin(instanceId, pinId);
-          if (!netId) continue;
-          setLevel(netId, value === 1 ? device.supply : 0, null, 0);
-          drivenNets.add(netId);
-        }
-      }
-      propagate();
-      if (signature === previous) return;
-      previous = signature;
-    }
+    // What the registers now hold has to reach everything downstream.
+    if (clocked) stable = settle();
+    if (stable) return;
 
     // Still moving after the round limit: the circuit oscillates. Reported,
     // not silently frozen at whatever the last round happened to produce.

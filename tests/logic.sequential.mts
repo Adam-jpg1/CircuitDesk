@@ -530,5 +530,48 @@ section('11. two counters on one canvas are independent');
   check(b.nibble(a, q) === 3, 'and the first did not move');
 }
 
+
+// =========================== 12. registers fed and clocked by other chips ====
+section('12. a register behind logic, and a counter clocked by a gate');
+{
+  // The regression this guards: clock edges were applied before the logic had
+  // settled that frame, so a register whose D came from another chip latched
+  // "unknown", and a counter whose clock came from a gate never counted.
+  const b = new Bench();
+  const mux = b.power(b.add('comp.74hc157'));
+  const reg = b.power(b.add('comp.74hc574'));
+  const sel = b.driver(mux, 'sel');
+  const clk = b.driver(reg, 'clk');
+  b.tie(mux, 'ne', false);
+  b.tie(reg, 'noe', false);
+  // A inputs 0101, B inputs 1010; the register stores whichever is selected.
+  [1, 2, 3, 4].forEach((n) => {
+    b.tie(mux, `${n}a`, n % 2 === 1);
+    b.tie(mux, `${n}b`, n % 2 === 0);
+    b.wire(mux, `${n}y`, reg, `d${n}`);
+  });
+  for (const n of [5, 6, 7, 8]) b.tie(reg, `d${n}`, false);
+  const q = ['q1', 'q2', 'q3', 'q4'];
+  b.set(sel, false);
+  b.pulse(clk);
+  check(b.nibble(reg, q) === 0b0101, `a 74HC574 latches what a 74HC157 is selecting (${b.nibble(reg, q).toString(2).padStart(4, '0')})`);
+  b.set(sel, true);
+  b.pulse(clk);
+  check(b.nibble(reg, q) === 0b1010, `and the other input after the select changes (${b.nibble(reg, q).toString(2).padStart(4, '0')})`);
+
+  // A counter whose clock is a gate output.
+  const c = new Bench();
+  const gate = c.power(c.add('comp.74hc08'));
+  const ctr = c.power(c.add('comp.74hc161'));
+  const pulse = c.driver(gate, '1a');
+  c.tie(gate, '1b', true);
+  c.wire(gate, '1y', ctr, 'clk');
+  for (const pin of ['nclr', 'nload', 'enp', 'ent']) c.tie(ctr, pin, true);
+  for (const pin of ['a', 'b', 'c', 'd']) c.tie(ctr, pin, false);
+  for (const pin of ['2a', '2b', '3a', '3b', '4a', '4b']) c.tie(gate, pin, false);
+  for (let i = 0; i < 5; i++) c.pulse(pulse);
+  check(c.nibble(ctr, ['qa', 'qb', 'qc', 'qd']) === 5, `a 74HC161 clocked through an AND gate counts five pulses (${c.nibble(ctr, ['qa', 'qb', 'qc', 'qd'])})`);
+}
+
 console.log(failures === 0 ? '\nSequential logic checks passed.' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
