@@ -22,7 +22,7 @@ import { getBoardDefinition } from '../src/boards/definitions';
 import { resolveWorkspaceTargets } from '../src/compiler/targets';
 import { getSimulatorAdapter } from '../src/simulation/adapters';
 import { runnerPinIndex } from '../src/simulation/boardRunner';
-import type { CircuitProject, ComponentInstance } from '../src/types';
+import type { CircuitProject, ComponentInstance, FirmwareArtifact } from '../src/types';
 
 let failures = 0;
 let skipped = 0;
@@ -253,6 +253,71 @@ for (const c of CASES) {
     check(sawHigh && sawLow, `and pad ${c.pad} — the pin labelled ${c.pinId} — toggles (high=${sawHigh} low=${sawLow})`);
   }
   simulationController.stop();
+}
+
+// ======================= 6. the UART claim is earned, not assumed ==========
+section('6. the boards that are recorded as having a UART move bytes');
+{
+  // tests/uart.audit.mts keeps a table of which simulated boards have a UART
+  // peripheral behind Serial. Adding a board to that table is a claim, and a
+  // claim about a peripheral belongs in a test that watches bytes arrive. The
+  // ESP32-C3 SuperMini is absent from this section for the same reason the
+  // DevKitM-1 is absent from the table: the C3's UART is not modelled, and
+  // saying so is the honest entry.
+  const serialCases = [
+    {
+      boardId: 'board.arduino-pro-mini',
+      // The ATmega328P's USART0, which is Serial on this board as on an Uno.
+      source: [
+        'void setup() { Serial.begin(9600); }',
+        'void loop() { Serial.println("PM"); delay(20); }',
+      ].join('\n'),
+      expect: 'PM',
+    },
+    {
+      boardId: 'board.seeed-xiao-rp2040',
+      // The RP2040's UART0, which the Arduino-Pico core calls Serial1 — on
+      // GP0 and GP1, the pads the XIAO prints as D6 and D7.
+      source: [
+        'void setup() { Serial1.begin(9600); }',
+        'void loop() { Serial1.println("XIAO"); delay(20); }',
+      ].join('\n'),
+      expect: 'XIAO',
+    },
+  ];
+
+  for (const sc of serialCases) {
+    const base = CASES.find((c) => c.boardId === sc.boardId)!;
+    const { project } = projectFor({ ...base, source: sc.source });
+    simulationController.stop();
+    const report = await simulationController.build(project);
+    if (!report.anyRunnable) {
+      skip(`the toolchain for ${sc.boardId} is unavailable, so its UART was not exercised`);
+      continue;
+    }
+    const build = report.builds[0];
+    check(build?.status === 'built', `${sc.boardId} built a serial sketch (${build?.status})`);
+    const firmware = build?.result?.firmware;
+    if (build?.status !== 'built' || !firmware) {
+      simulationController.stop();
+      continue;
+    }
+    const def = getBoardDefinition(sc.boardId)!;
+    const adapter = getSimulatorAdapter(def)!;
+    const artifact: FirmwareArtifact = {
+      data: firmware.data,
+      format: firmware.format ?? adapter.firmwareFormat,
+      ...(firmware.regions ? { regions: firmware.regions } : {}),
+    };
+    const runner = await adapter.createRunner(artifact, def);
+    let serial = '';
+    runner.onSerialByte = (b) => {
+      serial += String.fromCharCode(b);
+    };
+    for (let done = 0; done < 2000 && !serial.includes(sc.expect); done += 5) runner.runFor(5);
+    check(serial.includes(sc.expect), `and its firmware's "${sc.expect}" came out of the UART (${JSON.stringify(serial.slice(0, 24))})`);
+    simulationController.stop();
+  }
 }
 
 section(`${failures} failing, ${skipped} skipped`);

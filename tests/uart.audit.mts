@@ -52,6 +52,13 @@ const UART_SUPPORT: Record<string, { tx: boolean; rx: boolean; note: string }> =
   'board.raspberry-pi-pico-w': { tx: true, rx: true, note: 'RP2040 UART0; UART1 not wired' },
   'board.esp32-c3': { tx: false, rx: false, note: 'no UART peripheral is modelled — blocker: esp32-uart' },
   'board.esp32-c6-devkitc-1': { tx: false, rx: false, note: 'no UART peripheral is modelled — blocker: esp32-uart' },
+  // The boards that carry a chip already executed here. The peripheral belongs
+  // to the silicon, so the entry is the silicon's — and the TX claims are
+  // watched arriving in tests/boards.sameChip.mts rather than inferred from
+  // the chip, because a table is where an inference goes to look true.
+  'board.arduino-pro-mini': { tx: true, rx: true, note: 'AVRUSART, the ATmega328P USART0 behind Serial on D0/D1' },
+  'board.seeed-xiao-rp2040': { tx: true, rx: true, note: 'RP2040 UART0 behind Serial1, on the pads printed D6/D7' },
+  'board.esp32-c3-supermini': { tx: false, rx: false, note: 'no UART peripheral is modelled — blocker: esp32-uart' },
 };
 
 // ==================================== 1. the table matches the shipped boards
@@ -83,7 +90,7 @@ for (const [boardId, claim] of Object.entries(UART_SUPPORT)) {
 // =============== 3. the ESP limitation is recorded, not quietly worked around
 section('3. the ESP boards say they have no UART');
 {
-  for (const id of ['board.esp32-c3', 'board.esp32-c6-devkitc-1']) {
+  for (const id of ['board.esp32-c3', 'board.esp32-c6-devkitc-1', 'board.esp32-c3-supermini']) {
     const claim = UART_SUPPORT[id];
     check(!claim.tx && !claim.rx, `${id} claims no UART`);
     check(/esp32-uart/.test(claim.note), `${id} names the blocker rather than shrugging`);
@@ -123,7 +130,7 @@ section('4. the boards that do have a UART have both directions');
     check(!(claim.rx && !claim.tx), `${boardId} does not claim receive without transmit`);
   }
   const withUart = Object.entries(UART_SUPPORT).filter(([, c]) => c.tx && c.rx);
-  check(withUart.length === 6, `six boards carry a real UART today (${withUart.length})`);
+  check(withUart.length === 8, `eight boards carry a real UART today (${withUart.length})`);
 }
 
 
