@@ -584,6 +584,53 @@ void loop() {
 }
 `;
 
+const STEPPER_SEQUENCE_CODE = `// Showcase - a stepper is a sequence, not a speed
+//
+// The four lines are coils. Where the rotor sits is wherever the energised
+// coils put it, so motion comes from the ORDER the pattern is driven in, not
+// from any "step" command. The model follows the half-step sequence below and
+// moves one step per adjacent transition; drive the same four values in a
+// different order and it turns the other way; skip a phase and it does not
+// move at all, and the skip is counted rather than quietly credited.
+//
+// A relay shares the sketch to show a second kind of output: a coil you
+// switch rather than sequence.
+
+const int COILS[4] = {8, 9, 10, 11};
+const int RELAY = 7;
+
+// Half-step: eight states, each overlapping the next by one coil.
+const uint8_t SEQ[8] = {
+  0b0001, 0b0011, 0b0010, 0b0110,
+  0b0100, 0b1100, 0b1000, 0b1001,
+};
+
+int phase = 0;
+long steps = 0;
+
+void applyPhase(int p) {
+  for (int i = 0; i < 4; i++) digitalWrite(COILS[i], (SEQ[p & 7] >> i) & 1);
+}
+
+void setup() {
+  Serial.begin(9600);
+  for (int i = 0; i < 4; i++) pinMode(COILS[i], OUTPUT);
+  pinMode(RELAY, OUTPUT);
+  Serial.println("stepper ready");
+}
+
+void loop() {
+  // One revolution's worth of half-steps one way, then back.
+  for (int i = 0; i < 64; i++) { applyPhase(phase++); steps++; delay(3); }
+  Serial.print("forward "); Serial.println(steps);
+  digitalWrite(RELAY, HIGH);
+
+  for (int i = 0; i < 64; i++) { applyPhase(--phase); steps++; delay(3); }
+  Serial.print("reverse "); Serial.println(steps);
+  digitalWrite(RELAY, LOW);
+}
+`;
+
 export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   {
     id: 'tpl.blink',
@@ -1358,6 +1405,52 @@ void loop() {
           [
             { kind: 'serial-contains', text: 'ssd1306 initialised', withinMs: 1500 },
             { kind: 'serial-contains', text: 'pattern written', withinMs: 3000 },
+          ],
+          { timeoutMs: 5000 },
+        ),
+      ];
+      return p;
+    },
+  },
+  {
+    id: 'show.stepper-sequence',
+    name: 'Stepper: motion is the order, not a command',
+    description:
+      'Four coil lines driven through a half-step sequence, with a relay alongside as a contrast — a coil you ' +
+      'switch rather than sequence. The model moves one step per adjacent transition, so reversing the order ' +
+      'reverses the shaft and skipping a phase moves nothing.',
+    tags: ['simulated', 'motors', 'outputs'],
+    kind: 'showcase',
+    board: 'Arduino Uno',
+    teaches: 'Why stepper code is a table and a phase index rather than a speed.',
+    build: () => {
+      const p = emptyProject('Stepper Sequence');
+      const uno = inst('board.arduino-uno', 120, 190);
+      const stepper = inst('comp.stepper', 540, 90);
+      const relay = inst('comp.relay', 540, 300);
+      p.boardInstances = [uno];
+      p.componentInstances = [stepper, relay];
+      p.connections = [
+        wire(uno, 'D8', stepper, 'in1', '#e8590c'),
+        wire(uno, 'D9', stepper, 'in2', '#f08c00'),
+        wire(uno, 'D10', stepper, 'in3', '#2f9e44'),
+        wire(uno, 'D11', stepper, 'in4', '#1971c2'),
+        wire(relay, 'vcc', uno, '5V', '#e03131'),
+        wire(relay, 'gnd', uno, 'GND_PWR1', '#212529'),
+        wire(uno, 'D7', relay, 'in', '#7048e8'),
+      ];
+      p.codeFiles = [code('sketch.ino', STEPPER_SEQUENCE_CODE)];
+      p.tests = [
+        bench(
+          'All four coils sequence, and the relay follows',
+          'Every coil line must switch — a sequence missing one phase is a motor that does not turn — and the forward pass must complete before the relay is energised.',
+          [
+            { kind: 'serial-contains', text: 'stepper ready', withinMs: 1200 },
+            { kind: 'pin-toggles', pin: 8, minToggles: 4, withinMs: 2500 },
+            { kind: 'pin-toggles', pin: 9, minToggles: 4, withinMs: 2500 },
+            { kind: 'pin-toggles', pin: 10, minToggles: 4, withinMs: 2500 },
+            { kind: 'pin-toggles', pin: 11, minToggles: 4, withinMs: 2500 },
+            { kind: 'serial-contains', text: 'forward', withinMs: 3000 },
           ],
           { timeoutMs: 5000 },
         ),
