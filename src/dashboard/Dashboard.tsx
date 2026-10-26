@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listProjectMetas, saveProject, deleteProject, duplicateProject, loadProject } from '../project/projectService';
-import { buildBlinkProject, emptyProject, PROJECT_TEMPLATES } from '../project/templates';
+import {
+  buildBlinkProject,
+  emptyProject,
+  STARTER_TEMPLATES,
+  SHOWCASE_TEMPLATES,
+  type ProjectTemplate,
+} from '../project/templates';
 import { navigate, ContextMenu, Modal, SupportBadge, timeAgo, toast } from '../ui/primitives';
 import { LogoIcon, ImportIcon, PlusIcon, ChipIcon } from '../ui/icons';
 import { loadSetting } from '../persistence/settings';
@@ -105,7 +111,13 @@ export function Dashboard() {
             </div>
             <div style={{ marginTop: 26, width: '100%' }}>
               <div className="dash-section-title">Starter templates</div>
-              <TemplateGrid onPick={(build) => void createProject(build)} />
+              <TemplateGrid templates={STARTER_TEMPLATES()} onPick={(build) => void createProject(build)} blank />
+              <div className="dash-section-title" style={{ marginTop: 22 }}>Showcase projects</div>
+              <div className="dash-section-note">
+                Worked projects that drive real device models on real buses, across the boards that genuinely
+                execute firmware. Every one compiles and runs, and has a test bench asserting that it does.
+              </div>
+              <TemplateGrid templates={SHOWCASE_TEMPLATES()} onPick={(build) => void createProject(build)} />
             </div>
           </div>
         ) : (
@@ -138,7 +150,14 @@ export function Dashboard() {
             </div>
 
             <div className="dash-section-title">Starter templates</div>
-            <TemplateGrid onPick={(build) => void createProject(build)} />
+            <TemplateGrid templates={STARTER_TEMPLATES()} onPick={(build) => void createProject(build)} blank />
+
+            <div className="dash-section-title" style={{ marginTop: 22 }}>Showcase projects</div>
+            <div className="dash-section-note">
+              Worked projects that drive real device models on real buses, across the boards that genuinely
+              execute firmware. Every one compiles and runs, and has a test bench asserting that it does.
+            </div>
+            <TemplateGrid templates={SHOWCASE_TEMPLATES()} onPick={(build) => void createProject(build)} />
           </>
         )}
       </div>
@@ -258,24 +277,44 @@ function ProjectCard({ meta, onMenu }: { meta: ProjectMeta; onMenu: (m: { x: num
   );
 }
 
-function TemplateGrid({ onPick }: { onPick: (build: () => CircuitProject) => void }) {
+/**
+ * A row of template cards.
+ *
+ * Starters and showcases are drawn by the same component and listed
+ * separately, because they answer different questions: "how do I start" and
+ * "what can this actually do". Each card names the board it opens on, since a
+ * showcase on a Pico is not a thing you can open on an Uno.
+ */
+function TemplateGrid({
+  templates,
+  onPick,
+  blank,
+}: {
+  templates: ProjectTemplate[];
+  onPick: (build: () => CircuitProject) => void;
+  blank?: boolean;
+}) {
   return (
     <div className="template-row">
-      {PROJECT_TEMPLATES.map((t) => (
+      {templates.map((t) => (
         <div key={t.id} className="template-card" onClick={() => onPick(t.build)}>
           <div className="t-name">{t.name}</div>
+          <div className="t-board">{t.board}</div>
           <div className="t-desc">{t.description}</div>
-          <div style={{ display: 'flex', gap: 5 }}>
+          {t.teaches && <div className="t-teaches">{t.teaches}</div>}
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
             {t.tags.map((tag) => (
               <span key={tag} className={`badge ${tag === 'simulated' ? 'simulated' : 'visual-only'}`}>{tag}</span>
             ))}
           </div>
         </div>
       ))}
-      <div className="template-card" onClick={() => onPick(() => emptyProject('Blank Project'))}>
-        <div className="t-name">Blank project</div>
-        <div className="t-desc">Empty canvas and an empty sketch — start from scratch.</div>
-      </div>
+      {blank && (
+        <div className="template-card" onClick={() => onPick(() => emptyProject('Blank Project'))}>
+          <div className="t-name">Blank project</div>
+          <div className="t-desc">Empty canvas and an empty sketch — start from scratch.</div>
+        </div>
+      )}
     </div>
   );
 }

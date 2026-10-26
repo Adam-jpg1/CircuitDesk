@@ -806,3 +806,7 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .library-actions { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 .library-actions .btn { flex: 1; }
 .studio-upgrade { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.t-board { font-size: 10.5px; color: var(--accent); margin: 1px 0 3px; letter-spacing: 0.02em; }
+.t-teaches { font-size: 11px; color: var(--text-2); font-style: italic; margin: 4px 0 6px; line-height: 1.4; }
+.dash-section-note { color: var(--text-2); font-size: 12px; margin: -4px 0 10px; max-width: 760px; line-height: 1.5; }

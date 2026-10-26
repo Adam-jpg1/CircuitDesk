@@ -328,6 +328,146 @@ void loop() {
 }
 `;
 
+const PICO_I2C_CODE = `// Showcase - RP2040: an I2C bus on pins you choose
+//
+// The RP2040 can put I2C on several pin pairs, and the core picks GP4/GP5
+// unless the sketch says otherwise. Wire.setSDA/setSCL before Wire.begin() is
+// how you say otherwise, and it is why CircuitDesk's wiring checks ask which
+// pins the firmware actually muxed rather than assuming.
+//
+// Output goes to Serial1 - the hardware UART on GP0/GP1. The USB CDC Serial
+// object is not simulated here, so printing to it would produce nothing, and
+// a showcase that printed into a void would be teaching the wrong lesson.
+
+#include <Wire.h>
+
+const uint8_t BMP280 = 0x76;
+const int LED = 15;
+
+uint8_t read8(uint8_t reg) {
+  Wire.beginTransmission(BMP280); Wire.write(reg); Wire.endTransmission();
+  Wire.requestFrom((int)BMP280, 1);
+  return Wire.available() ? Wire.read() : 0;
+}
+
+uint16_t read16LE(uint8_t reg) {
+  Wire.beginTransmission(BMP280); Wire.write(reg); Wire.endTransmission();
+  Wire.requestFrom((int)BMP280, 2);
+  uint16_t lo = Wire.read(), hi = Wire.read();
+  return (hi << 8) | lo;
+}
+
+uint16_t dig_T1; int16_t dig_T2, dig_T3;
+
+void setup() {
+  Serial1.begin(9600);
+  pinMode(LED, OUTPUT);
+
+  Wire.setSDA(4);        // the pins this board brings the sensor out on
+  Wire.setSCL(5);
+  Wire.begin();
+
+  Serial1.print("chip id 0x"); Serial1.println(read8(0xD0), HEX);
+  dig_T1 = read16LE(0x88);
+  dig_T2 = (int16_t)read16LE(0x8A);
+  dig_T3 = (int16_t)read16LE(0x8C);
+  Wire.beginTransmission(BMP280); Wire.write(0xF4); Wire.write(0x27); Wire.endTransmission();
+}
+
+void loop() {
+  Wire.beginTransmission(BMP280); Wire.write(0xFA); Wire.endTransmission();
+  Wire.requestFrom((int)BMP280, 3);
+  int32_t adc = ((int32_t)Wire.read() << 12) | ((int32_t)Wire.read() << 4) | (Wire.read() >> 4);
+
+  int32_t v1 = ((((adc >> 3) - ((int32_t)dig_T1 << 1))) * (int32_t)dig_T2) >> 11;
+  int32_t v2 = (((((adc >> 4) - (int32_t)dig_T1) * ((adc >> 4) - (int32_t)dig_T1)) >> 12) * (int32_t)dig_T3) >> 14;
+  int32_t centi = ((v1 + v2) * 5 + 128) >> 8;
+
+  Serial1.print("temperature "); Serial1.print(centi / 100); Serial1.println(" C");
+  digitalWrite(LED, centi >= 2000 ? HIGH : LOW);
+  delay(300);
+}
+`;
+
+const UART_GPS_CODE = `// Showcase - UART: parsing what a GPS actually sends
+//
+// The module is a device model that emits real NMEA sentences on its TX line
+// at the baud the firmware configured, so this is byte-level parsing of a
+// byte-level stream. Serial lines cross: the module's TX goes to the board's
+// RX, which CircuitDesk will tell you about if you wire it straight through.
+
+const int FIX_LED = 8;
+char line[96];
+uint8_t len = 0;
+
+void handle(const char *s) {
+  // $GPRMC,time,status,lat,N,lon,E,...  - status A means the fix is valid.
+  if (strncmp(s, "$GPRMC", 6) != 0) return;
+  const char *p = strchr(s, ',');
+  if (!p) return;
+  p = strchr(p + 1, ',');
+  if (!p) return;
+  char status = p[1];
+  Serial.print("RMC status "); Serial.println(status);
+  digitalWrite(FIX_LED, status == 'A' ? HIGH : LOW);
+}
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(FIX_LED, OUTPUT);
+  Serial.println("listening for NMEA");
+}
+
+void loop() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\\n' || len >= sizeof(line) - 1) {
+      line[len] = 0;
+      if (len > 6) handle(line);
+      len = 0;
+    } else if (c != '\\r') {
+      line[len++] = c;
+    }
+  }
+}
+`;
+
+const ESP32C6_GPIO_CODE = `// Showcase - ESP32-C6: what is real, and what is not
+//
+// This board executes the compiled RISC-V application image for real: ESP-IDF
+// startup, FreeRTOS, setup() and loop(), and GPIO with its pull resistors.
+//
+// It does NOT simulate Wi-Fi, Bluetooth, Zigbee, Thread, USB Serial/JTAG, the
+// ADC, PWM, I2C, SPI or the hardware UART. Sketches using them compile and
+// run and quietly do nothing, so this showcase uses only what is real: pins
+// in, pins out, and timing from the actual CPU.
+
+const int LEDS[] = {15, 18, 19, 20};
+const int BUTTON = 9;      // the board's BOOT button, active low
+
+int step = 0;
+bool lastPressed = false;
+
+void setup() {
+  for (int i = 0; i < 4; i++) pinMode(LEDS[i], OUTPUT);
+  pinMode(BUTTON, INPUT_PULLUP);
+}
+
+void loop() {
+  bool pressed = digitalRead(BUTTON) == LOW;
+
+  // Held: all four on. Released: a single light walks along them.
+  if (pressed) {
+    for (int i = 0; i < 4; i++) digitalWrite(LEDS[i], HIGH);
+  } else {
+    for (int i = 0; i < 4; i++) digitalWrite(LEDS[i], i == step ? HIGH : LOW);
+    step = (step + 1) & 3;
+  }
+  lastPressed = pressed;
+  delay(120);
+}
+`;
+
 export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   {
     id: 'tpl.blink',
@@ -853,6 +993,135 @@ void loop() {
             { kind: 'pin-toggles', pin: 11, minToggles: 8, withinMs: 2000 },
             { kind: 'pin-toggles', pin: 13, minToggles: 16, withinMs: 2000 },
             { kind: 'pin-toggles', pin: 8, minToggles: 4, withinMs: 2000 },
+          ],
+          { timeoutMs: 4000 },
+        ),
+      ];
+      return p;
+    },
+  },
+  {
+    id: 'show.pico-i2c',
+    name: 'RP2040: an I2C bus on pins you choose',
+    description:
+      'A BMP280 on a Pico, with the sketch muxing I2C onto GP4/GP5 through Wire.setSDA/setSCL. Output goes to ' +
+      'Serial1, the hardware UART, because the USB CDC Serial object is not simulated and printing into a void ' +
+      'would teach the wrong lesson.',
+    tags: ['simulated', 'i2c', 'rp2040'],
+    kind: 'showcase',
+    board: 'Raspberry Pi Pico',
+    teaches: 'That an RP2040 chooses its bus pins in firmware, and which pins it chose is a checkable fact.',
+    build: () => {
+      const p = emptyProject('Pico I2C Sensor');
+      const pico = inst('board.raspberry-pi-pico', 120, 170);
+      const bmp = inst('comp.bmp280', 520, 110);
+      const resistor = inst('comp.resistor', 440, 300, { resistance: 220 });
+      const led = inst('comp.led', 560, 330, { color: 'red' });
+      p.boardInstances = [pico];
+      p.componentInstances = [bmp, resistor, led];
+      p.connections = [
+        wire(bmp, 'vcc', pico, '3V3', '#e03131'),
+        wire(bmp, 'gnd', pico, 'GND3', '#212529'),
+        wire(bmp, 'sda', pico, 'GP4', '#2f9e44'),
+        wire(bmp, 'scl', pico, 'GP5', '#1971c2'),
+        wire(pico, 'GP15', resistor, 'p1', '#e8590c'),
+        wire(resistor, 'p2', led, 'anode', '#e8590c'),
+        wire(led, 'cathode', pico, 'GND7', '#212529'),
+      ];
+      p.codeFiles = [code('sketch.ino', PICO_I2C_CODE)];
+      p.tests = [
+        bench(
+          'The sensor answers on the muxed pins',
+          'GP15 goes high only once a temperature has been read and compensated, so the pin is proof the whole bus transaction happened.',
+          [{ kind: 'pin-becomes-high', pin: 15, withinMs: 3000 }],
+          { timeoutMs: 5000 },
+        ),
+      ];
+      return p;
+    },
+  },
+  {
+    id: 'show.uart-gps',
+    name: 'UART: parsing what a GPS actually sends',
+    description:
+      'A NEO-6M emitting real NMEA sentences at the baud the firmware configured, parsed byte by byte. The fix ' +
+      'LED follows the status field of $GPRMC, so it is lit by the content of the stream rather than by its ' +
+      'existence.',
+    tags: ['simulated', 'uart', 'modules'],
+    kind: 'showcase',
+    board: 'Arduino Uno',
+    teaches: 'That serial is a byte stream with no framing but the one you write.',
+    build: () => {
+      const p = emptyProject('UART GPS');
+      const uno = inst('board.arduino-uno', 120, 170);
+      const gps = inst('comp.gps', 520, 110);
+      const resistor = inst('comp.resistor', 440, 310, { resistance: 220 });
+      const led = inst('comp.led', 560, 340, { color: 'blue' });
+      p.boardInstances = [uno];
+      p.componentInstances = [gps, resistor, led];
+      p.connections = [
+        wire(gps, 'vcc', uno, '5V', '#e03131'),
+        wire(gps, 'gnd', uno, 'GND_PWR1', '#212529'),
+        // Crossed, as serial always is: the module's TX drives the board's RX.
+        wire(gps, 'tx', uno, 'D0', '#2f9e44'),
+        wire(uno, 'D1', gps, 'rx', '#f08c00'),
+        wire(uno, 'D8', resistor, 'p1', '#e8590c'),
+        wire(resistor, 'p2', led, 'anode', '#e8590c'),
+        wire(led, 'cathode', uno, 'GND_TOP', '#212529'),
+      ];
+      p.codeFiles = [code('sketch.ino', UART_GPS_CODE)];
+      p.tests = [
+        bench(
+          'A valid fix lights the LED',
+          'The status character comes out of a sentence the module generated, so the LED is evidence the stream was parsed rather than merely received.',
+          [
+            { kind: 'serial-contains', text: 'listening for NMEA', withinMs: 1200 },
+            { kind: 'serial-contains', text: 'RMC status A', withinMs: 4000 },
+            { kind: 'pin-becomes-high', pin: 8, withinMs: 4500 },
+          ],
+          { timeoutMs: 6000 },
+        ),
+      ];
+      return p;
+    },
+  },
+  {
+    id: 'show.esp32c6-gpio',
+    name: 'ESP32-C6: what is real, and what is not',
+    description:
+      'Real RISC-V execution of the compiled application image — ESP-IDF startup, FreeRTOS, setup() and loop(), ' +
+      'and GPIO with its pulls. Wi-Fi, Bluetooth, the ADC, PWM, I2C, SPI and the hardware UART are not simulated, ' +
+      'so this uses only what genuinely runs.',
+    tags: ['simulated', 'esp32', 'gpio'],
+    kind: 'showcase',
+    board: 'ESP32-C6-DevKitC-1',
+    teaches: 'Where the line is on this board, by staying on the right side of it.',
+    build: () => {
+      const p = emptyProject('ESP32-C6 GPIO');
+      const c6 = inst('board.esp32-c6-devkitc-1', 120, 170);
+      const pins = ['IO15', 'IO18', 'IO19', 'IO20'];
+      const resistors = pins.map((_, i) => inst('comp.resistor', 470, 60 + i * 70, { resistance: 330 }));
+      const leds = pins.map((_, i) => inst('comp.led', 600, 80 + i * 70, { color: 'green' }));
+      const button = inst('comp.push-button', 470, 360);
+      p.boardInstances = [c6];
+      p.componentInstances = [...resistors, ...leds, button];
+      p.connections = [
+        ...pins.flatMap((pin, i) => [
+          wire(c6, pin, resistors[i], 'p1', '#e8590c'),
+          wire(resistors[i], 'p2', leds[i], 'anode', '#e8590c'),
+          wire(leds[i], 'cathode', c6, 'GND2', '#212529'),
+        ]),
+        wire(c6, 'IO9', button, '1a', '#1971c2'),
+        wire(button, '2a', c6, 'GND1', '#212529'),
+      ];
+      p.codeFiles = [code('sketch.ino', ESP32C6_GPIO_CODE)];
+      p.tests = [
+        bench(
+          'The pattern walks, and the button stops it',
+          'Each output must switch on its own, which is the CPU running loop() and driving pads - the only thing this board claims to do.',
+          [
+            { kind: 'pin-toggles', pin: 15, minToggles: 3, withinMs: 2500 },
+            { kind: 'pin-toggles', pin: 18, minToggles: 3, withinMs: 2500 },
           ],
           { timeoutMs: 4000 },
         ),
