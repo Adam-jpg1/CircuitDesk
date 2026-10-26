@@ -468,6 +468,122 @@ void loop() {
 }
 `;
 
+const PICO_BLINK_CODE = `// Starter - Pico Blink
+//
+// GP15 drives an LED through a 220 ohm resistor to ground, and a button on
+// GP14 holds it on. Two things worth knowing about this board:
+//
+//   * pin numbers here are GP numbers - the pad's own name on the chip, not
+//     an Arduino board numbering. GP15 is pad 15.
+//   * Serial here is USB CDC, which is not simulated, so anything printed to
+//     it goes nowhere. Serial1 is the hardware UART on GP0/GP1 and does work.
+
+const int LED = 15;
+const int BUTTON = 14;
+
+void setup() {
+  pinMode(LED, OUTPUT);
+  pinMode(BUTTON, INPUT_PULLUP);
+  Serial1.begin(9600);
+  Serial1.println("pico ready");
+}
+
+void loop() {
+  if (digitalRead(BUTTON) == LOW) {
+    digitalWrite(LED, HIGH);      // held: stay on
+    delay(20);
+    return;
+  }
+  digitalWrite(LED, HIGH);
+  delay(250);
+  digitalWrite(LED, LOW);
+  delay(250);
+}
+`;
+
+const C6_BLINK_CODE = `// Starter - ESP32-C6 Blink
+//
+// The compiled RISC-V image really executes: ESP-IDF startup, FreeRTOS, then
+// setup() and loop(). GPIO and its pull resistors are simulated; Wi-Fi,
+// Bluetooth, the ADC, PWM, I2C, SPI and the hardware UART are not, so a
+// sketch using them compiles, runs, and quietly does nothing.
+//
+// Pin numbers are IO numbers - the pad's own name, as printed on the board.
+
+const int LED = 15;
+const int BUTTON = 9;    // BOOT button, active low
+
+void setup() {
+  pinMode(LED, OUTPUT);
+  pinMode(BUTTON, INPUT_PULLUP);
+}
+
+void loop() {
+  // Held down: fast. Released: slow. Both come from the real CPU's timing.
+  int wait = digitalRead(BUTTON) == LOW ? 60 : 300;
+  digitalWrite(LED, HIGH);
+  delay(wait);
+  digitalWrite(LED, LOW);
+  delay(wait);
+}
+`;
+
+const OLED_SSD1306_CODE = `// Showcase - SSD1306 over I2C, one command at a time
+//
+// No display library. The SSD1306 model implements the real command set and a
+// real GDDRAM, so this is the initialisation sequence from the datasheet
+// followed by pixel data, and what appears on the panel is what was written
+// into memory.
+//
+// Control byte 0x00 means "commands follow"; 0x40 means "display data
+// follows". That single distinction is most of the driver.
+
+#include <Wire.h>
+
+const uint8_t OLED = 0x3C;
+
+void command(uint8_t c) {
+  Wire.beginTransmission(OLED);
+  Wire.write((uint8_t)0x00);
+  Wire.write(c);
+  Wire.endTransmission();
+}
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+
+  command(0xAE);              // display off while we configure it
+  command(0x20); command(0x00);   // horizontal addressing
+  command(0x21); command(0); command(127);   // column range
+  command(0x22); command(0); command(7);     // page range
+  command(0xA1);              // segment remap
+  command(0xC8);              // scan direction
+  command(0x81); command(0x7F);   // contrast
+  command(0xA4);              // follow RAM, not all-on
+  command(0xA6);              // normal, not inverted
+  command(0xAF);              // display on
+  Serial.println("ssd1306 initialised");
+
+  // A vertical bar every eight columns, written straight into GDDRAM.
+  for (int page = 0; page < 8; page++) {
+    for (int col = 0; col < 128; col += 16) {
+      Wire.beginTransmission(OLED);
+      Wire.write((uint8_t)0x40);
+      for (int i = 0; i < 16; i++) Wire.write(i < 2 ? 0xFF : 0x00);
+      Wire.endTransmission();
+    }
+  }
+  Serial.println("pattern written");
+}
+
+void loop() {
+  // Invert, then back: one command, whole panel, no redraw.
+  command(0xA7); delay(500);
+  command(0xA6); delay(500);
+}
+`;
+
 export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   {
     id: 'tpl.blink',
@@ -1124,6 +1240,126 @@ void loop() {
             { kind: 'pin-toggles', pin: 18, minToggles: 3, withinMs: 2500 },
           ],
           { timeoutMs: 4000 },
+        ),
+      ];
+      return p;
+    },
+  },
+  {
+    id: 'tpl.pico-blink',
+    name: 'Pico Blink',
+    description:
+      'Raspberry Pi Pico: an LED on GP15 and a button on GP14. Pin numbers here are GP numbers — the pad\'s own ' +
+      'name — and output goes to Serial1, because the USB CDC Serial object is not simulated.',
+    tags: ['simulated', 'starter', 'rp2040'],
+    kind: 'starter',
+    board: 'Raspberry Pi Pico',
+    teaches: 'That a Pico is not an Uno with different labels.',
+    build: () => {
+      const p = emptyProject('Pico Blink');
+      const pico = inst('board.raspberry-pi-pico', 120, 170);
+      const resistor = inst('comp.resistor', 460, 120, { resistance: 220 });
+      const led = inst('comp.led', 580, 150, { color: 'green' });
+      const button = inst('comp.push-button', 460, 300);
+      p.boardInstances = [pico];
+      p.componentInstances = [resistor, led, button];
+      p.connections = [
+        wire(pico, 'GP15', resistor, 'p1', '#e8590c'),
+        wire(resistor, 'p2', led, 'anode', '#e8590c'),
+        wire(led, 'cathode', pico, 'GND7', '#212529'),
+        wire(pico, 'GP14', button, '1a', '#1971c2'),
+        wire(button, '2a', pico, 'GND5', '#212529'),
+      ];
+      p.codeFiles = [code('sketch.ino', PICO_BLINK_CODE)];
+      p.tests = [
+        bench(
+          'GP15 blinks',
+          'The LED pin must go high and keep switching — on this board that is pad 15, named the way the chip names it.',
+          [
+            { kind: 'pin-becomes-high', pin: 15, withinMs: 800 },
+            { kind: 'pin-toggles', pin: 15, minToggles: 3, withinMs: 2000 },
+          ],
+          { timeoutMs: 3000 },
+        ),
+      ];
+      return p;
+    },
+  },
+  {
+    id: 'tpl.c6-blink',
+    name: 'ESP32-C6 Blink',
+    description:
+      'ESP32-C6: an LED on IO15 and the BOOT button on IO9, blinking faster while held. The compiled RISC-V ' +
+      'image really executes — ESP-IDF startup, FreeRTOS, loop() — but only GPIO is simulated on this board.',
+    tags: ['simulated', 'starter', 'esp32'],
+    kind: 'starter',
+    board: 'ESP32-C6-DevKitC-1',
+    teaches: 'What an ESP32-C6 does here, and what it only appears to do.',
+    build: () => {
+      const p = emptyProject('ESP32-C6 Blink');
+      const c6 = inst('board.esp32-c6-devkitc-1', 120, 170);
+      const resistor = inst('comp.resistor', 470, 120, { resistance: 330 });
+      const led = inst('comp.led', 590, 150, { color: 'blue' });
+      const button = inst('comp.push-button', 470, 320);
+      p.boardInstances = [c6];
+      p.componentInstances = [resistor, led, button];
+      p.connections = [
+        wire(c6, 'IO15', resistor, 'p1', '#e8590c'),
+        wire(resistor, 'p2', led, 'anode', '#e8590c'),
+        wire(led, 'cathode', c6, 'GND2', '#212529'),
+        wire(c6, 'IO9', button, '1a', '#1971c2'),
+        wire(button, '2a', c6, 'GND1', '#212529'),
+      ];
+      p.codeFiles = [code('sketch.ino', C6_BLINK_CODE)];
+      p.tests = [
+        bench(
+          'IO15 blinks',
+          'Pad 15 must switch, which is the RISC-V core running loop() after a real ESP-IDF startup.',
+          [
+            { kind: 'pin-becomes-high', pin: 15, withinMs: 1200 },
+            { kind: 'pin-toggles', pin: 15, minToggles: 3, withinMs: 2500 },
+          ],
+          { timeoutMs: 4000 },
+        ),
+      ];
+      return p;
+    },
+  },
+  {
+    id: 'show.oled-ssd1306',
+    name: 'SSD1306: a display driver, one command at a time',
+    description:
+      'The datasheet initialisation sequence and then pixel data, with no display library in between. The model ' +
+      'implements the real command set and a real GDDRAM, so what appears on the panel is what the sketch wrote ' +
+      'into memory.',
+    tags: ['simulated', 'i2c', 'displays'],
+    kind: 'showcase',
+    board: 'Arduino Uno',
+    teaches: 'That a display driver is a command byte, a data byte, and a lot of patience.',
+    build: () => {
+      const p = emptyProject('SSD1306 OLED');
+      const uno = inst('board.arduino-uno', 120, 170);
+      const oled = inst('comp.oled', 520, 120);
+      p.boardInstances = [uno];
+      p.componentInstances = [oled];
+      p.connections = [
+        // 3.3 V module. The validator flags 5 V here, and on a bench that
+        // is how the panel dies.
+        wire(oled, 'vcc', uno, '3V3', '#e03131'),
+        wire(oled, 'gnd', uno, 'GND_PWR1', '#212529'),
+        wire(oled, 'sda', uno, 'A4', '#2f9e44'),
+        wire(oled, 'scl', uno, 'A5', '#1971c2'),
+      ];
+      p.codeFiles = [code('sketch.ino', OLED_SSD1306_CODE)];
+      p.tests = [
+        bench(
+          'The panel is configured and written to',
+          'Initialisation has to complete before any pixel is accepted, and the pattern has to be acknowledged by the device — both are reported only after the transactions succeed.',
+          [
+            { kind: 'serial-contains', text: 'ssd1306 initialised', withinMs: 1500 },
+            { kind: 'serial-contains', text: 'pattern written', withinMs: 3000 },
+          ],
+          { timeoutMs: 5000 },
         ),
       ];
       return p;

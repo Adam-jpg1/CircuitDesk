@@ -48,8 +48,22 @@ try {
   const names = await page.$$eval('.template-card .t-name', (els) => els.map((e) => e.textContent?.trim() ?? ''));
   const starters = STARTER_TEMPLATES();
   const showcases = SHOWCASE_TEMPLATES();
-  check(starters.length === 8, `all eight starters are defined (${starters.length})`);
-  check(showcases.length >= 6, `and the showcase gallery has a spread (${showcases.length})`);
+  // The eight originals must still be there — a rebuild that quietly dropped
+  // one is a regression — and the set may grow beyond them, which is the point
+  // of having starters for boards that are not an Uno.
+  const ORIGINAL_STARTERS = [
+    'tpl.blink', 'tpl.button-led', 'tpl.potentiometer', 'tpl.rgb',
+    'tpl.servo-sweep', 'tpl.ultrasonic', 'tpl.seven-segment', 'tpl.serial-demo',
+  ];
+  for (const id of ORIGINAL_STARTERS) {
+    check(starters.some((t) => t.id === id), `the original starter ${id} is still offered`);
+  }
+  check(starters.length >= ORIGINAL_STARTERS.length, `and the set has not shrunk (${starters.length})`);
+  check(
+    new Set(starters.map((t) => t.board)).size >= 2,
+    'starters cover more than one board, so a Pico owner has somewhere to begin',
+  );
+  check(showcases.length >= 6, `the showcase gallery has a spread (${showcases.length})`);
 
   for (const t of [...starters, ...showcases]) {
     check(names.includes(t.name), `"${t.name}" is on the dashboard`);
