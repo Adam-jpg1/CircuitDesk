@@ -10,6 +10,7 @@ import {
 import { navigate, ContextMenu, Modal, SupportBadge, timeAgo, toast } from '../ui/primitives';
 import { LogoIcon, ImportIcon, PlusIcon, ChipIcon } from '../ui/icons';
 import { loadSetting } from '../persistence/settings';
+import { svgDataUrl } from '../canvas/thumbnail';
 import { APP_VERSION_LABEL } from '../version';
 import type { CircuitProject, ProjectMeta } from '../types';
 
@@ -242,7 +243,8 @@ function ProjectCard({ meta, onMenu }: { meta: ProjectMeta; onMenu: (m: { x: num
     >
       <div className="project-thumb">
         {meta.thumbnailSvg ? (
-          <div style={{ width: '100%', height: '100%' }} dangerouslySetInnerHTML={{ __html: meta.thumbnailSvg }} />
+          // An image, not injected markup: an SVG drawn through <img> cannot run script.
+          <img alt="" src={svgDataUrl(meta.thumbnailSvg)} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
         ) : (
           <ChipIcon style={{ width: 34, height: 34, color: 'var(--text-2)' }} />
         )}

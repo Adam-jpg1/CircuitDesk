@@ -1,3 +1,4 @@
+import { renderProjectThumbnail } from '../canvas/thumbnail';
 import { dbGetProject, dbListProjects, dbPutProject, dbDeleteProject } from '../persistence/db';
 import { resolveDefinition } from './partsRegistry';
 import { ensureSketchAssignments } from './sketches';
@@ -23,8 +24,18 @@ export function projectMeta(p: CircuitProject): ProjectMeta {
     primaryBoard: primaryDef?.name ?? 'No board',
     componentCount: p.componentInstances.length + p.boardInstances.length,
     supportLevel,
-    thumbnailSvg: p.thumbnailSvg,
+    // Drawn from the layout here rather than read from storage, so what the
+    // dashboard shows is always the app's own escaped rendering.
+    thumbnailSvg: thumbnailFor(p),
   };
+}
+
+function thumbnailFor(p: CircuitProject): string | undefined {
+  try {
+    return renderProjectThumbnail(p);
+  } catch {
+    return undefined; // cosmetic
+  }
 }
 
 export async function listProjectMetas(): Promise<ProjectMeta[]> {
@@ -84,7 +95,10 @@ export function normalizeProject(raw: unknown): CircuitProject {
     tests: arr(p.tests),
     customDefinitions: arr(p.customDefinitions),
     settings: p.settings && typeof p.settings === 'object' ? p.settings : {},
-    thumbnailSvg: typeof p.thumbnailSvg === 'string' ? p.thumbnailSvg : undefined,
+    // Never carried in from outside. A thumbnail is markup, and one that
+    // arrived in a file or from someone else's project could carry script;
+    // the app draws its own from the layout on the next save.
+    thumbnailSvg: undefined,
   };
   const major = project.version.split('.')[0];
   if (major !== PROJECT_SCHEMA_VERSION.split('.')[0]) {

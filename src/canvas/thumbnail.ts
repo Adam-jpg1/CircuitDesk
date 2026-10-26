@@ -2,6 +2,27 @@ import type { CircuitProject } from '../types';
 import { resolveDefinition } from '../project/partsRegistry';
 import { MM } from '../boards/pinHelpers';
 
+/**
+ * Everything interpolated into the markup below comes from a project, and a
+ * project can come from a file or from someone else entirely. So nothing goes
+ * in as text: positions and sizes are coerced to finite numbers, and a wire's
+ * colour must be a hex colour or it is replaced. A colour of
+ * `"/><script>…` would otherwise have closed the attribute.
+ */
+function num(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+}
+const HEX_COLOUR = /^#[0-9a-f]{3,8}$/i;
+export function safeColour(value: unknown, fallback = '#2f9e44'): string {
+  return typeof value === 'string' && HEX_COLOUR.test(value) ? value : fallback;
+}
+
+/** An SVG string as an image URL, so it is drawn as a picture and never parsed as page markup. */
+export function svgDataUrl(svg: string): string {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 /** Renders a small, cheap SVG thumbnail of the project layout for dashboard cards. */
 export function renderProjectThumbnail(project: CircuitProject): string {
   const instances = [...project.boardInstances, ...project.componentInstances];
@@ -16,12 +37,12 @@ export function renderProjectThumbnail(project: CircuitProject): string {
     const h = (def?.heightMm ?? 10) * MM;
     const isBoard = Boolean(def?.isBoard);
     rects.push({
-      x: inst.x, y: inst.y, w, h,
+      x: num(inst.x), y: num(inst.y), w: num(w), h: num(h),
       fill: isBoard ? '#1e5b8a' : def && !def.isBoard && def.category === 'Breadboards' ? '#d8dce0' : '#7a8894',
       rx: isBoard ? 6 : 2,
     });
-    minX = Math.min(minX, inst.x); minY = Math.min(minY, inst.y);
-    maxX = Math.max(maxX, inst.x + w); maxY = Math.max(maxY, inst.y + h);
+    minX = Math.min(minX, num(inst.x)); minY = Math.min(minY, num(inst.y));
+    maxX = Math.max(maxX, num(inst.x) + num(w)); maxY = Math.max(maxY, num(inst.y) + num(h));
   }
   const lines: string[] = [];
   for (const c of project.connections.slice(0, 60)) {
@@ -30,7 +51,7 @@ export function renderProjectThumbnail(project: CircuitProject): string {
     const b = all.get(c.targetComponentId);
     if (!a || !b) continue;
     lines.push(
-      `<line x1="${a.x + 20}" y1="${a.y + 20}" x2="${b.x + 20}" y2="${b.y + 20}" stroke="${c.color || '#2f9e44'}" stroke-width="3" stroke-linecap="round" opacity="0.85"/>`,
+      `<line x1="${num(a.x) + 20}" y1="${num(a.y) + 20}" x2="${num(b.x) + 20}" y2="${num(b.y) + 20}" stroke="${safeColour(c.color)}" stroke-width="3" stroke-linecap="round" opacity="0.85"/>`,
     );
   }
   const pad = 30;
