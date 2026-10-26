@@ -74,6 +74,15 @@ export interface BoardBuild {
   result?: CompileResult;
 }
 
+/** What one background prebuild did. */
+export interface PrebuildOutcome {
+  compiled: number;
+  alreadyReady: number;
+  failed: number;
+  /** The service declined (busy, rate limit, unreachable): back off. */
+  refused: boolean;
+}
+
 export interface BuildReport {
   builds: BoardBuild[];
   /** True when at least one target produced firmware a runner can execute. */
@@ -217,6 +226,69 @@ class SimulationController {
       anyRunnable: builds.some((b) => b.status === 'built'),
       allSucceeded: builds.every((b) => b.status === 'built'),
     };
+  }
+
+  /**
+   * Compiles ahead of Run, silently, so pressing Run finds the firmware ready.
+   *
+   * Fills the same artifact cache `build()` reads, keyed by the same compile
+   * fingerprint, and touches nothing else: no build report, no stage messages,
+   * no change to the project the controller is running. A later `build()` of
+   * the same source is then "up to date" without a request leaving the page.
+   *
+   * Targets whose artifact is already cached are skipped, and so are boards
+   * nothing here can execute — there is nothing to have ready for those. What
+   * it returns is what it did, so the caller can back off when the service is
+   * busy or rate-limiting rather than keep asking.
+   */
+  async prebuild(project: CircuitProject): Promise<PrebuildOutcome> {
+    const { targets } = resolveWorkspaceTargets(project);
+    const outcome: PrebuildOutcome = { compiled: 0, alreadyReady: 0, failed: 0, refused: false };
+    for (const target of targets) {
+      if (!getSimulatorAdapter(target.board)) continue;
+      const files = filesForBoard(project, target.instanceIds[0]);
+      const cacheKey = fingerprintForBoard(target.board, files);
+      if (this.artifacts.has(cacheKey)) {
+        outcome.alreadyReady++;
+        continue;
+      }
+      const result = await this.compileFn(project, {
+        boardId: target.serverBoardId,
+        stampBoardId: target.boardId,
+        fqbn: target.fqbn,
+        files: files.map((f) => ({ name: f.name, content: f.content })),
+      });
+      if (!result.success || !result.firmware) {
+        outcome.failed++;
+        // A compile error is an answer about the source; anything else — busy,
+        // rate-limited, unreachable — is the service saying "not now".
+        if (result.diagnostics.length === 0) {
+          outcome.refused = true;
+          break;
+        }
+        continue;
+      }
+      if (checkArtifactRuntime(target.board, result.firmware.format)) {
+        outcome.failed++;
+        continue;
+      }
+      this.artifacts.set(cacheKey, result.firmware);
+      const notes = result.simulationNotes;
+      if (notes && notes.length > 0) this.artifactNotes.set(cacheKey, notes);
+      else this.artifactNotes.delete(cacheKey);
+      outcome.compiled++;
+    }
+    return outcome;
+  }
+
+  /** True when every runnable target of `project` already has its firmware cached. */
+  isPrebuilt(project: CircuitProject): boolean {
+    const { targets } = resolveWorkspaceTargets(project);
+    const runnable = targets.filter((t) => getSimulatorAdapter(t.board));
+    return (
+      runnable.length > 0 &&
+      runnable.every((t) => this.artifacts.has(fingerprintForBoard(t.board, filesForBoard(project, t.instanceIds[0]))))
+    );
   }
 
   /**

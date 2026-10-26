@@ -3,6 +3,7 @@ import { useEditorStore } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
 import { simulationController } from '../simulation/simulationController';
 import { compileAction, runAction } from '../app/actions';
+import { startBackgroundBuilds } from '../app/backgroundBuild';
 import { CanvasStage } from '../canvas/CanvasStage';
 import { Toolbar } from './Toolbar';
 import { LibraryPanel } from './LibraryPanel';
@@ -45,6 +46,10 @@ export function EditorShell({ projectId }: { projectId: string }) {
       simulationController.refreshCircuit(p);
     }
   }, [connections, componentInstances, boardInstances]);
+
+  // Compile in the background once the code has been still for a moment, so
+  // Run finds the firmware ready instead of starting the toolchain then.
+  useEffect(() => startBackgroundBuilds(), [projectId]);
 
   useKeyboardShortcuts();
 

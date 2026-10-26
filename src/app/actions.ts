@@ -91,13 +91,14 @@ export function runAction(): void {
       return;
     }
   }
-  if (simulationController.hasFirmware && s.lastCompile?.success) {
-    if (s.project) simulationController.refreshCircuit(s.project);
-    simulationController.start();
-    s.setBottomTab('serial');
-  } else {
-    void compileAction(true);
-  }
+  // Always through the build. It used to start whatever was built last when
+  // the last compile had succeeded — so editing the sketch and pressing Run
+  // ran the OLD firmware, because the controller still held the project as it
+  // was when it was built. Going through build() costs nothing when nothing
+  // changed (the artifact is cached by source, and the build is "up to date"
+  // without a request), and when the code did change it has usually been
+  // compiled already in the background — see backgroundBuild.ts.
+  void compileAction(true);
 }
 
 export function validateAction(): void {
