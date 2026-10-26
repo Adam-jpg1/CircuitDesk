@@ -1,17 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listProjectMetas, saveProject, deleteProject, duplicateProject, loadProject } from '../project/projectService';
-import {
-  buildBlinkProject,
-  emptyProject,
-  STARTER_TEMPLATES,
-  SHOWCASE_TEMPLATES,
-  type ProjectTemplate,
-} from '../project/templates';
+import { buildBlinkProject, emptyProject } from '../project/templates';
 import { navigate, ContextMenu, Modal, SupportBadge, timeAgo, toast } from '../ui/primitives';
-import { LogoIcon, ImportIcon, PlusIcon, ChipIcon } from '../ui/icons';
+import { LogoIcon, ImportIcon, PlusIcon, ChipIcon, LayersIcon, UsersIcon } from '../ui/icons';
+import { SiteHeader } from '../site/SiteHeader';
+import { TemplateCard, templateViews } from '../site/TemplatesPage';
 import { loadSetting } from '../persistence/settings';
 import { svgDataUrl } from '../canvas/thumbnail';
-import { APP_VERSION_LABEL } from '../version';
 import type { CircuitProject, ProjectMeta } from '../types';
 
 type SortKey = 'updated' | 'name' | 'created';
@@ -70,28 +65,27 @@ export function Dashboard() {
 
   return (
     <div className="dashboard">
-      <header className="dash-header">
-        <span className="dash-brand">
-          <LogoIcon /> CircuitDesk
-          <span className="badge compile" title="First public beta release">{APP_VERSION_LABEL}</span>
-          <span className="tagline">Plan, wire, code, validate, simulate and test hardware projects before you build them.</span>
-        </span>
-        <div style={{ flex: 1 }} />
-        <button className="btn" onClick={() => navigate('#/custom-parts')}>
-          <ChipIcon style={{ width: 14, height: 14 }} /> Custom boards
-        </button>
-        <button className="btn" onClick={() => navigate('#/import')}>
-          <ImportIcon style={{ width: 14, height: 14 }} /> Import
-        </button>
-        <button className="btn" onClick={() => navigate('#/licenses')}>Licenses</button>
-        <button className="btn" onClick={() => navigate('#/about')}>About</button>
-        {/* A new project is blank. Starting the user inside a wired Blink
-            means their first act is deleting someone else's circuit; the
-            templates below are where a worked example belongs. */}
-        <button className="btn primary" onClick={() => void createProject(() => emptyProject('Untitled Project'))}>
-          <PlusIcon style={{ width: 14, height: 14 }} /> New project
-        </button>
-      </header>
+      <SiteHeader
+        active="projects"
+        actions={
+          <>
+            <button className="btn" onClick={() => navigate('#/custom-parts')}>
+              <ChipIcon style={{ width: 14, height: 14 }} /> Custom boards
+            </button>
+            <button className="btn" onClick={() => navigate('#/import')}>
+              <ImportIcon style={{ width: 14, height: 14 }} /> Import
+            </button>
+            <button className="btn" onClick={() => navigate('#/licenses')}>Licenses</button>
+            <button className="btn" onClick={() => navigate('#/about')}>About</button>
+            {/* A new project is blank. Starting the user inside a wired Blink
+                means their first act is deleting someone else's circuit; the
+                templates are where a worked example belongs. */}
+            <button className="btn primary" onClick={() => void createProject(() => emptyProject('Untitled Project'))}>
+              <PlusIcon style={{ width: 14, height: 14 }} /> New project
+            </button>
+          </>
+        }
+      />
 
       <div className="dash-body">
         {metas === null ? (
@@ -110,15 +104,8 @@ export function Dashboard() {
               </button>
               <button className="btn" onClick={() => navigate('#/import')}>Import Project</button>
             </div>
-            <div style={{ marginTop: 26, width: '100%' }}>
-              <div className="dash-section-title">Starter templates</div>
-              <TemplateGrid templates={STARTER_TEMPLATES()} onPick={(build) => void createProject(build)} blank />
-              <div className="dash-section-title" style={{ marginTop: 22 }}>Showcase projects</div>
-              <div className="dash-section-note">
-                Worked projects that drive real device models on real buses, across the boards that genuinely
-                execute firmware. Every one compiles and runs, and has a test bench asserting that it does.
-              </div>
-              <TemplateGrid templates={SHOWCASE_TEMPLATES()} onPick={(build) => void createProject(build)} />
+            <div style={{ marginTop: 26, width: '100%', textAlign: 'left' }}>
+              <TemplateTeaser onPick={(build) => void createProject(build)} />
             </div>
           </div>
         ) : (
@@ -150,15 +137,7 @@ export function Dashboard() {
               {filtered.length === 0 && <div className="empty-state">No projects match “{query}”.</div>}
             </div>
 
-            <div className="dash-section-title">Starter templates</div>
-            <TemplateGrid templates={STARTER_TEMPLATES()} onPick={(build) => void createProject(build)} blank />
-
-            <div className="dash-section-title" style={{ marginTop: 22 }}>Showcase projects</div>
-            <div className="dash-section-note">
-              Worked projects that drive real device models on real buses, across the boards that genuinely
-              execute firmware. Every one compiles and runs, and has a test bench asserting that it does.
-            </div>
-            <TemplateGrid templates={SHOWCASE_TEMPLATES()} onPick={(build) => void createProject(build)} />
+            <TemplateTeaser onPick={(build) => void createProject(build)} />
           </>
         )}
       </div>
@@ -182,6 +161,7 @@ export function Dashboard() {
                 });
               },
             },
+            { label: 'Share to community…', onClick: () => navigate(`#/community?share=${encodeURIComponent(menu.meta.id)}`) },
             'sep',
             { label: 'Delete…', danger: true, onClick: () => setConfirmDelete(menu.meta) },
           ]}
@@ -280,44 +260,30 @@ function ProjectCard({ meta, onMenu }: { meta: ProjectMeta; onMenu: (m: { x: num
 }
 
 /**
- * A row of template cards.
+ * A taste of the templates, with the way to the rest.
  *
- * Starters and showcases are drawn by the same component and listed
- * separately, because they answer different questions: "how do I start" and
- * "what can this actually do". Each card names the board it opens on, since a
- * showcase on a Pico is not a thing you can open on an Uno.
+ * The full gallery has its own page; here it is four cards and two doors, so
+ * the projects list is about the user's projects.
  */
-function TemplateGrid({
-  templates,
-  onPick,
-  blank,
-}: {
-  templates: ProjectTemplate[];
-  onPick: (build: () => CircuitProject) => void;
-  blank?: boolean;
-}) {
+const TEASER_IDS = ['tpl.blink', 'tpl.ultrasonic', 'show.i2c-sensor-bus', 'tpl.pico-blink'];
+function TemplateTeaser({ onPick }: { onPick: (build: () => CircuitProject) => void }) {
+  const views = templateViews().filter((v) => TEASER_IDS.includes(v.template.id));
   return (
-    <div className="template-row">
-      {templates.map((t) => (
-        <div key={t.id} className="template-card" onClick={() => onPick(t.build)}>
-          <div className="t-name">{t.name}</div>
-          <div className="t-board">{t.board}</div>
-          <div className="t-desc">{t.description}</div>
-          {t.teaches && <div className="t-teaches">{t.teaches}</div>}
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-            {t.tags.map((tag) => (
-              <span key={tag} className={`badge ${tag === 'simulated' ? 'simulated' : 'visual-only'}`}>{tag}</span>
-            ))}
-          </div>
-        </div>
-      ))}
-      {blank && (
-        <div className="template-card" onClick={() => onPick(() => emptyProject('Blank Project'))}>
-          <div className="t-name">Blank project</div>
-          <div className="t-desc">Empty canvas and an empty sketch — start from scratch.</div>
-        </div>
-      )}
-    </div>
+    <>
+      <div className="dash-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        Start from a template
+        <span style={{ flex: 1 }} />
+        <button className="btn sm" onClick={() => navigate('#/templates')}>
+          <LayersIcon style={{ width: 13, height: 13 }} /> All templates →
+        </button>
+        <button className="btn sm" onClick={() => navigate('#/community')}>
+          <UsersIcon style={{ width: 13, height: 13 }} /> Community →
+        </button>
+      </div>
+      <div className="tpl-grid">
+        {views.map((v) => <TemplateCard key={v.template.id} view={v} onPick={() => onPick(v.template.build)} />)}
+      </div>
+    </>
   );
 }
 

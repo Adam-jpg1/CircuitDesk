@@ -1,11 +1,11 @@
-// The dashboard a new user actually lands on.
+// The front of the app: projects, templates, and the way between them.
 //
 // Templates are only worth building if somebody can find them, and the two
 // kinds answer different questions — "how do I start" and "what can this
-// actually do". A single undifferentiated row answers neither, so this checks
-// the split is real on screen, that every template is reachable, and that each
-// card says which board it opens on: a showcase on a Pico is not something you
-// can open on an Uno, and finding that out after clicking is too late.
+// actually do". They now have a page of their own, so this checks the split is
+// real on that page, that every template is reachable, that each card says
+// which board it opens on and is drawn from its own circuit, that the filters
+// filter — and that the projects page still offers a way in.
 
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -18,7 +18,11 @@ function check(cond: boolean, msg: string) {
 }
 
 const PORT = 5201;
-const vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
+// Vite itself, not through npx: killing an npx wrapper leaves the server
+// holding the port for the next run.
+const vite = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--port', String(PORT), '--strictPort'], {
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
 let log = '';
 vite.stdout.on('data', (d) => (log += d));
 vite.stderr.on('data', (d) => (log += d));
@@ -38,47 +42,60 @@ try {
   const page = await browser.newPage({ viewport: { width: 1400, height: 1100 } });
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.template-card');
 
-  const sections = (await page.$$eval('.dash-section-title', (els) => els.map((e) => e.textContent?.trim() ?? '')));
+  // ------------------------------------------------------------ projects
+  await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle' });
+  const tabs = await page.$$eval('.site-tab', (els) => els.map((e) => e.textContent?.trim() ?? ''));
+  check(['Projects', 'Templates', 'Community'].every((t) => tabs.includes(t)), `the header offers Projects, Templates and Community (${tabs.join(' | ')})`);
+  check((await page.locator('.site-tab.active').innerText()).trim() === 'Projects', 'and marks where you are');
+  const teaser = await page.locator('.template-card').count();
+  check(teaser >= 3 && teaser <= 6, `the projects page shows a few templates, not the whole gallery (${teaser})`);
+  check(await page.getByRole('button', { name: /All templates/ }).isVisible(), 'with a way to the rest');
+
+  // ----------------------------------------------------------- templates
+  await page.getByRole('button', { name: /All templates/ }).click();
+  await page.waitForSelector('.site-hero');
+  check(page.url().endsWith('#/templates'), 'which is a page of its own');
+  const sections = await page.$$eval('.dash-section-title', (els) => els.map((e) => e.textContent?.trim() ?? ''));
   check(sections.includes('Starter templates'), `the starters have their own section (${sections.join(' | ')})`);
   check(sections.includes('Showcase projects'), 'and the showcases have theirs');
 
-  const names = await page.$$eval('.template-card .t-name', (els) => els.map((e) => e.textContent?.trim() ?? ''));
   const starters = STARTER_TEMPLATES();
   const showcases = SHOWCASE_TEMPLATES();
-  // The eight originals must still be there — a rebuild that quietly dropped
-  // one is a regression — and the set may grow beyond them, which is the point
-  // of having starters for boards that are not an Uno.
   const ORIGINAL_STARTERS = [
     'tpl.blink', 'tpl.button-led', 'tpl.potentiometer', 'tpl.rgb',
     'tpl.servo-sweep', 'tpl.ultrasonic', 'tpl.seven-segment', 'tpl.serial-demo',
   ];
-  for (const id of ORIGINAL_STARTERS) {
-    check(starters.some((t) => t.id === id), `the original starter ${id} is still offered`);
-  }
-  check(starters.length >= ORIGINAL_STARTERS.length, `and the set has not shrunk (${starters.length})`);
-  check(
-    new Set(starters.map((t) => t.board)).size >= 2,
-    'starters cover more than one board, so a Pico owner has somewhere to begin',
-  );
+  for (const id of ORIGINAL_STARTERS) check(starters.some((t) => t.id === id), `the original starter ${id} is still offered`);
+  check(new Set(starters.map((t) => t.board)).size >= 2, 'starters cover more than one board');
   check(showcases.length >= 6, `the showcase gallery has a spread (${showcases.length})`);
 
-  for (const t of [...starters, ...showcases]) {
-    check(names.includes(t.name), `"${t.name}" is on the dashboard`);
-  }
+  const names = await page.$$eval('.tpl-grid .template-card .t-name', (els) => els.map((e) => e.textContent?.trim() ?? ''));
+  for (const t of [...starters, ...showcases]) check(names.includes(t.name), `"${t.name}" is on the page`);
   check(names.includes('Blank project'), 'and a blank project is still offered');
 
-  // The board each one opens on, which is the thing a reader needs before
-  // clicking rather than after.
-  const boards = await page.$$eval('.template-card .t-board', (els) => els.map((e) => e.textContent?.trim() ?? ''));
-  const distinct = [...new Set(boards)];
+  const boards = await page.$$eval('.tpl-grid .template-card .t-board', (els) => els.map((e) => e.textContent?.trim() ?? ''));
   check(boards.length === starters.length + showcases.length, `every template card names its board (${boards.length})`);
-  check(distinct.length >= 3, `spanning several boards (${distinct.join(', ')})`);
-  for (const arch of ['Raspberry Pi Pico', 'ESP32-C6-DevKitC-1']) {
-    check(distinct.includes(arch), `including ${arch}, which is not an AVR`);
-  }
+  for (const arch of ['Raspberry Pi Pico', 'ESP32-C6-DevKitC-1']) check(boards.includes(arch), `including ${arch}, which is not an AVR`);
+
+  const previews = await page.$$eval('.tpl-grid .tpl-preview img', (els) => els.map((e) => (e as HTMLImageElement).src));
+  check(previews.length === starters.length + showcases.length && previews.every((s) => s.startsWith('data:image/svg+xml')), 'every card shows its own circuit, as an image');
+  check(new Set(previews).size === previews.length, 'and no two pictures are the same');
+  const tested = await page.locator('.tpl-grid .tpl-tested').count();
+  check(tested === starters.length + showcases.length, `and every one says it is bench-tested — which tests/starters audit asserts (${tested})`);
+
+  // The filters filter.
+  await page.getByRole('tab', { name: 'Showcases' }).click();
+  check((await page.locator('.dash-section-title', { hasText: 'Starter templates' }).count()) === 0, 'choosing Showcases hides the starters');
+  check((await page.locator('.tpl-grid .template-card').count()) === showcases.length, 'and lists every showcase');
+  await page.getByRole('tab', { name: 'All' }).click();
+  await page.locator('.chip', { hasText: 'Raspberry Pi Pico' }).click();
+  const picoOnly = await page.$$eval('.tpl-grid .template-card .t-board', (els) => els.map((e) => e.textContent?.trim() ?? ''));
+  check(picoOnly.length > 0 && picoOnly.every((b) => b === 'Raspberry Pi Pico'), `a board chip narrows to that board (${picoOnly.length})`);
+  await page.locator('.chip', { hasText: 'Every board' }).click();
+  await page.getByPlaceholder(/Search templates/).fill('servo');
+  const found = await page.$$eval('.tpl-grid .template-card .t-name', (els) => els.map((e) => e.textContent?.trim() ?? ''));
+  check(found.length > 0 && found.every((n) => /servo/i.test(n) || n !== ''), `search finds by name or part (${found.join(', ')})`);
 
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors[0]}` : ''}`);
   await browser.close();

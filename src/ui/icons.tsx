@@ -51,3 +51,16 @@ export const ChipIcon = (props: P) => <S {...props}><rect x="4" y="4" width="8" 
 export const CollapseLeftIcon = (props: P) => <S {...props}><path d="M9.5 3L5 8l4.5 5M12 3v10" /></S>;
 export const CollapseRightIcon = (props: P) => <S {...props}><path d="M6.5 3L11 8l-4.5 5M4 3v10" /></S>;
 export const FlaskIcon = (props: P) => <S {...props}><path d="M6 2h4M6.8 2v4L3 12.5A1.4 1.4 0 0 0 4.2 14.5h7.6a1.4 1.4 0 0 0 1.2-2L9.2 6V2" /><path d="M5 10h6" /></S>;
+export const HeartIcon = (props: P & { filled?: boolean }) => {
+  const { filled, ...rest } = props;
+  return (
+    <S {...rest}>
+      <path d="M8 13.6S2 10 2 5.9A3 3 0 0 1 8 4.4a3 3 0 0 1 6 1.5C14 10 8 13.6 8 13.6z" fill={filled ? 'currentColor' : 'none'} />
+    </S>
+  );
+};
+export const UsersIcon = (props: P) => <S {...props}><circle cx="6" cy="5.5" r="2.4" /><path d="M1.8 13.5a4.2 4.2 0 0 1 8.4 0" /><path d="M10.6 3.4a2.4 2.4 0 0 1 0 4.4M12 9.6a4.2 4.2 0 0 1 2.2 3.9" /></S>;
+export const LayersIcon = (props: P) => <S {...props}><path d="M8 1.8l6.2 3.2L8 8.2 1.8 5z" /><path d="M1.8 8L8 11.2 14.2 8" /><path d="M1.8 11L8 14.2l6.2-3.2" /></S>;
+export const StarIcon = (props: P) => <S {...props}><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" fill="currentColor" stroke="none" /></S>;
+export const CopyIcon = (props: P) => <S {...props}><rect x="5" y="5" width="8.5" height="8.5" rx="1.5" /><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" /></S>;
+export const ShareIcon = (props: P) => <S {...props}><circle cx="12" cy="3.5" r="1.8" /><circle cx="4" cy="8" r="1.8" /><circle cx="12" cy="12.5" r="1.8" /><path d="M5.6 7.1l4.8-2.7M5.6 8.9l4.8 2.7" /></S>;

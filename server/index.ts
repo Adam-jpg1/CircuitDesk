@@ -13,6 +13,7 @@ import { rateLimit } from './rateLimit.js';
 import { CompileGate, CompilerBusyError } from './compileGate.js';
 import { cacheStats, evictBuildDirs } from './compiler/buildCache.js';
 import { warmCoreCaches } from './compiler/warmup.js';
+import { registerCommunityRoutes } from './community/routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -262,6 +263,10 @@ app.post('/api/compiler/validate', compileLimiter, async (req, res) => {
   }
   res.status(200).json(result);
 });
+
+// ---- community: shared projects and likes; see server/community ----
+const community = await registerCommunityRoutes(app);
+console.log(`[CircuitDesk] community: ${community.size} project(s)`);
 
 // Serve the production build when present (optional single-host deployments).
 const dist = path.resolve(__dirname, '../dist');

@@ -11,3 +11,12 @@ services:
       # Optional: extra CORS origins (comma-separated), e.g. Vercel preview URLs.
       - key: CORS_EXTRA_ORIGINS
         value: ""
+      # Community (see docs/community.md). CREATOR_TOKEN grants the Creator
+      # badge when publishing; set it in the dashboard, never in this file.
+      - key: CREATOR_TOKEN
+        sync: false
+      # Where shared projects are kept. On a disk that is replaced at deploy,
+      # published posts do not survive one; attach a persistent disk and point
+      # this at it to keep them.
+      - key: COMMUNITY_DATA_DIR
+        value: /app/.community-data

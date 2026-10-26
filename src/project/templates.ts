@@ -10,11 +10,11 @@ import {
   type TestInputEvent,
 } from '../types';
 
-function inst(definitionId: string, x: number, y: number, properties: Record<string, unknown> = {}, rotation = 0): ComponentInstance {
+export function inst(definitionId: string, x: number, y: number, properties: Record<string, unknown> = {}, rotation = 0): ComponentInstance {
   return { id: uid('inst'), definitionId, x, y, rotation, properties, simulationState: {} };
 }
 
-function wire(
+export function wire(
   a: ComponentInstance, aPin: string,
   b: ComponentInstance, bPin: string,
   color = '#2f9e44',
@@ -32,7 +32,7 @@ function wire(
   };
 }
 
-function code(name: string, content: string): CodeFile {
+export function code(name: string, content: string): CodeFile {
   return { id: uid('file'), name, content, language: 'cpp' };
 }
 
@@ -45,7 +45,7 @@ function code(name: string, content: string): CodeFile {
  * emulator against the real compiled firmware, so a bench that passes is proof
  * the circuit and the sketch still agree.
  */
-function bench(
+export function bench(
   name: string,
   description: string,
   // Without the id, which this function is what assigns — asking a caller for

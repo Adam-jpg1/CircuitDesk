@@ -8,6 +8,8 @@ import { AboutPage } from './AboutPage';
 import { LicensesPage } from './LicensesPage';
 import { useCustomPartsStore } from '../custom-parts/customPartsStore';
 import { BoardStudio } from '../board-studio/BoardStudio';
+import { TemplatesPage } from '../site/TemplatesPage';
+import { CommunityPage } from '../site/CommunityPage';
 
 export function App() {
   const route = useHashRoute();
@@ -36,6 +38,14 @@ export function App() {
       ) : route.startsWith('#/licenses') ? (
         <ErrorBoundary name="licenses page">
           <LicensesPage />
+        </ErrorBoundary>
+      ) : route.startsWith('#/templates') ? (
+        <ErrorBoundary name="templates">
+          <TemplatesPage />
+        </ErrorBoundary>
+      ) : route.startsWith('#/community') ? (
+        <ErrorBoundary name="community">
+          <CommunityPage />
         </ErrorBoundary>
       ) : route.startsWith('#/about') ? (
         <ErrorBoundary name="about page">
