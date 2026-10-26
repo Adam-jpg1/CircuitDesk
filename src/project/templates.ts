@@ -86,8 +86,33 @@ export interface ProjectTemplate {
   name: string;
   description: string;
   tags: string[];
+  /**
+   * What this is for.
+   *
+   *   starter  — the smallest honest example of one idea, for somebody on
+   *              their first day. One board, few parts, a sketch you can read
+   *              in one screen.
+   *   showcase — a worked project that shows what the application can
+   *              actually do: real device models on real buses, across the
+   *              architectures that genuinely execute firmware.
+   *
+   * They are separated because they answer different questions — "how do I
+   * start" and "what is this capable of" — and a list that mixes them answers
+   * neither.
+   */
+  kind: 'starter' | 'showcase';
+  /** The board it opens on, named as the board names itself. */
+  board: string;
+  /** What a reader learns from it, in one line. */
+  teaches?: string;
   build: () => CircuitProject;
 }
+
+/** The starters: the first thing a new user opens. */
+export const STARTER_TEMPLATES = (): ProjectTemplate[] => PROJECT_TEMPLATES.filter((t) => t.kind === 'starter');
+
+/** The showcase gallery: what the application can actually do. */
+export const SHOWCASE_TEMPLATES = (): ProjectTemplate[] => PROJECT_TEMPLATES.filter((t) => t.kind === 'showcase');
 
 const BLINK_CODE = `// CircuitDesk starter — Blink
 // D13 drives an LED through a 220 ohm resistor to GND.
@@ -137,9 +162,177 @@ export function buildBlinkProject(name = 'Blink'): CircuitProject {
   return p;
 }
 
+const I2C_SENSOR_BUS_CODE = `// Showcase - I2C sensor bus
+//
+// Two devices share one pair of wires, addressed separately, driven with raw
+// Wire calls so every byte on the bus is visible. No sensor library: the
+// BMP280 here is a register-level model with the datasheet's own calibration
+// constants, so the compensation below is the compensation from the datasheet
+// and the number it produces is a real one.
+
+#include <Wire.h>
+
+const uint8_t BMP280 = 0x76;   // sensor
+const uint8_t EEPROM_ADDR = 0x50;   // log
+const int LED = 13;
+
+uint16_t dig_T1; int16_t dig_T2, dig_T3;
+
+uint8_t read8(uint8_t addr, uint8_t reg) {
+  Wire.beginTransmission(addr); Wire.write(reg); Wire.endTransmission();
+  Wire.requestFrom((int)addr, 1);
+  return Wire.available() ? Wire.read() : 0;
+}
+
+uint16_t read16LE(uint8_t addr, uint8_t reg) {
+  Wire.beginTransmission(addr); Wire.write(reg); Wire.endTransmission();
+  Wire.requestFrom((int)addr, 2);
+  uint16_t lo = Wire.read(), hi = Wire.read();
+  return (hi << 8) | lo;
+}
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(LED, OUTPUT);
+  Wire.begin();
+
+  uint8_t id = read8(BMP280, 0xD0);
+  Serial.print("BMP280 chip id 0x"); Serial.println(id, HEX);
+
+  dig_T1 = read16LE(BMP280, 0x88);
+  dig_T2 = (int16_t)read16LE(BMP280, 0x8A);
+  dig_T3 = (int16_t)read16LE(BMP280, 0x8C);
+
+  // normal mode, temperature and pressure oversampling x1
+  Wire.beginTransmission(BMP280); Wire.write(0xF4); Wire.write(0x27); Wire.endTransmission();
+}
+
+void loop() {
+  // 20-bit temperature, MSB first
+  Wire.beginTransmission(BMP280); Wire.write(0xFA); Wire.endTransmission();
+  Wire.requestFrom((int)BMP280, 3);
+  int32_t adc = ((int32_t)Wire.read() << 12) | ((int32_t)Wire.read() << 4) | (Wire.read() >> 4);
+
+  // Datasheet compensation, integer form.
+  int32_t v1 = ((((adc >> 3) - ((int32_t)dig_T1 << 1))) * (int32_t)dig_T2) >> 11;
+  int32_t v2 = (((((adc >> 4) - (int32_t)dig_T1) * ((adc >> 4) - (int32_t)dig_T1)) >> 12) * (int32_t)dig_T3) >> 14;
+  int32_t tFine = v1 + v2;
+  int32_t centi = (tFine * 5 + 128) >> 8;
+
+  Serial.print("temperature "); Serial.print(centi / 100); Serial.print("."); 
+  Serial.print((centi % 100) / 10); Serial.println(" C");
+  digitalWrite(LED, centi >= 2000 ? HIGH : LOW);
+
+  // Log the whole degrees to the EEPROM at address 0, and read it back.
+  Wire.beginTransmission(EEPROM_ADDR);
+  Wire.write((uint8_t)0x00); Wire.write((uint8_t)0x00); Wire.write((uint8_t)(centi / 100));
+  Wire.endTransmission();
+  delay(10);
+  Wire.beginTransmission(EEPROM_ADDR); Wire.write((uint8_t)0x00); Wire.write((uint8_t)0x00);
+  Wire.endTransmission();
+  Wire.requestFrom((int)EEPROM_ADDR, 1);
+  if (Wire.available()) { Serial.print("logged "); Serial.println(Wire.read()); }
+
+  delay(400);
+}
+`;
+
+const SPI_SD_CARD_CODE = `// Showcase - SPI storage: the card's own init handshake
+//
+// No SD library. This is the sequence every one of them performs, written out
+// so you can watch it: CMD0 to idle, CMD8 to check the voltage range, then
+// CMD55/ACMD41 polled until the card stops reporting busy. The card model
+// answers at the command layer and reports "still initialising" for the first
+// few polls, exactly as real silicon does, so the retry loop below is not
+// decoration - remove it and this fails.
+
+#include <SPI.h>
+
+const int CS = 10, LED = 7;
+
+uint8_t cmd(uint8_t index, uint32_t arg, uint8_t crc) {
+  digitalWrite(CS, LOW);
+  SPI.transfer(0x40 | index);
+  SPI.transfer(arg >> 24); SPI.transfer(arg >> 16);
+  SPI.transfer(arg >> 8);  SPI.transfer(arg);
+  SPI.transfer(crc);
+  uint8_t r = 0xFF;
+  for (int i = 0; i < 10 && (r & 0x80); i++) r = SPI.transfer(0xFF);
+  digitalWrite(CS, HIGH);
+  SPI.transfer(0xFF);
+  return r;
+}
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(CS, OUTPUT); pinMode(LED, OUTPUT);
+  digitalWrite(CS, HIGH);
+  SPI.begin();
+
+  // 80 clocks with CS high: the card needs them before it will listen.
+  for (int i = 0; i < 10; i++) SPI.transfer(0xFF);
+
+  uint8_t r = cmd(0, 0, 0x95);
+  Serial.print("CMD0 -> 0x"); Serial.println(r, HEX);
+
+  r = cmd(8, 0x000001AA, 0x87);
+  Serial.print("CMD8 -> 0x"); Serial.println(r, HEX);
+
+  int polls = 0;
+  do {
+    cmd(55, 0, 0xFF);
+    r = cmd(41, 0x40000000, 0xFF);
+    polls++;
+    delay(5);
+  } while ((r & 0x01) && polls < 20);
+
+  Serial.print("ready after "); Serial.print(polls); Serial.println(" polls");
+  if (r == 0x00) { Serial.println("card initialised"); digitalWrite(LED, HIGH); }
+}
+
+void loop() {}
+`;
+
+const SHIFT_REGISTER_CODE = `// Showcase - 74HC595: eight outputs from three pins
+//
+// The shift register has no chip select. It consumes every clock edge it sees,
+// which is why the outputs only change when RCLK rises - the latch is what
+// makes the pattern appear all at once instead of sliding across the LEDs.
+// Bits are shifted by hand here so the three signals are visible as three
+// signals.
+
+const int SER = 11, SRCLK = 13, RCLK = 8;
+
+void shiftByte(uint8_t value) {
+  for (int bit = 7; bit >= 0; bit--) {
+    digitalWrite(SER, (value >> bit) & 1);
+    digitalWrite(SRCLK, HIGH);
+    digitalWrite(SRCLK, LOW);
+  }
+  digitalWrite(RCLK, HIGH);   // latch: outputs change here, and only here
+  digitalWrite(RCLK, LOW);
+}
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(SER, OUTPUT); pinMode(SRCLK, OUTPUT); pinMode(RCLK, OUTPUT);
+  Serial.println("595 ready");
+}
+
+void loop() {
+  for (int i = 0; i < 8; i++) {
+    shiftByte(1 << i);
+    Serial.print("pattern 0x"); Serial.println(1 << i, HEX);
+    delay(120);
+  }
+}
+`;
+
 export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   {
     id: 'tpl.blink',
+    kind: 'starter',
+    board: 'Arduino Uno',
     name: 'Arduino Blink',
     description: 'Uno D13 → 220 Ω resistor → LED → GND, with the classic Blink sketch. Fully simulated.',
     tags: ['simulated', 'starter'],
@@ -147,6 +340,8 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
   },
   {
     id: 'tpl.button-led',
+    kind: 'starter',
+    board: 'Arduino Uno',
     name: 'Button-controlled LED',
     description: 'Push button on D2 (INPUT_PULLUP) turns the D13 LED on. Fully simulated.',
     tags: ['simulated', 'input'],
@@ -197,6 +392,8 @@ void loop() {
   },
   {
     id: 'tpl.potentiometer',
+    kind: 'starter',
+    board: 'Arduino Uno',
     name: 'Potentiometer reading',
     description: 'Potentiometer on A0 read via the real emulated ADC, reported over serial. Fully simulated.',
     tags: ['simulated', 'analog'],
@@ -238,6 +435,8 @@ void loop() {
   },
   {
     id: 'tpl.rgb',
+    kind: 'starter',
+    board: 'Arduino Uno',
     name: 'RGB LED fade',
     description: 'PWM color mixing on an RGB LED using pins 9/10/11. Fully simulated (duty-cycle brightness).',
     tags: ['simulated', 'pwm'],
@@ -287,6 +486,8 @@ void loop() {
   },
   {
     id: 'tpl.servo-sweep',
+    kind: 'starter',
+    board: 'Arduino Uno',
     name: 'Servo sweep',
     description: 'Servo on D9 swept by 50 Hz pulses generated in firmware. The horn angle follows the measured pulse width.',
     tags: ['simulated', 'motors'],
@@ -334,6 +535,8 @@ void loop() {
   },
   {
     id: 'tpl.ultrasonic',
+    kind: 'starter',
+    board: 'Arduino Uno',
     name: 'Ultrasonic distance indicator',
     description: 'HC-SR04 distance turns an LED on when close. Echo timing is generated by the simulated sensor protocol.',
     tags: ['simulated', 'sensors'],
@@ -395,6 +598,8 @@ void loop() {
   },
   {
     id: 'tpl.seven-segment',
+    kind: 'starter',
+    board: 'Arduino Uno',
     name: 'Seven-segment counter',
     description: 'Counts 0-9 on a common-cathode digit driven from D2-D9. Segments light from real GPIO state.',
     tags: ['simulated', 'displays'],
@@ -452,6 +657,8 @@ void loop() {
   },
   {
     id: 'tpl.serial-demo',
+    kind: 'starter',
+    board: 'Arduino Uno',
     name: 'Serial monitor demo',
     description: 'Prints counters and echoes serial input — exercises the emulated UART both ways.',
     tags: ['simulated', 'serial'],
@@ -487,6 +694,165 @@ void loop() {
           [
             { kind: 'serial-contains', text: 'serial demo ready', withinMs: 1000 },
             { kind: 'serial-contains', text: 'uptime', withinMs: 2500 },
+          ],
+          { timeoutMs: 4000 },
+        ),
+      ];
+      return p;
+    },
+  },
+  {
+    id: 'show.i2c-sensor-bus',
+    name: 'I2C sensor bus: BMP280 + EEPROM',
+    description:
+      'A pressure/temperature sensor and an EEPROM sharing one I2C bus, driven with raw Wire calls. ' +
+      'The sensor is a register-level model with the datasheet\'s own calibration constants, so the ' +
+      'compensation in the sketch is the datasheet\'s and the temperature it prints is a real one.',
+    tags: ['simulated', 'i2c', 'sensors'],
+    kind: 'showcase',
+    board: 'Arduino Uno',
+    teaches: 'Two devices on one bus, addressed separately, with no library in between.',
+    build: () => {
+      const p = emptyProject('I2C Sensor Bus');
+      const uno = inst('board.arduino-uno', 120, 170);
+      const bmp = inst('comp.bmp280', 520, 70);
+      const eeprom = inst('comp.eeprom-24c', 520, 230);
+      const resistor = inst('comp.resistor', 430, 330, { resistance: 220 });
+      const led = inst('comp.led', 560, 360, { color: 'red' });
+      p.boardInstances = [uno];
+      p.componentInstances = [bmp, eeprom, resistor, led];
+      p.connections = [
+        // The BMP280 is a 3.3 V part. The validator catches 5 V here, and it is
+        // right to: on real hardware that is how the sensor dies.
+        wire(bmp, 'vcc', uno, '3V3', '#e03131'),
+        wire(bmp, 'gnd', uno, 'GND_PWR1', '#212529'),
+        wire(bmp, 'sda', uno, 'A4', '#2f9e44'),
+        wire(bmp, 'scl', uno, 'A5', '#1971c2'),
+        wire(eeprom, 'vcc', uno, '5V', '#e03131'),
+        wire(eeprom, 'gnd', uno, 'GND_PWR2', '#212529'),
+        wire(eeprom, 'sda', uno, 'A4', '#2f9e44'),
+        wire(eeprom, 'scl', uno, 'A5', '#1971c2'),
+        // Address straps: all low puts the EEPROM at 0x50.
+        wire(eeprom, 'a0', uno, 'GND_PWR2', '#212529'),
+        wire(eeprom, 'a1', uno, 'GND_PWR2', '#212529'),
+        wire(eeprom, 'a2', uno, 'GND_PWR2', '#212529'),
+        wire(eeprom, 'wp', uno, 'GND_PWR2', '#212529'),
+        wire(uno, 'D13', resistor, 'p1', '#e8590c'),
+        wire(resistor, 'p2', led, 'anode', '#e8590c'),
+        wire(led, 'cathode', uno, 'GND_TOP', '#212529'),
+      ];
+      p.codeFiles = [code('sketch.ino', I2C_SENSOR_BUS_CODE)];
+      p.tests = [
+        bench(
+          'The sensor answers and the log reads back',
+          'The chip id proves the right device replied; the temperature proves the calibration was read and the compensation ran; the readback proves a second device on the same bus kept what it was given.',
+          [
+            { kind: 'serial-contains', text: 'chip id 0x58', withinMs: 1200 },
+            { kind: 'serial-contains', text: 'temperature 25', withinMs: 2500 },
+            { kind: 'serial-contains', text: 'logged 25', withinMs: 3000 },
+            { kind: 'pin-becomes-high', pin: 13, withinMs: 3000 },
+          ],
+          { timeoutMs: 5000 },
+        ),
+      ];
+      return p;
+    },
+  },
+  {
+    id: 'show.spi-sd-card',
+    name: 'SPI storage: an SD card\'s own handshake',
+    description:
+      'The initialisation sequence every SD library performs, written out with raw SPI so you can watch it: ' +
+      'CMD0, CMD8, then CMD55/ACMD41 polled until the card stops reporting busy. The card model answers at ' +
+      'the command layer and really does report busy for the first few polls.',
+    tags: ['simulated', 'spi', 'storage'],
+    kind: 'showcase',
+    board: 'Arduino Uno',
+    teaches: 'What an SD library is doing before it ever opens a file.',
+    build: () => {
+      const p = emptyProject('SPI SD Card');
+      const uno = inst('board.arduino-uno', 120, 170);
+      const sd = inst('comp.sd-card', 520, 110);
+      const resistor = inst('comp.resistor', 440, 320, { resistance: 220 });
+      const led = inst('comp.led', 560, 350, { color: 'green' });
+      p.boardInstances = [uno];
+      p.componentInstances = [sd, resistor, led];
+      p.connections = [
+        wire(sd, 'vcc', uno, '5V', '#e03131'),
+        wire(sd, 'gnd', uno, 'GND_PWR1', '#212529'),
+        wire(sd, 'sck', uno, 'D13', '#1971c2'),
+        wire(sd, 'mosi', uno, 'D11', '#7048e8'),
+        wire(sd, 'miso', uno, 'D12', '#2f9e44'),
+        wire(sd, 'cs', uno, 'D10', '#f08c00'),
+        wire(uno, 'D7', resistor, 'p1', '#e8590c'),
+        wire(resistor, 'p2', led, 'anode', '#e8590c'),
+        wire(led, 'cathode', uno, 'GND_TOP', '#212529'),
+      ];
+      p.codeFiles = [code('sketch.ino', SPI_SD_CARD_CODE)];
+      p.tests = [
+        bench(
+          'The card completes its handshake',
+          'CMD0 must return the idle bit, and the ACMD41 loop must run more than once before the card reports ready - a card that answered immediately would mean the model was not modelling anything.',
+          [
+            { kind: 'serial-contains', text: 'CMD0 -> 0x1', withinMs: 1500 },
+            { kind: 'serial-contains', text: 'card initialised', withinMs: 3000 },
+            { kind: 'pin-becomes-high', pin: 7, withinMs: 3000 },
+          ],
+          { timeoutMs: 5000 },
+        ),
+      ];
+      return p;
+    },
+  },
+  {
+    id: 'show.shift-register',
+    name: '74HC595: eight outputs from three pins',
+    description:
+      'A shift register driving eight LEDs from three signals, bit-banged so the data, clock and latch are ' +
+      'visible as three separate things. The outputs change only when the latch rises, which is the whole ' +
+      'reason the part has one.',
+    tags: ['simulated', 'logic', 'outputs'],
+    kind: 'showcase',
+    board: 'Arduino Uno',
+    teaches: 'Why a shift register needs a latch, by watching what happens on it.',
+    build: () => {
+      const p = emptyProject('Shift Register');
+      const uno = inst('board.arduino-uno', 120, 200);
+      const reg = inst('comp.hc595', 500, 120);
+      const leds = Array.from({ length: 8 }, (_, i) => inst('comp.led', 760, 40 + i * 52, { color: 'amber' }));
+      const resistors = Array.from({ length: 8 }, (_, i) => inst('comp.resistor', 660, 40 + i * 52, { resistance: 330 }));
+      p.boardInstances = [uno];
+      p.componentInstances = [reg, ...resistors, ...leds];
+      p.connections = [
+        wire(reg, 'vcc', uno, '5V', '#e03131'),
+        wire(reg, 'gnd', uno, 'GND_PWR2', '#212529'),
+        // OE is active-low and SRCLR is active-high: tied so the outputs are
+        // always enabled and the shift register is never cleared.
+        wire(reg, 'oe', uno, 'GND_PWR1', '#212529'),
+        wire(reg, 'srclr', uno, '5V', '#e03131'),
+        // SER and SRCLK sit on the Uno's MOSI and SCK even though this sketch
+        // bit-bangs them. They are the pins hardware SPI would use, the
+        // validator checks them as such, and a reader who swaps the loop for
+        // SPI.transfer() should not have to rewire anything.
+        wire(uno, 'D11', reg, 'ser', '#7048e8'),
+        wire(uno, 'D13', reg, 'srclk', '#1971c2'),
+        wire(uno, 'D8', reg, 'rclk', '#f08c00'),
+        ...Array.from({ length: 8 }, (_, i) => [
+          wire(reg, `q${i}`, resistors[i], 'p1', '#e8590c'),
+          wire(resistors[i], 'p2', leds[i], 'anode', '#e8590c'),
+          wire(leds[i], 'cathode', uno, 'GND_TOP', '#212529'),
+        ]).flat(),
+      ];
+      p.codeFiles = [code('sketch.ino', SHIFT_REGISTER_CODE)];
+      p.tests = [
+        bench(
+          'The pattern walks across the outputs',
+          'Data and clock must both be switching, and the latch too - a latch that never rises means the outputs never change however much is shifted in.',
+          [
+            { kind: 'serial-contains', text: '595 ready', withinMs: 1200 },
+            { kind: 'pin-toggles', pin: 11, minToggles: 8, withinMs: 2000 },
+            { kind: 'pin-toggles', pin: 13, minToggles: 16, withinMs: 2000 },
+            { kind: 'pin-toggles', pin: 8, minToggles: 4, withinMs: 2000 },
           ],
           { timeoutMs: 4000 },
         ),

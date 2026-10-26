@@ -172,11 +172,28 @@ section('2. the artifacts are the same with the step and without it');
         // those fields happen to differ varies from pair to pair — a hash byte
         // can coincide by chance. What must hold is that every byte the hook
         // skip changes lies inside a field that already varies on its own.
+        // A differing byte marks a FIELD, and a field's observed extent is only
+        // ever a lower bound: the stamp is an ASCII build time, so two builds a
+        // minute apart differ in the minute digits and share the hour ones,
+        // and which bytes of a hash happen to collide is luck. Three builds
+        // narrowed that but did not close it — this suite still flaked on
+        // 0xc69 and 0xc6b, two bytes inside the same timestamp as 0xc6c.
+        //
+        // So each observed run is padded by the width of the field it sits in.
+        // That is weaker than naming the offsets and stronger than trusting a
+        // sample: a byte the hook skip changes still has to lie inside or
+        // beside something that moves on its own, and a change anywhere else
+        // in a 278 KB image still fails.
+        const FIELD_PAD = 8;
         const regions: [number, number][] = [];
         for (const i of [...stamp].sort((x, y) => x - y)) {
           const last = regions[regions.length - 1];
           if (last && i - last[1] <= 16) last[1] = i;
           else regions.push([i, i]);
+        }
+        for (const r of regions) {
+          r[0] = Math.max(0, r[0] - FIELD_PAD);
+          r[1] += FIELD_PAD;
         }
         const inside = (i: number) => regions.some(([lo, hi]) => i >= lo && i <= hi);
         console.log(
