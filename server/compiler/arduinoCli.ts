@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { CLI_CACHE_ROOT } from './buildCache.js';
+import { dataDirFor } from './coreDataDirs.js';
 
 /**
  * Environment every arduino-cli call runs with.
@@ -171,6 +172,27 @@ export interface CliBuildOutput {
  */
 const SKIP_MERGED_IMAGE = ['--build-property', 'recipe.hooks.objcopy.postobjcopy.3.pattern=/usr/bin/env true'];
 
+/**
+ * The second-stage bootloader each ESP32 target's builds produce, by FQBN.
+ *
+ * Every ESP32 build starts by running esptool to turn the core's prebuilt
+ * bootloader ELF into a flash image — about 250 ms, for a result that depends
+ * only on the target and the core, never on the sketch, and is the same bytes
+ * every time (tests/compiler.espArtifacts.mts compares it across builds). The
+ * core's own prebuild recipe checks for a `bootloader.bin` in the sketch
+ * folder first and copies it instead of running esptool; that is the hook a
+ * user would use for a custom bootloader, and here it is handed the very image
+ * esptool produced on this target's first build in this process.
+ *
+ * It can only ever hold the stock image: a request's files are restricted to
+ * source extensions (fileService), so no build here has a user-supplied
+ * bootloader to learn from, and the first build of each target — the warm-up —
+ * always runs esptool. tests/compiler.espBootloader.mts asserts the artifacts
+ * are byte-identical either way.
+ */
+const stockBootloaders = new Map<string, Buffer>();
+const BOOTLOADER_FILE = 'bootloader.bin';
+
 export async function cliCompile(
   sketchDir: string,
   outputDir: string,
@@ -197,12 +219,19 @@ export async function cliCompile(
   const args = syntaxOnly
     ? ['compile', ...jobs, ...skip, '--fqbn', fqbn, '--warnings', 'default', sketchDir]
     : ['compile', ...jobs, ...skip, '--fqbn', fqbn, '--warnings', 'default', '--output-dir', outputDir, sketchDir];
+  // A data directory holding only this core's package, so arduino-cli does not
+  // parse every other installed platform before compiling — see coreDataDirs.
+  const dataDir = await dataDirFor(fqbn);
+  const isEsp = arch === 'esp32c3' || arch === 'esp32c6';
+  const stockBootloader = isEsp && !syntaxOnly ? stockBootloaders.get(fqbn) : undefined;
+  if (stockBootloader) await writeFile(path.join(sketchDir, BOOTLOADER_FILE), stockBootloader);
+  const env = dataDir ? { ...CLI_ENV, ARDUINO_DIRECTORIES_DATA: dataDir } : CLI_ENV;
   try {
     const { stdout, stderr } = await execFileAsync('arduino-cli', args, {
       timeout: CLI_TIMEOUT_MS,
       maxBuffer: OUTPUT_LIMIT_BYTES,
       killSignal: 'SIGKILL',
-      env: CLI_ENV,
+      env,
     });
     let hex: string | undefined;
     let binaryBase64: string | undefined;
@@ -247,7 +276,10 @@ export async function cliCompile(
           const partitions = files.find((f) => f.endsWith('.partitions.bin'));
           binaryRegions = [];
           if (bootloader) {
-            binaryRegions.push({ offset: 0x0, data: (await readFile(path.join(outputDir, bootloader))).toString('base64') });
+            const image = await readFile(path.join(outputDir, bootloader));
+            // Learnt only from a build where esptool made it.
+            if (!stockBootloader && image.length > 0) stockBootloaders.set(fqbn, image);
+            binaryRegions.push({ offset: 0x0, data: image.toString('base64') });
           }
           if (partitions) {
             binaryRegions.push({ offset: 0x8000, data: (await readFile(path.join(outputDir, partitions))).toString('base64') });
@@ -259,6 +291,7 @@ export async function cliCompile(
       }
     }
     const artifactMs = Date.now() - artifactStart;
+    if (stockBootloader) await rm(path.join(sketchDir, BOOTLOADER_FILE), { force: true });
     const flashMatch = /Sketch uses (\d+) bytes/.exec(stdout);
     const ramMatch = /Global variables use (\d+) bytes/.exec(stdout);
     return {
@@ -274,6 +307,7 @@ export async function cliCompile(
       ramBytes: ramMatch ? Number(ramMatch[1]) : undefined,
     };
   } catch (err: unknown) {
+    if (stockBootloader) await rm(path.join(sketchDir, BOOTLOADER_FILE), { force: true });
     const e = err as { code?: number; stdout?: string; stderr?: string; killed?: boolean };
     return {
       code: typeof e.code === 'number' ? e.code : 1,
@@ -284,3 +318,8 @@ export async function cliCompile(
 }
 
 
+
+/** For tests: forget the learnt bootloaders, so the next build runs esptool. */
+export function forgetStockBootloaders(): void {
+  stockBootloaders.clear();
+}

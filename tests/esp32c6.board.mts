@@ -151,7 +151,15 @@ if (!board) {
   const simulated = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'simulated').map((b) => b.id);
   check(simulated.includes('board.esp32-c6-devkitc-1'), 'the C6 is among the Simulated boards');
   check(simulated.includes('board.esp32-c3'), 'and has not displaced the C3');
-  check(simulated.length === 8, `and the Simulated set has grown by exactly one, to ${simulated.length}`);
+  // What this guards is that adding the C6 displaced nothing — not a count of
+  // the catalogue, which grows whenever another board on an executed chip is
+  // added (tests/boards.profile.mts owns the full list).
+  const BEFORE_THE_C6 = [
+    'board.arduino-uno', 'board.arduino-nano', 'board.arduino-mega2560', 'board.arduino-leonardo',
+    'board.raspberry-pi-pico', 'board.raspberry-pi-pico-w', 'board.esp32-c3',
+  ];
+  const displaced = BEFORE_THE_C6.filter((id) => !simulated.includes(id));
+  check(displaced.length === 0, `and every board simulated before it still is${displaced.length ? ` (lost: ${displaced.join(', ')})` : ''}`);
 }
 
 console.log(failures === 0 ? '\nESP32-C6 board checks passed.' : `\n${failures} check(s) FAILED`);
