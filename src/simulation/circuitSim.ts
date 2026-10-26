@@ -50,6 +50,7 @@ import {
 } from './devices/portExpanders';
 import { Sht31Device, SHT31_ADDRESSES } from './devices/sht31';
 import { ANALOG_SENSORS, GPIO_SENSORS } from './devices/analogSensors';
+import { explicitQuantity, gravityFor, inputControlsFor, quantityOf, quantityValue } from './inputControls';
 import { contactsOf } from './devices/contactRegistry';
 import { LOGIC_PARTS } from './devices/logicParts';
 import { Hd44780ParallelDevice, LCD_DATA_PINS_8 } from './devices/lcdParallel';
@@ -2761,6 +2762,8 @@ export class CircuitBinding {
 
   /** When each holding sensor last saw its trigger, in world milliseconds. */
   private gpioSensorTriggeredAt = new Map<string, number>();
+  /** Whether each digital sensor's output is asserted this update. */
+  private gpioSensorAsserted = new Map<string, boolean>();
 
   /**
    * Whether a digital sensor's output is asserted right now.
@@ -3117,6 +3120,28 @@ export class CircuitBinding {
       }
     }
 
+    // Digital sensors drive their one output line here, with the other line
+    // drivers, so the level is on the net before board inputs are resolved.
+    // It used to be driven in the per-part pass further down, which runs after
+    // the board has already read its pins — the net carried the right voltage
+    // and the firmware's digitalRead never saw it, so a PIR could not fire.
+    this.gpioSensorAsserted.clear();
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      const spec = def ? GPIO_SENSORS[def.id] : undefined;
+      if (!spec) continue;
+      const raw = (controls.sensorValues.get(inst.id) ?? 0) > 0.5 || inst.properties.triggered === true;
+      const held = this.gpioSensorHold(inst.id, raw, spec.holdMs, controls);
+      this.gpioSensorAsserted.set(inst.id, held);
+      const supply = this.moduleSupply(inst.id, levels);
+      const outNet = this.netOfInstancePin(inst.id, spec.outputPin);
+      if (outNet && supply > 0) {
+        const asserted = spec.activeLow ? !held : held;
+        setLevel(outNet, asserted ? supply : 0, null, 0);
+        drivenNets.add(outNet);
+      }
+    }
+
     // External ADCs read the wire.
     //
     // Done here, from the settled levels, so the number firmware gets back over
@@ -3389,6 +3414,9 @@ export class CircuitBinding {
     // Per-component behavior + visuals.
     const visuals = new Map<string, ComponentVisualState>();
     const duty = runner ? runner.snapshot() : null;
+    // Every user-set environment value is read through the input-control
+    // registry, so the inspector and the simulation agree on keys and defaults.
+    const sensorRead = (key: string) => controls.sensorValues.get(key);
 
     for (const inst of this.graph.instances) {
       const def = this.graph.definitions.get(inst.id);
@@ -3645,7 +3673,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.tmp36': {
-          const temp = controls.sensorValues.get(inst.id) ?? 25;
+          const temp = quantityValue(sensorRead, inst, quantityOf('comp.tmp36'));
           visuals.set(inst.id, { value: temp });
           if (runner) {
             const outNet = net('vout');
@@ -3660,7 +3688,11 @@ export class CircuitBinding {
         case 'sim.analog-sensor': {
           const spec = ANALOG_SENSORS[def.id];
           if (!spec) break;
-          const value = controls.sensorValues.get(inst.id) ?? Number(inst.properties[spec.quantity.key] ?? spec.quantity.default);
+          const spec2 = inputControlsFor(def.id);
+          const value =
+            spec2?.kind === 'quantities'
+              ? quantityValue(sensorRead, inst, spec2.quantities[0])
+              : spec.quantity.default;
           visuals.set(inst.id, { value });
           const supply = this.moduleSupply(inst.id, levels);
           if (runner && supply > 0) {
@@ -3677,16 +3709,9 @@ export class CircuitBinding {
         case 'sim.gpio-sensor': {
           const spec = GPIO_SENSORS[def.id];
           if (!spec) break;
-          const raw = (controls.sensorValues.get(inst.id) ?? 0) > 0.5 || inst.properties.triggered === true;
-          const held = this.gpioSensorHold(inst.id, raw, spec.holdMs, controls);
+          // Driven earlier, with the other line drivers; this only shows it.
+          const held = this.gpioSensorAsserted.get(inst.id) === true;
           visuals.set(inst.id, { value: held ? 1 : 0, ledOn: held });
-          const supply = this.moduleSupply(inst.id, levels);
-          const outNet = net(spec.outputPin);
-          if (outNet && supply > 0) {
-            const asserted = spec.activeLow ? !held : held;
-            setLevel(outNet, asserted ? supply : 0, null, 0);
-            drivenNets.add(outNet);
-          }
           break;
         }
         case 'sim.expander': {
@@ -3730,9 +3755,9 @@ export class CircuitBinding {
         case 'sim.bme280': {
           const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Bme280Device) {
-            device.temperatureC = controls.sensorValues.get(`${inst.id}#temperature`) ?? Number(inst.properties.temperature ?? 22);
-            device.pressureHpa = controls.sensorValues.get(`${inst.id}#pressure`) ?? Number(inst.properties.pressure ?? 1013);
-            device.humidityPct = controls.sensorValues.get(`${inst.id}#humidity`) ?? Number(inst.properties.humidity ?? 45);
+            device.temperatureC = quantityValue(sensorRead, inst, quantityOf('comp.bme280', 'temperature'));
+            device.pressureHpa = quantityValue(sensorRead, inst, quantityOf('comp.bme280', 'pressure'));
+            device.humidityPct = quantityValue(sensorRead, inst, quantityOf('comp.bme280', 'humidity'));
             visuals.set(inst.id, {
               readout: device.isMeasuring
                 ? [`${device.temperatureC.toFixed(1)} C  ${device.humidityPct.toFixed(0)}%`, `${device.pressureHpa.toFixed(0)} hPa`]
@@ -3746,8 +3771,8 @@ export class CircuitBinding {
         case 'sim.sht31': {
           const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Sht31Device) {
-            device.temperatureC = controls.sensorValues.get(`${inst.id}#temperature`) ?? Number(inst.properties.temperature ?? 22);
-            device.humidityPct = controls.sensorValues.get(`${inst.id}#humidity`) ?? Number(inst.properties.humidity ?? 45);
+            device.temperatureC = quantityValue(sensorRead, inst, quantityOf('comp.sht31', 'temperature'));
+            device.humidityPct = quantityValue(sensorRead, inst, quantityOf('comp.sht31', 'humidity'));
             visuals.set(inst.id, {
               readout: [`${device.temperatureC.toFixed(1)} C`, `${device.humidityPct.toFixed(0)} %RH`],
             });
@@ -3757,7 +3782,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.ldr': {
-          const light = controls.sensorValues.get(inst.id) ?? 0.5;
+          const light = quantityValue(sensorRead, inst, quantityOf('comp.ldr'));
           visuals.set(inst.id, { value: light });
           if (runner) {
             for (const pinId of ['p1', 'p2']) {
@@ -3772,7 +3797,7 @@ export class CircuitBinding {
           break;
         }
         case 'sim.ultrasonic': {
-          const cm = controls.sensorValues.get(inst.id) ?? 100;
+          const cm = quantityValue(sensorRead, inst, quantityOf('comp.ultrasonic'));
           inst.simulationState.distanceCm = cm;
           visuals.set(inst.id, { value: cm });
           break;
@@ -3893,6 +3918,12 @@ export class CircuitBinding {
         case 'sim.bmp280': {
           const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Bmp280Device) {
+            // Only what someone actually set: a device whose state was put
+            // there some other way keeps it rather than being reset each frame.
+            const t = explicitQuantity(sensorRead, inst, quantityOf('comp.bmp280', 'temperature'));
+            const p = explicitQuantity(sensorRead, inst, quantityOf('comp.bmp280', 'pressure'));
+            if (t !== undefined) device.temperatureC = t;
+            if (p !== undefined) device.pressureHpa = p;
             visuals.set(inst.id, {
               readout: device.isMeasuring
                 ? [`${device.temperatureC.toFixed(1)} C`, `${device.pressureHpa.toFixed(0)} hPa`]
@@ -3907,6 +3938,18 @@ export class CircuitBinding {
         case 'sim.mpu6050': {
           const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Mpu6050Device) {
+            const read = (channel: string) => explicitQuantity(sensorRead, inst, quantityOf('comp.mpu6050', channel));
+            const pitch = read('pitch');
+            const roll = read('roll');
+            if (pitch !== undefined || roll !== undefined) {
+              device.motion.accelG = gravityFor(pitch ?? 0, roll ?? 0);
+            }
+            for (const axis of ['x', 'y', 'z'] as const) {
+              const rate = read(`g${axis}`);
+              if (rate !== undefined) device.motion.gyroDps[axis] = rate;
+            }
+            const die = read('temperature');
+            if (die !== undefined) device.motion.temperatureC = die;
             const { accelG, gyroDps } = device.motion;
             visuals.set(inst.id, {
               readout: device.isAwake
@@ -3993,6 +4036,8 @@ export class CircuitBinding {
         case 'sim.ds3231': {
           const device = this.i2cDeviceFor(inst.id);
           if (device instanceof Ds3231Device) {
+            const die = explicitQuantity(sensorRead, inst, quantityOf('comp.ds3231', 'temperature'));
+            if (die !== undefined) device.temperatureC = die;
             const t = device.time;
             const pad = (n: number) => String(n).padStart(2, '0');
             visuals.set(inst.id, {

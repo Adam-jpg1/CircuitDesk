@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useEditorStore } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
 import { resolveDefinition, resolvePin } from '../project/partsRegistry';
@@ -6,6 +6,13 @@ import { analyzeCodePins } from '../compiler/codeAnalysis';
 import { arduinoPinNumber } from '../boards/pinMaps';
 import { describeSupport } from '../project/support';
 import { SupportBadge } from '../ui/primitives';
+import {
+  clampQuantity,
+  controlKey,
+  inputControlsFor,
+  quantityValue,
+  type InputQuantity,
+} from '../simulation/inputControls';
 import { revealCodeLocation } from './CodePanel';
 import type { ComponentInstance, Connection, PartDefinition } from '../types';
 
@@ -229,11 +236,57 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
     return null;
   }
   const disabled = simStatus === 'stopped' || simStatus === 'error';
+  const inputs = inputControlsFor(def.id);
 
   return (
     <div className="inspector-section">
       <h4>Simulation controls</h4>
-      {disabled && <div style={{ color: 'var(--text-2)', fontSize: 11.5, marginBottom: 6 }}>Start the simulation to interact.</div>}
+      {disabled && (
+        <div style={{ color: 'var(--text-2)', fontSize: 11.5, marginBottom: 6 }}>
+          {inputs ? 'Values set now apply when the simulation starts.' : 'Start the simulation to interact.'}
+        </div>
+      )}
+      {inputs?.kind === 'quantities' && (
+        <div style={{ display: 'grid', gap: 8, marginBottom: 6 }}>
+          {inputs.quantities.map((q) => {
+            const key = controlKey(inst.id, q);
+            const values = q.store === 'pot' ? potPositions : sensorValues;
+            const value = quantityValue((k) => values[k], inst, q);
+            const write = (v: number) =>
+              q.store === 'pot' ? sim.getState().setPot(key, v) : sim.getState().setSensor(key, v);
+            return <QuantityControl key={key} id={key} q={q} value={value} onChange={write} />;
+          })}
+          {inputs.note && <div style={{ fontSize: 11, color: 'var(--text-2)' }}>{inputs.note}</div>}
+        </div>
+      )}
+      {inputs?.kind === 'trigger' && (
+        <div style={{ display: 'grid', gap: 6, marginBottom: 6 }}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={(sensorValues[inst.id] ?? 0) > 0.5}
+              onChange={(e) => sim.getState().setSensor(inst.id, e.target.checked ? 1 : 0)}
+            />
+            {inputs.label}
+            {visuals?.ledOn ? <span style={{ color: 'var(--accent)' }}>● output active</span> : null}
+          </label>
+          {inputs.latching && (
+            <button
+              className="btn sm"
+              disabled={disabled}
+              onClick={() => {
+                // One event: asserted for a moment, then released. The part's
+                // own hold time keeps its output up afterwards, as on the bench.
+                sim.getState().setSensor(inst.id, 1);
+                setTimeout(() => sim.getState().setSensor(inst.id, 0), 150);
+              }}
+            >
+              Trigger once
+            </button>
+          )}
+          {inputs.note && <div style={{ fontSize: 11, color: 'var(--text-2)' }}>{inputs.note}</div>}
+        </div>
+      )}
       {adapter === 'sim.push-button' && (
         <button
           className="btn"
@@ -256,17 +309,6 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
           Switch on (COM→NO)
         </label>
       )}
-      {adapter === 'sim.potentiometer' && (
-        <div>
-          <input
-            type="range" min="0" max="1" step="0.01" disabled={disabled}
-            value={potPositions[inst.id] ?? 0.5}
-            onChange={(e) => sim.getState().setPot(inst.id, Number(e.target.value))}
-            style={{ width: '100%' }}
-          />
-          <div style={{ fontSize: 11, color: 'var(--text-2)' }}>Wiper: {Math.round((potPositions[inst.id] ?? 0.5) * 100)}%</div>
-        </div>
-      )}
       {adapter === 'sim.keypad' && (
         <div>
           <button className="btn" onClick={() => useEditorStore.getState().setKeyPanel(inst.id)}>
@@ -282,69 +324,16 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
         // Two wipers, because that is what the module is: the sliders set the
         // same positions the axes impose on VRx and VRy, so what the stick
         // shows and what the ADC reads are one number each.
-        <div>
-          {(['x', 'y'] as const).map((axis) => (
-            <div key={axis} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: 11, color: 'var(--text-2)', width: 12 }}>{axis.toUpperCase()}</span>
-              <input
-                type="range" min="0" max="1" step="0.01" disabled={disabled}
-                value={potPositions[`${inst.id}#${axis}`] ?? 0.5}
-                onChange={(e) => sim.getState().setPot(`${inst.id}#${axis}`, Number(e.target.value))}
-                style={{ flex: 1 }}
-              />
-              <span style={{ fontSize: 11, color: 'var(--text-1)', fontFamily: 'var(--font-mono)', width: 34 }}>
-                {(potPositions[`${inst.id}#${axis}`] ?? 0.5).toFixed(2)}
-              </span>
-            </div>
-          ))}
-          <button
-            className="btn sm"
-            disabled={disabled}
-            style={{ marginTop: 4 }}
-            onClick={() => {
-              sim.getState().setPot(`${inst.id}#x`, 0.5);
-              sim.getState().setPot(`${inst.id}#y`, 0.5);
-            }}
-          >
-            Centre
-          </button>
-          <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 4 }}>
-            The wipers are across whatever reaches VCC — a stick on 3.3 V reads 3.3 V at full scale.
-          </div>
-        </div>
-      )}
-      {adapter === 'sim.ultrasonic' && (
-        <div>
-          <input
-            type="range" min="2" max="400" step="1" disabled={disabled}
-            value={sensorValues[inst.id] ?? 100}
-            onChange={(e) => sim.getState().setSensor(inst.id, Number(e.target.value))}
-            style={{ width: '100%' }}
-          />
-          <div style={{ fontSize: 11, color: 'var(--text-2)' }}>Distance: {sensorValues[inst.id] ?? 100} cm</div>
-        </div>
-      )}
-      {adapter === 'sim.tmp36' && (
-        <div>
-          <input
-            type="range" min="-40" max="125" step="1" disabled={disabled}
-            value={sensorValues[inst.id] ?? 25}
-            onChange={(e) => sim.getState().setSensor(inst.id, Number(e.target.value))}
-            style={{ width: '100%' }}
-          />
-          <div style={{ fontSize: 11, color: 'var(--text-2)' }}>Temperature: {sensorValues[inst.id] ?? 25} °C</div>
-        </div>
-      )}
-      {adapter === 'sim.ldr' && (
-        <div>
-          <input
-            type="range" min="0" max="1" step="0.01" disabled={disabled}
-            value={sensorValues[inst.id] ?? 0.5}
-            onChange={(e) => sim.getState().setSensor(inst.id, Number(e.target.value))}
-            style={{ width: '100%' }}
-          />
-          <div style={{ fontSize: 11, color: 'var(--text-2)' }}>Light level: {Math.round((sensorValues[inst.id] ?? 0.5) * 100)}%</div>
-        </div>
+        <button
+          className="btn sm"
+          style={{ marginBottom: 6 }}
+          onClick={() => {
+            sim.getState().setPot(`${inst.id}#x`, 0.5);
+            sim.getState().setPot(`${inst.id}#y`, 0.5);
+          }}
+        >
+          Centre
+        </button>
       )}
       {adapter === 'sim.servo' && (
         <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
@@ -398,6 +387,84 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
           Lit segments: <b>{Object.entries(visuals?.segments ?? {}).filter(([, v]) => v).map(([k]) => k.toUpperCase()).join(' ') || 'none'}</b>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * One adjustable quantity: a slider for dragging and a number box for typing an
+ * exact value. Both write the same stored value; the box accepts display units
+ * (a light level of 40 means 40 %) and clamps to the part's real range when it
+ * is committed with Enter or by leaving the field.
+ */
+function QuantityControl({
+  id,
+  q,
+  value,
+  onChange,
+}: {
+  id: string;
+  q: InputQuantity;
+  value: number;
+  onChange: (stored: number) => void;
+}) {
+  const scale = q.scale ?? 1;
+  const shown = (value * scale).toFixed(q.precision);
+  const [draft, setDraft] = useState(shown);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!editing) setDraft(shown);
+  }, [shown, editing]);
+
+  const commit = () => {
+    setEditing(false);
+    const typed = Number(draft.trim().replace(',', '.'));
+    if (draft.trim() === '' || !Number.isFinite(typed)) {
+      setDraft(shown);
+      return;
+    }
+    const stored = clampQuantity(q, typed / scale);
+    onChange(stored);
+    setDraft((stored * scale).toFixed(q.precision));
+  };
+
+  return (
+    <div data-input-control={id}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5 }}>
+        <label htmlFor={`qc-${id}`} style={{ flex: 1, color: 'var(--text-1)' }}>
+          {q.label}
+        </label>
+        <input
+          id={`qc-${id}`}
+          type="text"
+          inputMode="decimal"
+          aria-label={`${q.label} (${q.unit})`}
+          value={draft}
+          onFocus={() => setEditing(true)}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            if (e.key === 'Escape') {
+              setDraft(shown);
+              setEditing(false);
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          style={{ width: 72, textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}
+        />
+        <span style={{ color: 'var(--text-2)', minWidth: 30 }}>{q.unit}</span>
+      </div>
+      <input
+        type="range"
+        aria-label={`${q.label} slider`}
+        min={q.min}
+        max={q.max}
+        step={q.step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: '100%' }}
+      />
     </div>
   );
 }

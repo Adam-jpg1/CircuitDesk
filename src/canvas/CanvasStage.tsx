@@ -703,6 +703,8 @@ const PartView = memo(function PartView({
   return (
     <g
       transform={`translate(${inst.x} ${inst.y}) rotate(${inst.rotation} ${w / 2} ${h / 2})`}
+      data-part-id={inst.id}
+      data-definition-id={def.id}
       onPointerDown={(e) => onPointerDown(inst, e)}
       onDoubleClick={() => onDoubleClick(inst, def)}
       style={{ cursor: 'move' }}
