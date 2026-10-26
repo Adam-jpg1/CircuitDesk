@@ -1,15 +1,28 @@
 // Automated test bench: runs each test on a fresh, headless emulator instance
 // (accelerated — no realtime pacing), applies input events at their scheduled
 // times, and evaluates assertions against real firmware behavior.
+//
+// It runs on whatever the board's own adapter executes. That is a deliberate
+// change from what this used to be: it constructed an AVRRunner directly and
+// refused any board without an AVR profile, so a Pico or an ESP32-C6 project
+// could be compiled and run live but could not be ASSERTED — the one place a
+// claim gets checked was the one place that only understood one architecture.
+// A starter nobody can assert is a starter nobody can trust, and a custom
+// board on an RP2040 had the same problem.
+//
+// Everything here now goes through the BoardRunner interface the live
+// simulation uses, so a bench proves the same thing on every engine: real
+// firmware, real pads, real serial bytes.
 
-import { AVRRunner, F_CPU } from '../simulation/avrRunner';
-import { avrProfileFor } from '../boards/pinMaps';
-import { assertFirmwareMatchesBoard } from '../simulation/adapters';
+import { getSimulatorAdapter, assertFirmwareMatchesBoard, type FirmwareArtifact } from '../simulation/adapters';
+import { arduinoPinLabel } from '../boards/pinMaps';
 import { resolveDefinition } from '../project/partsRegistry';
 import { CircuitBinding, emptyControls } from '../simulation/circuitSim';
-import type { CircuitProject, TestAssertion, TestCase, TestResult, TestAssertionResult } from '../types';
+import type { BoardRunner } from '../simulation/boardRunner';
+import type { BoardDefinition, CircuitProject, TestAssertion, TestCase, TestResult, TestAssertionResult } from '../types';
 
-const CHUNK_CYCLES = F_CPU / 200; // 5 ms of simulated time per chunk
+/** Simulated milliseconds per step. Small enough to place an event precisely. */
+const CHUNK_MS = 5;
 
 interface PinEventLog {
   atMs: number;
@@ -17,10 +30,20 @@ interface PinEventLog {
   high: boolean;
 }
 
-/** Firmware plus the board it was compiled for — the pair is inseparable. */
+/**
+ * Firmware plus the board it was compiled for — the pair is inseparable.
+ *
+ * `data` is whatever that engine executes: Intel HEX text for AVR, base64 UF2
+ * for an RP2040, a base64 image for an ESP part. `regions` carries the other
+ * flash regions a chip needs before it will run anything at all — an ESP32
+ * reads its partition table out of flash first — so a bench on those parts
+ * gets the same bytes the live simulation does.
+ */
 export interface TestFirmware {
-  hex: string;
+  data: string;
   boardId: string;
+  format?: string;
+  regions?: { offset: number; data: string }[];
 }
 
 export async function runTest(project: CircuitProject, firmware: TestFirmware, test: TestCase): Promise<TestResult> {
@@ -29,15 +52,21 @@ export async function runTest(project: CircuitProject, firmware: TestFirmware, t
     const def = resolveDefinition(b.definitionId, project);
     return def?.isBoard && def.simulation?.supported === true;
   });
-  const boardDef = boardInst ? resolveDefinition(boardInst.definitionId, project) : undefined;
-  const profile = boardDef?.isBoard ? avrProfileFor(boardDef) : undefined;
-  if (!boardDef || !profile) {
+  // Narrowed to a BOARD once, here, rather than re-asking `isBoard` at each
+  // use: everything below needs board-only fields, and a component that
+  // reached this far would be a bug rather than a case to handle.
+  const resolved = boardInst ? resolveDefinition(boardInst.definitionId, project) : undefined;
+  const boardDef: BoardDefinition | undefined = resolved?.isBoard ? resolved : undefined;
+  const adapter = boardDef ? getSimulatorAdapter(boardDef) : null;
+  if (!boardDef || !adapter) {
     return {
       testId: test.id,
       status: 'error',
       durationMs: 0,
       assertionResults: [],
-      message: 'This project has no simulated board — tests require a board with genuine simulation support (e.g. Arduino Uno or Nano).',
+      message:
+        'This project has no board CircuitDesk can execute firmware on, so there is nothing for a test to assert. ' +
+        'Boards that run firmware carry a runtime profile; the rest validate and wire.',
     };
   }
   // Same guard as the live simulation path: firmware never executes on a
@@ -53,9 +82,14 @@ export async function runTest(project: CircuitProject, firmware: TestFirmware, t
       message: err instanceof Error ? err.message : 'Firmware does not match the board on the canvas.',
     };
   }
-  let runner: AVRRunner;
+  const artifact: FirmwareArtifact = {
+    data: firmware.data,
+    format: firmware.format ?? adapter.firmwareFormat,
+    ...(firmware.regions ? { regions: firmware.regions } : {}),
+  };
+  let runner: BoardRunner;
   try {
-    runner = new AVRRunner(firmware.hex, profile);
+    runner = await adapter.createRunner(artifact, boardDef);
   } catch (err) {
     return {
       testId: test.id,
@@ -82,12 +116,11 @@ export async function runTest(project: CircuitProject, firmware: TestFirmware, t
   let eventIdx = 0;
 
   const totalMs = Math.max(test.timeoutMs, ...test.assertions.map((a) => (a.withinMs ?? 0) + (a.holdMs ?? 0)), 100);
-  const totalCycles = (totalMs / 1000) * F_CPU;
   const timeline: { atMs: number; event: string }[] = [];
 
   try {
     let lastYield = performance.now();
-    while (runner.cpu.cycles < totalCycles) {
+    while (runner.timeMs < totalMs) {
       // apply due input events
       while (eventIdx < events.length && events[eventIdx].atMs <= runner.timeMs) {
         const ev = events[eventIdx++];
@@ -114,7 +147,7 @@ export async function runTest(project: CircuitProject, firmware: TestFirmware, t
             break;
         }
       }
-      runner.runToCycles(runner.cpu.cycles + CHUNK_CYCLES);
+      runner.runFor(CHUNK_MS);
       binding.update(controls);
 
       // keep the UI alive during long tests
@@ -138,8 +171,9 @@ export async function runTest(project: CircuitProject, firmware: TestFirmware, t
   }
 
   const assertionResults: TestAssertionResult[] = test.assertions.map((a) =>
-    evaluateAssertion(a, pinLog, serial, runner),
+    evaluateAssertion(a, pinLog, serial, runner, boardDef),
   );
+  runner.dispose?.();
   const passed = assertionResults.every((r) => r.passed);
   return {
     testId: test.id,
@@ -168,12 +202,20 @@ function evaluateAssertion(
   a: TestAssertion,
   pinLog: PinEventLog[],
   serial: string,
-  runner: AVRRunner,
+  runner: BoardRunner,
+  board: BoardDefinition,
 ): TestAssertionResult {
+  // An assertion names a pin by the number the firmware uses, and what that
+  // number is CALLED depends on the board: D13 and A0 on an AVR, GP15 on an
+  // RP2040, IO8 on an ESP32. The label is for the person reading the result,
+  // so it comes from the board rather than from an assumption about Arduino
+  // numbering that only one architecture has.
   const label = (p?: number) => {
     if (p === undefined) return '?';
-    const base = runner.profile.analogPinBase;
-    return p >= base ? `A${p - base}` : `D${p}`;
+    if ((board.architecture ?? 'other') === 'avr') return arduinoPinLabel(board, p);
+    const named = board.pins.find((pin) => (board.padMap?.[pin.id] ?? pin.id) === `GP${p}`)
+      ?? board.pins.find((pin) => (board.padMap?.[pin.id] ?? pin.id) === `IO${p}`);
+    return named ? named.label : `pin ${p}`;
   };
   switch (a.kind) {
     case 'pin-becomes-high':

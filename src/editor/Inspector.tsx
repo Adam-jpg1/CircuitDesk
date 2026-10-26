@@ -159,6 +159,11 @@ function InstanceInspector({ inst }: { inst: ComponentInstance }) {
               const conns = connectionsByPin.get(pin.id) ?? [];
               const arduinoPin = def.isBoard ? arduinoPinNumber(def, pin.id) : undefined;
               const refs = arduinoPin !== undefined ? codeUsage.refs.filter((r) => r.pin === arduinoPin) : [];
+              // Narrowed through `isBoard`, which is the discriminant on the
+              // union: only a board has a pad map, and a component asked for
+              // one would be a question with no meaning rather than a missing
+              // value.
+              const pad = def.isBoard ? def.padMap?.[pin.id] : undefined;
               return (
                 <tr key={pin.id} className={conns.length > 0 ? 'connected' : ''}>
                   {/* The maker's name, and the processor pad behind it. Both
@@ -167,9 +172,7 @@ function InstanceInspector({ inst }: { inst: ComponentInstance }) {
                       a sketch that says GP15. */}
                   <td>
                     {pin.label}
-                    {def.padMap?.[pin.id] && def.padMap[pin.id] !== pin.label && (
-                      <span style={{ color: 'var(--text-2)' }}> · {def.padMap[pin.id]}</span>
-                    )}
+                    {pad && pad !== pin.label && <span style={{ color: 'var(--text-2)' }}> · {pad}</span>}
                   </td>
                   <td style={{ color: 'var(--text-2)' }}>{pin.type}{pin.voltage != null ? ` ${pin.voltage}V` : ''}</td>
                   <td>{conns.length || '—'}</td>

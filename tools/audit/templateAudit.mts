@@ -204,7 +204,16 @@ if (BUILD) {
       continue;
     }
     for (const test of project.tests) {
-      const result = await runTest(project, { hex: firmware, boardId }, test);
+      const result = await runTest(
+        project,
+        {
+          data: firmware,
+          boardId,
+          format: build?.result?.firmware?.format,
+          regions: build?.result?.firmware?.regions,
+        },
+        test,
+      );
       const failed = result.assertionResults.filter((a) => !a.passed);
       if (result.status === 'passed') {
         console.log(`   ${name}: "${test.name}" passed (${result.assertionResults.length} assertions)`);

@@ -846,11 +846,15 @@ function UpgradeControl({ onMessage }: { onMessage: (m: string) => void }) {
         data-testid="studio-upgrade-apply"
         onClick={() => {
           const editor = useEditorStore.getState();
-          let applied: ReturnType<typeof previewUpgrade> = null;
           editor.mutateCircuit((p) => {
-            applied = upgradeEmbeddedBoard(p, ready).report;
+            upgradeEmbeddedBoard(p, ready);
           });
-          const lost = applied?.droppedPins.reduce((n, d) => n + d.connectionIds.length, 0) ?? 0;
+          // The quote above IS the cost — `previewUpgrade` and the upgrade walk
+          // the same pins, which is the whole point of quoting it first. This
+          // used to read the count back out of a variable assigned inside the
+          // mutation callback, which TypeScript rightly refused to believe had
+          // been assigned at all.
+          const lost = wires;
           useStudioStore.getState().markSaved(ready);
           onMessage(
             `This project now uses revision ${ready.revision}` +

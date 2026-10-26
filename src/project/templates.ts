@@ -48,7 +48,9 @@ function code(name: string, content: string): CodeFile {
 function bench(
   name: string,
   description: string,
-  assertions: TestAssertion[],
+  // Without the id, which this function is what assigns — asking a caller for
+  // one would be asking it to invent a unique value it has no way to check.
+  assertions: Omit<TestAssertion, 'id'>[],
   opts: { events?: TestInputEvent[]; timeoutMs?: number } = {},
 ): TestCase {
   return {

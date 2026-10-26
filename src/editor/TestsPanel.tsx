@@ -4,6 +4,7 @@ import { compileAction } from '../app/actions';
 import { uid, type TestAssertion, type TestCase, type TestInputEvent, type TestResult } from '../types';
 import { Modal, toast } from '../ui/primitives';
 import { resolveDefinition } from '../project/partsRegistry';
+import type { TestFirmware } from '../testing/testRunner';
 
 /** Shared with the export code so test reports include the latest results. */
 export const testResultsCache = new Map<string, TestResult>();
@@ -23,7 +24,7 @@ export function TestsPanel() {
    * A cached build for another board is never reused — it is rebuilt, and if
    * the rebuild still does not match, tests refuse to run.
    */
-  async function ensureFirmware(): Promise<{ hex: string; boardId: string } | null> {
+  async function ensureFirmware(): Promise<TestFirmware | null> {
     const currentBoardId = useEditorStore.getState().project?.boardInstances[0]
       ? resolveDefinition(useEditorStore.getState().project!.boardInstances[0].definitionId, useEditorStore.getState().project!)?.id
       : undefined;
@@ -40,14 +41,21 @@ export function TestsPanel() {
       if (!ok) return null;
       compile = useEditorStore.getState().lastCompile;
     }
-    const hex = compile?.firmware?.data;
+    const data = compile?.firmware?.data;
     const boardId = compile?.boardId;
-    if (!hex || !boardId) return null;
+    if (!data || !boardId) return null;
     if (currentBoardId !== undefined && boardId !== currentBoardId) {
       toast('Firmware does not match the board on the canvas — tests were not run.', 'error');
       return null;
     }
-    return { hex, boardId };
+    // Everything the engine needs, not just the executable image: an ESP part
+    // reads its partition table out of flash before it will run anything.
+    return {
+      data,
+      boardId,
+      ...(compile?.firmware?.format ? { format: compile.firmware.format } : {}),
+      ...(compile?.firmware?.regions ? { regions: compile.firmware.regions } : {}),
+    };
   }
 
   async function run(test: TestCase) {

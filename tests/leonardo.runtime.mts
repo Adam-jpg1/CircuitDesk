@@ -285,11 +285,11 @@ void loop(){ if (Serial1.available()) { char c = Serial1.read(); Serial1.print("
     assertions: [{ id: 'a1', kind: 'pin-becomes-high' as const, pin: 13, withinMs: 200 }],
     timeoutMs: 300,
   };
-  const wrongA = await runTest(leoProject, { hex: unoHex, boardId: 'board.arduino-uno' }, test);
+  const wrongA = await runTest(leoProject, { data: unoHex, boardId: 'board.arduino-uno' }, test);
   check(wrongA.status === 'error', `test bench refuses Uno firmware on a Leonardo project (${wrongA.status})`);
-  const wrongB = await runTest(unoProject, { hex: leoHex, boardId: 'board.arduino-leonardo' }, test);
+  const wrongB = await runTest(unoProject, { data: leoHex, boardId: 'board.arduino-leonardo' }, test);
   check(wrongB.status === 'error', `test bench refuses Leonardo firmware on an Uno project (${wrongB.status})`);
-  const right = await runTest(leoProject, { hex: leoHex, boardId: 'board.arduino-leonardo' }, test);
+  const right = await runTest(leoProject, { data: leoHex, boardId: 'board.arduino-leonardo' }, test);
   check(right.status === 'passed', `matching Leonardo firmware runs in the test bench (${right.status})`);
 }
 

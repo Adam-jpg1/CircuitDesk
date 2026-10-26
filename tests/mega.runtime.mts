@@ -335,21 +335,21 @@ void loop(){
     timeoutMs: 300,
   };
 
-  const unoOnMega = await runTest(megaProject, { hex: unoHex, boardId: 'board.arduino-uno' }, test);
+  const unoOnMega = await runTest(megaProject, { data: unoHex, boardId: 'board.arduino-uno' }, test);
   check(
     unoOnMega.status === 'error' && /compiled for "board.arduino-uno"/.test(unoOnMega.message ?? ''),
     `cached Uno firmware never executes on a Mega project (${unoOnMega.status}: ${(unoOnMega.message ?? '').slice(0, 60)}…)`,
   );
 
-  const megaOnUno = await runTest(unoProject, { hex: megaHex, boardId: 'board.arduino-mega2560' }, test);
+  const megaOnUno = await runTest(unoProject, { data: megaHex, boardId: 'board.arduino-mega2560' }, test);
   check(
     megaOnUno.status === 'error' && /compiled for "board.arduino-mega2560"/.test(megaOnUno.message ?? ''),
     `cached Mega firmware never executes on an Uno project (${megaOnUno.status}: ${(megaOnUno.message ?? '').slice(0, 60)}…)`,
   );
 
-  const matching = await runTest(megaProject, { hex: megaHex, boardId: 'board.arduino-mega2560' }, test);
+  const matching = await runTest(megaProject, { data: megaHex, boardId: 'board.arduino-mega2560' }, test);
   check(matching.status === 'passed', `matching cached firmware still runs normally (${matching.status})`);
-  const matchingUno = await runTest(unoProject, { hex: unoHex, boardId: 'board.arduino-uno' }, test);
+  const matchingUno = await runTest(unoProject, { data: unoHex, boardId: 'board.arduino-uno' }, test);
   check(matchingUno.status === 'passed', `Uno test bench is unaffected (${matchingUno.status})`);
 }
 

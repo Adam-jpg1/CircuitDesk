@@ -17,7 +17,7 @@
 // wires of a project already built against revision 3. Upgrading is a thing the
 // user chooses, and `upgradeEmbeddedBoard` is where that choice is applied.
 
-import type { CircuitProject, CustomDefinition } from '../types';
+import type { CircuitProject, CustomDefinition, PartDefinition } from '../types';
 import { validateCustomBoard, isError, type BoardProblem } from './validate';
 import { resolveCustomBoard } from './resolve';
 import { CUSTOM_BOARD_SCHEMA_VERSION, type CustomBoardDefinition } from './schema';
@@ -189,6 +189,33 @@ export function newCustomBoard(name: string): CustomBoardDefinition {
 }
 
 /**
+ * A stored definition with every capability claim removed.
+ *
+ * Used wherever a board's description can no longer be read — in a project, in
+ * the user's library — and the honest reading is "we cannot tell what this is
+ * any more". It keeps the geometry and the pins, because those are what the
+ * wires on the canvas are attached to, and deleting them would take the wires
+ * with them.
+ *
+ * The explicit return type is load-bearing: written inline, `provider: 'none'`
+ * widens to `string` and stops being assignable to the union the definition
+ * declares. Naming the type here is what keeps the literals literal, in one
+ * place, for both callers.
+ */
+export function disarmedDefinition(definition: PartDefinition, reason: string): PartDefinition {
+  return {
+    ...definition,
+    supportLevel: 'wiring',
+    ...(definition.isBoard
+      ? {
+          compiler: { provider: 'none', supported: false, note: reason },
+          simulation: { engine: 'none', supported: false, supportedApis: [], supportedPeripherals: [] },
+        }
+      : {}),
+  } as PartDefinition;
+}
+
+/**
  * Rebuilds every embedded board's definition from the spec it was made from.
  *
  * A project file is untrusted input in exactly the way a board file is — it
@@ -228,15 +255,7 @@ export function revalidateEmbeddedBoards(project: CircuitProject): {
     }
     const reason = problems.find(isError)?.message ?? 'the board description could not be read';
     disarmed.push({ boardId: entry.definition?.id ?? 'unknown', reason });
-    return {
-      ...entry,
-      definition: {
-        ...entry.definition,
-        supportLevel: 'wiring',
-        compiler: { provider: 'none', supported: false, note: reason },
-        simulation: { engine: 'none', supported: false, supportedApis: [], supportedPeripherals: [] },
-      },
-    };
+    return { ...entry, definition: disarmedDefinition(entry.definition, reason) };
   });
 
   return { rederived, disarmed };

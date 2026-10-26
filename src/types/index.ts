@@ -371,7 +371,24 @@ export interface CompileResult {
   stdout: string;
   stderr: string;
   diagnostics: Diagnostic[];
-  firmware?: { format: 'intel-hex' | 'uf2' | 'bin' | 'esp-image'; data: string };
+  /**
+   * What the toolchain produced.
+   *
+   * `regions` carries the other things it placed in flash, at their real
+   * offsets — an ESP part's bootloader and partition table. The type used to
+   * omit them even though the service has always sent them, which made them
+   * invisible to anything reading this: the live simulation happened to work
+   * because it passes the whole object through, and the test bench did not,
+   * because it rebuilt the artifact field by field from a type that did not
+   * mention them. An ESP32 reads its partition table out of flash before it
+   * will execute anything, so the symptom was an emulator fetching a zero
+   * instruction.
+   */
+  firmware?: {
+    format: 'intel-hex' | 'uf2' | 'bin' | 'esp-image';
+    data: string;
+    regions?: { offset: number; data: string }[];
+  };
   memory?: { flashBytes: number; flashMaxBytes: number; ramBytes: number; ramMaxBytes: number };
   /**
    * True things about this build that are not compiler diagnostics.

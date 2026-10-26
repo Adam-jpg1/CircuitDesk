@@ -21,7 +21,7 @@
 import type { CustomDefinition } from '../types';
 import { validateCustomBoard, isError, type BoardProblem } from '../custom-boards/validate';
 import { resolveCustomBoard } from '../custom-boards/resolve';
-import { CUSTOM_BOARD_SOURCE } from '../custom-boards/projectBoards';
+import { CUSTOM_BOARD_SOURCE, disarmedDefinition } from '../custom-boards/projectBoards';
 import type { CustomBoardDefinition } from '../custom-boards/schema';
 
 /** The custom boards among a set of library entries, newest edit first. */
@@ -142,12 +142,7 @@ export function rederivedLibraryEntry(entry: CustomDefinition): CustomDefinition
   if (!board) {
     return {
       ...entry,
-      definition: {
-        ...entry.definition,
-        supportLevel: 'wiring',
-        compiler: { provider: 'none', supported: false, note: 'This board\'s description could not be read.' },
-        simulation: { engine: 'none', supported: false, supportedApis: [], supportedPeripherals: [] },
-      },
+      definition: disarmedDefinition(entry.definition, 'This board\'s description could not be read.'),
     };
   }
   const { board: resolved } = resolveCustomBoard(board);
