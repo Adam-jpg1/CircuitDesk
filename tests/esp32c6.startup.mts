@@ -28,10 +28,13 @@ function check(cond: boolean, msg: string) {
   if (!cond) failures++;
 }
 
-const SP = process.env.SP ?? '/tmp/claude-0/-home-user-whay/33313529-9d56-5506-bb90-3d0291077577/scratchpad';
-const dir = `${SP}/fw/c6blink/out`;
+// Where a compiled C6 firmware build was left, if one was. There is no
+// default: the path is whatever machine this was built on, and baking one in
+// means every other machine silently checks a directory that cannot exist.
+const SP = process.env.SP ?? '';
+const dir = SP ? `${SP}/fw/c6blink/out` : '';
 
-if (!existsSync(`${dir}/c6blink.ino.bin`) || !existsSync(`${dir}/c6blink.ino.map`)) {
+if (!dir || !existsSync(`${dir}/c6blink.ino.bin`) || !existsSync(`${dir}/c6blink.ino.map`)) {
   console.log('SKIP: no compiled ESP32-C6 firmware in this container');
   skipped++;
   console.log(`\nESP32-C6 startup checks passed (${skipped} skipped).`);
