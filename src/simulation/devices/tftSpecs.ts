@@ -63,6 +63,7 @@ export const ST7735_SPEC: TftControllerSpec = {
   colOffset: 2,
   rowOffset: 1,
   pixelFormats: [PF_12BIT, PF_16BIT, PF_18BIT],
+  pixelFormatMask: 0x07,
   vendorCommands: {
     0xb1: 3, // frame rate control, normal mode
     0xb2: 3, // frame rate control, idle mode

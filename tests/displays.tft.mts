@@ -274,6 +274,23 @@ section("5. one controller's sequence does not drive another");
   bringUp(h);
   h.cmd(0x3a, 0x53);
   check(st3.refusedPixelFormats.length === 0, 'while an ST7735, which does have 12-bit, accepts it');
+
+  // The ST7735 decodes only COLMOD's low three bits. Adafruit's driver sends
+  // 0x05 for 16-bit colour, and a real panel shows it.
+  const adafruitStyle = new TftDisplayDevice('st-ada', 'cs', ST7735_SPEC);
+  const ada = driver(adafruitStyle);
+  bringUp(ada);
+  ada.cmd(0x3a, 0x03);
+  ada.cmd(0x3a, 0x05);
+  check(
+    adafruitStyle.refusedPixelFormats.length === 0 && adafruitStyle.currentPixelFormat === 0x55,
+    `an ST7735 takes 0x05 as 16-bit colour, as the Adafruit driver sends it (0x${adafruitStyle.currentPixelFormat.toString(16)})`,
+  );
+  const wholeByte = new TftDisplayDevice('ili-whole', 'cs', ILI9341_SPEC);
+  const wb = driver(wholeByte);
+  bringUp(wb);
+  wb.cmd(0x3a, 0x05);
+  check(wholeByte.refusedPixelFormats.includes(0x05), 'while an ILI9341, which decodes the whole byte, still refuses it');
 }
 
 // ==================================== 6. the ST7735's memory offset is applied

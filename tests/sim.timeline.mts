@@ -224,5 +224,32 @@ class RecordingRunner implements BoardRunner {
   );
 }
 
+// Power-up. The circuit is on the pins before the first instruction: a
+// sketch that reads a joystick in its first millisecond must see the stick's
+// voltage, not 0 V. So the world resolves the nets once before the first
+// slice, and again after a reset — and only then.
+{
+  const world = new SimulationWorld({ sliceMs: 1 });
+  const runner = new RecordingRunner();
+  world.add('b1', runner);
+  const order: string[] = [];
+  const run = runner.runFor.bind(runner);
+  runner.runFor = (ms: number) => {
+    order.push('run');
+    run(ms);
+  };
+  world.settle = () => order.push('settle');
+  world.runFor(2);
+  check(order[0] === 'settle', `the circuit is resolved before the first slice runs (${order.slice(0, 3).join(', ')})`);
+  check(order.filter((o) => o === 'settle').length === 3, 'and after that once per slice, as before');
+  order.length = 0;
+  world.runFor(1);
+  check(order[0] === 'run', 'later calls do not add an extra settle');
+  world.reset();
+  order.length = 0;
+  world.runFor(1);
+  check(order[0] === 'settle', 'a reset is a fresh power-up');
+}
+
 console.log(failures === 0 ? '\nTimeline resolution checks passed.' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

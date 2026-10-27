@@ -19,6 +19,7 @@ const GREEN = '#2f9e44';
 const PURPLE = '#7048e8';
 const YELLOW = '#f59f00';
 const TEAL = '#0c8599';
+const PINK = '#d6336c';
 
 /** A little wiring kit, so a forty-wire circuit reads as what it connects. */
 class Wiring {
@@ -49,44 +50,58 @@ class Wiring {
 
 const COMPUTER_SKETCH = `// A 4-bit computer, built from logic chips.
 //
-// The Uno is only the program memory - the ROM. It reads the address the
+// The Uno is the program memory and the sequencer. It reads the address the
 // 74HC161 program counter is showing, puts that instruction on the bus, and
-// pulses the clock. Everything else happens in the chips:
+// pulses the clock. The arithmetic and the registers are all in the chips:
 //
+//   74HC161  the program counter; its parallel load is the jump
 //   74HC157  picks the accumulator's next value: the operand (LOAD) or the sum (ADD)
 //   74HC283  adds the accumulator and the operand
 //   74HC574  is the accumulator; its fifth bit is the carry flag
-//   74HC04 + 74HC08  let the adder's carry into the flag only on ADD
+//   74HC08   gates the accumulator's clock off during a jump, and lets the
+//            adder's carry into the flag only on ADD (with a 74HC04 inverter)
 //   CD4511   shows the accumulator on the display (0-9; 10-15 blank, as on the real chip)
 //
-// The Uno never works out the answer. It reads it back off the
-// accumulator's own pins and prints what the hardware computed.
+// The Uno never works out an answer. It reads it back off the accumulator's
+// own pins and prints what the hardware computed. The program runs forever:
+// 3 x 3 by repeated addition, an overflow that sets the carry flag, then a
+// countdown from 9 that loops on the carry flag, and back to the start.
 
 const int PC_PINS[4]  = {2, 3, 4, 5};      // 74HC161 QA..QD: the address
-const int BUS_PINS[4] = {6, 7, 8, 9};      // operand bits 0..3
-const int CLK = 10, RESET_N = 11, LOAD = 12;
+const int BUS_PINS[4] = {6, 7, 8, 9};      // operand / jump target, bits 0..3
+const int CLK = 10, RESET_N = 11, LOAD = 12, JUMP_N = 13;
 const int ACC_PINS[4] = {A0, A1, A2, A3};  // the accumulator, read back
 const int CARRY = A4;                      // the carry flag, read back
+const unsigned long STEP_MS = 350;         // one instruction; slow enough to watch
 
-enum Op { OP_LOAD, OP_ADD, OP_HALT };
+enum Op { OP_LOAD, OP_ADD, OP_JMP, OP_JC };
 struct Instruction { Op op; byte value; };
 
-// The program: 3 x 3 by repeated addition, then one more add to overflow.
+// Adding 15 is subtracting 1 in four bits; the carry is set when nothing was
+// borrowed, so "JC" keeps looping until the count passes zero.
 const Instruction ROM[16] = {
   { OP_LOAD, 0 },
   { OP_ADD,  3 },
   { OP_ADD,  3 },
   { OP_ADD,  3 },   // 9
-  { OP_ADD,  9 },   // 18: four bits hold 2, and the carry flag sets
-  { OP_HALT, 0 },
+  { OP_ADD,  9 },   // 18: four bits hold 2, and the carry flag lights
+  { OP_LOAD, 9 },
+  { OP_ADD, 15 },   // count down
+  { OP_JC,   6 },   // ...while there was no borrow
+  { OP_JMP,  0 },   // and start again
 };
-
-bool halted = false;
 
 byte readNibble(const int *pins) {
   byte value = 0;
   for (int i = 0; i < 4; i++) if (digitalRead(pins[i]) == HIGH) value |= 1 << i;
   return value;
+}
+
+void pulseClock() {
+  digitalWrite(CLK, HIGH);
+  delay(30);
+  digitalWrite(CLK, LOW);
+  delay(30);
 }
 
 void setup() {
@@ -100,7 +115,9 @@ void setup() {
   pinMode(CLK, OUTPUT);
   pinMode(RESET_N, OUTPUT);
   pinMode(LOAD, OUTPUT);
+  pinMode(JUMP_N, OUTPUT);
   digitalWrite(CLK, LOW);
+  digitalWrite(JUMP_N, HIGH);
   digitalWrite(RESET_N, LOW);   // program counter to 0
   delay(30);
   digitalWrite(RESET_N, HIGH);
@@ -109,38 +126,38 @@ void setup() {
 }
 
 void loop() {
-  if (halted) return;
+  unsigned long started = millis();
   byte pc = readNibble(PC_PINS);
   Instruction in = ROM[pc];
-  if (in.op == OP_HALT) {
-    halted = true;
-    Serial.print("HALT at PC=");
-    Serial.print(pc);
-    Serial.print("  ACC=");
-    Serial.println(readNibble(ACC_PINS));
-    return;
-  }
+  bool jump = in.op == OP_JMP || (in.op == OP_JC && digitalRead(CARRY) == HIGH);
 
   // Fetch: put the instruction on the bus and let it settle through the chips.
+  // A jump loads the counter from the bus; the accumulator's clock is gated
+  // off by the same line, so it keeps its value.
   digitalWrite(LOAD, in.op == OP_LOAD ? HIGH : LOW);
+  digitalWrite(JUMP_N, jump ? LOW : HIGH);
   for (int i = 0; i < 4; i++) digitalWrite(BUS_PINS[i], (in.value >> i) & 1);
   delay(30);
 
-  // Execute: one clock edge latches the accumulator and advances the counter.
-  digitalWrite(CLK, HIGH);
-  delay(30);
-  digitalWrite(CLK, LOW);
-  delay(30);
+  // Execute: one clock edge.
+  pulseClock();
+  digitalWrite(JUMP_N, HIGH);
 
   Serial.print("PC=");
   Serial.print(pc);
-  Serial.print(in.op == OP_LOAD ? "  LOAD " : "  ADD  ");
-  Serial.print(in.value);
-  Serial.print("  ->  ACC=");
-  Serial.print(readNibble(ACC_PINS));
-  Serial.print("  carry=");
-  Serial.println(digitalRead(CARRY));
-  delay(120);   // slow enough to watch the lights
+  if (in.op == OP_JMP || in.op == OP_JC) {
+    Serial.print(in.op == OP_JMP ? "  JMP " : "  JC  ");
+    Serial.print(in.value);
+    Serial.println(jump ? "  taken" : "  not taken");
+  } else {
+    Serial.print(in.op == OP_LOAD ? "  LOAD " : "  ADD  ");
+    Serial.print(in.value);
+    Serial.print("  ->  ACC=");
+    Serial.print(readNibble(ACC_PINS));
+    Serial.print("  carry=");
+    Serial.println(digitalRead(CARRY));
+  }
+  while (millis() - started < STEP_MS) {}
 }
 `;
 
@@ -148,11 +165,12 @@ const logicComputer: BuiltinProject = {
   id: 'cp_logic_computer',
   title: '4-bit computer built from logic chips',
   description:
-    'A real accumulator machine on the bench: a 74HC161 program counter, a 74HC157 to choose LOAD or ADD, a ' +
-    '74HC283 adder, a 74HC574 accumulator with a carry flag, and a CD4511 driving the display. The Uno is only ' +
-    'the program memory — it puts each instruction on the bus and pulses the clock, then reads back what the ' +
-    'chips computed. Watch the program counter count, the accumulator reach 9, and the carry flag light when it ' +
-    'overflows. Change the ROM table to write your own program.',
+    'A real accumulator machine on the bench: a 74HC161 program counter that jumps by loading itself from the ' +
+    'bus, a 74HC157 to choose LOAD or ADD, a 74HC283 adder, a 74HC574 accumulator with a carry flag, and a ' +
+    'CD4511 driving the display. The Uno is only the program memory and sequencer — it puts each instruction on ' +
+    'the bus and pulses the clock, then reads back what the chips computed. It runs forever: 3 × 3 by repeated ' +
+    'addition, an overflow that lights the carry flag, a countdown from 9 that loops on the carry, then back to ' +
+    'the start. Change the ROM table to write your own program.',
   author: 'creator',
   tags: ['logic', 'computer', '74hc', 'cpu'],
   baseLikes: 64,
@@ -168,24 +186,35 @@ const logicComputer: BuiltinProject = {
     const and = inst('comp.74hc08', 660, 60);
     const decoder = inst('comp.cd4511', 760, 60);
     const display = inst('comp.seven-segment', 880, 70);
+    pc.label = 'program counter';
+    mux.label = 'LOAD / ADD';
+    adder.label = 'adder';
+    acc.label = 'accumulator';
+    and.label = 'clock gate';
+    decoder.label = 'decoder';
+    display.label = 'ACC';
     const w = new Wiring(uno, '5V', 'GND_PWR1');
 
     // Every chip on the 5 V rail.
     for (const chip of [pc, mux, adder, acc, inv, and, decoder]) w.supply(chip);
 
-    // Program counter: counts on the clock, cleared by the Uno, never loaded.
+    // Program counter: counts on the clock, cleared by the Uno, and loaded
+    // from the bus when JUMP is pulled low — that is the jump instruction.
     w.link(uno, 'D10', pc, 'clk', YELLOW);
     w.link(uno, 'D11', pc, 'nclr', PURPLE);
-    w.high(pc, 'enp', 'ent', 'nload');
-    w.low(pc, 'a', 'b', 'c', 'd');
+    w.link(uno, 'D13', pc, 'nload', PINK);
+    w.high(pc, 'enp', 'ent');
     const pcBits = ['qa', 'qb', 'qc', 'qd'];
     ['D2', 'D3', 'D4', 'D5'].forEach((pin, i) => w.link(pc, pcBits[i], uno, pin, TEAL));
 
-    // The operand bus, to both the adder and the LOAD side of the selector.
+    // The operand bus, to the adder, the LOAD side of the selector, and the
+    // counter's load inputs (where it is a jump target).
     const busPins = ['D6', 'D7', 'D8', 'D9'];
+    const pcLoad = ['a', 'b', 'c', 'd'];
     busPins.forEach((pin, i) => {
       w.link(uno, pin, adder, `b${i + 1}`, GREEN);
       w.link(uno, pin, mux, `${i + 1}b`, GREEN);
+      w.link(uno, pin, pc, pcLoad[i], GREEN);
     });
     w.low(adder, 'c0');
 
@@ -197,9 +226,12 @@ const logicComputer: BuiltinProject = {
       w.link(mux, `${n}y`, acc, `d${n}`, ORANGE);
     });
 
-    // Accumulator: clocked with the counter; outputs feed back into the adder,
-    // out to the display decoder, and back to the Uno.
-    w.link(uno, 'D10', acc, 'clk', YELLOW);
+    // Accumulator: clocked with the counter except during a jump (CLK AND
+    // JUMP-not); outputs feed back into the adder, out to the display decoder,
+    // and back to the Uno.
+    w.link(uno, 'D10', and, '2a', YELLOW);
+    w.link(uno, 'D13', and, '2b', PINK);
+    w.link(and, '2y', acc, 'clk', YELLOW);
     w.low(acc, 'noe', 'd6', 'd7', 'd8');
     const accIn = ['a', 'b', 'c', 'd'];
     ['A0', 'A1', 'A2', 'A3'].forEach((pin, i) => {
@@ -215,7 +247,7 @@ const logicComputer: BuiltinProject = {
     w.link(and, '1y', acc, 'd5', RED);
     w.link(acc, 'q5', uno, 'A4', RED);
     w.low(inv, '2a', '3a', '4a', '5a', '6a');
-    w.low(and, '2a', '2b', '3a', '3b', '4a', '4b');
+    w.low(and, '3a', '3b', '4a', '4b');
 
     // Display: BCD in, segments out, no lamp test, no blanking, transparent latch.
     w.high(decoder, 'nlt', 'nbi');
@@ -248,15 +280,16 @@ const logicComputer: BuiltinProject = {
     p.codeFiles = [code('sketch.ino', COMPUTER_SKETCH)];
     p.tests = [
       bench(
-        'The chips compute 3 x 3, then overflow',
+        'The chips compute 3 x 3, overflow, count down and loop',
         'Every value is read back off the accumulator\'s pins: the Uno only supplies the program.',
         [
           { kind: 'serial-contains', text: 'PC=0  LOAD 0  ->  ACC=0', withinMs: 1500 },
           { kind: 'serial-contains', text: 'PC=3  ADD  3  ->  ACC=9  carry=0', withinMs: 2500 },
           { kind: 'serial-contains', text: 'PC=4  ADD  9  ->  ACC=2  carry=1', withinMs: 3000 },
-          { kind: 'serial-contains', text: 'HALT at PC=5  ACC=2', withinMs: 3500 },
+          { kind: 'serial-contains', text: 'PC=6  ADD  15  ->  ACC=8  carry=1', withinMs: 3500 },
+          { kind: 'serial-contains', text: 'PC=7  JC  6  taken', withinMs: 3800 },
         ],
-        { timeoutMs: 3600 },
+        { timeoutMs: 4000 },
       ),
     ];
     return p;
@@ -274,10 +307,11 @@ const SNAKE_SKETCH = `// Snake on an 8x8 LED matrix.
 #include <SPI.h>
 
 const int CS = 10, BUZZER = 8, STICK_X = A0, STICK_Y = A1, STICK_SW = 2;
-const unsigned long STEP_MS = 220;
+const unsigned long STEP_MS = 260;
 
 int8_t sx[64], sy[64];      // the snake, head first
 int len, dx, dy, foodX, foodY, score;
+bool waiting = true;        // a new game sits still until the stick is pushed
 unsigned long lastStep = 0;
 unsigned int seed = 7;      // the same food every game, so a game can be replayed
 
@@ -295,8 +329,9 @@ bool onSnake(int x, int y) {
 
 void show() {
   byte rows[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-  for (int i = 0; i < len; i++) rows[sy[i]] |= 1 << sx[i];
-  rows[foodY] |= 1 << foodX;
+  // Column 0 is the left of the panel, which is the row byte's top bit.
+  for (int i = 0; i < len; i++) rows[sy[i]] |= 0x80 >> sx[i];
+  rows[foodY] |= 0x80 >> foodX;
   for (int r = 0; r < 8; r++) max7219(r + 1, rows[r]);
 }
 
@@ -312,7 +347,8 @@ void newGame() {
   len = 3; dx = 1; dy = 0; score = 0;
   for (int i = 0; i < len; i++) { sx[i] = 2 - i; sy[i] = 3; }
   foodX = 5; foodY = 3;     // the first bite is straight ahead
-  Serial.println("SNAKE: new game");
+  waiting = true;
+  Serial.println("SNAKE: new game - push the stick to start");
   show();
 }
 
@@ -339,7 +375,18 @@ void setup() {
   newGame();
 }
 
+bool stickPushed() {
+  int x = analogRead(STICK_X), y = analogRead(STICK_Y);
+  return x < 300 || x > 700 || y < 300 || y > 700 || digitalRead(STICK_SW) == LOW;
+}
+
 void loop() {
+  if (waiting) {
+    if (!stickPushed()) return;
+    waiting = false;
+    lastStep = millis();
+    Serial.println("GO");
+  }
   steer();
   if (millis() - lastStep < STEP_MS) return;
   lastStep = millis();
@@ -374,8 +421,8 @@ const snake: BuiltinProject = {
   description:
     'The whole game on a MAX7219 matrix: an analog joystick steers, the snake grows when it eats, a buzzer ' +
     'clicks on every bite and sounds when you crash. The matrix driver is programmed register by register over ' +
-    'hardware SPI — no library — so every pixel you see is a byte the sketch sent. Drag the joystick in the ' +
-    'inspector (or click it on the canvas) to play.',
+    'hardware SPI — no library — so every pixel you see is a byte the sketch sent. Press Run, then drag the ' +
+    'joystick on the canvas to start and steer; it springs back to centre when you let go.',
   author: 'creator',
   tags: ['game', 'max7219', 'spi', 'joystick'],
   baseLikes: 81,
@@ -385,6 +432,7 @@ const snake: BuiltinProject = {
     const uno = inst('board.arduino-uno', 40, 260);
     const matrix = inst('comp.max7219', 400, 40);
     const stick = inst('comp.joystick', 400, 230);
+    stick.label = 'drag to steer';
     const buzzer = inst('comp.buzzer', 600, 120);
     const w = new Wiring(uno, '5V', 'GND_PWR1');
     w.supply(matrix);
@@ -403,19 +451,22 @@ const snake: BuiltinProject = {
     p.codeFiles = [code('sketch.ino', SNAKE_SKETCH)];
     p.tests = [
       bench(
-        'Eat, turn, crash',
-        'The first bite is straight ahead; pushing the stick up turns the snake into the top wall.',
+        'Wait, eat, turn, crash',
+        'A new game waits for the stick. Pushed right it sets off, the first bite is straight ahead, and pushing up turns the snake into the top wall.',
         [
-          { kind: 'serial-contains', text: 'SNAKE: new game', withinMs: 500 },
-          { kind: 'serial-contains', text: 'score 1', withinMs: 1300 },
-          { kind: 'serial-contains', text: 'turn U', withinMs: 1500 },
+          { kind: 'serial-contains', text: 'SNAKE: new game', withinMs: 300 },
+          { kind: 'serial-contains', text: 'GO', withinMs: 600 },
+          { kind: 'serial-contains', text: 'score 1', withinMs: 1500 },
+          { kind: 'serial-contains', text: 'turn U', withinMs: 1700 },
           { kind: 'serial-contains', text: 'GAME OVER  score 1', withinMs: 3200 },
           { kind: 'pin-toggles', pin: 8, minToggles: 2, withinMs: 3200 },
         ],
         {
           events: [
-            { atMs: 1000, action: 'set-analog', componentId: `${stick.id}#y`, value: 0 },
-            { atMs: 1300, action: 'set-analog', componentId: `${stick.id}#y`, value: 0.5 },
+            { atMs: 400, action: 'set-analog', componentId: `${stick.id}#x`, value: 1 },
+            { atMs: 600, action: 'set-analog', componentId: `${stick.id}#x`, value: 0.5 },
+            { atMs: 1500, action: 'set-analog', componentId: `${stick.id}#y`, value: 0 },
+            { atMs: 1700, action: 'set-analog', componentId: `${stick.id}#y`, value: 0.5 },
           ],
           timeoutMs: 3400,
         },
@@ -1021,4 +1072,435 @@ const twoBoardLink: BuiltinProject = {
   },
 };
 
-export const CREATOR_PROJECTS: BuiltinProject[] = [logicComputer, snake, keypadSafe, weatherStation, twoBoardLink];
+// ================================================================= tetris
+
+const TETRIS_SKETCH = `// Tetris on a 1.8" colour TFT.
+//
+// An ST7735 on hardware SPI, driven straight from its datasheet - reset, sleep
+// out, 16-bit colour, display on, then windows of pixels - and four buttons.
+// No graphics library: every pixel on the panel is a byte this sketch sent.
+// Only the cells that changed are redrawn each frame, which is what keeps a
+// 16 MHz Uno quick enough to play on.
+//
+// Buttons: LEFT, ROTATE, RIGHT, DROP. Clear lines to score; the pieces fall
+// faster as you go. The first three pieces are always I, I, O, so the first
+// line is on offer: I all the way left, I one right, O all the way right.
+
+#include <SPI.h>
+
+const int TFT_CS = 10, TFT_DC = 9, TFT_RST = 8;
+const int BTN_LEFT = 2, BTN_ROTATE = 3, BTN_RIGHT = 4, BTN_DROP = 5;
+const int BUZZER = 6;
+
+const int COLS = 10, ROWS = 20, CELL = 7;
+const int FIELD_X = 4, FIELD_Y = 16;   // the playfield's top-left on the panel
+const int SIDE_X = 82;
+// A 128x160 panel is a corner of the ST7735's 132x162 memory.
+const int X_OFFSET = 2, Y_OFFSET = 1;
+
+const uint16_t BLACK = 0x0000, WHITE = 0xFFFF, GREY = 0x52AA, RED = 0xF800;
+// Empty, then I J L O S T Z in their usual colours (RGB565).
+const uint16_t COLOURS[8] = {BLACK, 0x07FF, 0x233F, 0xFD20, 0xFFE0, 0x07E0, 0xA81F, 0xF800};
+
+// Seven tetrominoes, four rotations each, as 4x4 bitmaps (bit 15 is top-left).
+const uint16_t SHAPES[7][4] = {
+  {0x0F00, 0x2222, 0x00F0, 0x4444},  // I
+  {0x8E00, 0x6440, 0x0E20, 0x44C0},  // J
+  {0x2E00, 0x4460, 0x0E80, 0xC440},  // L
+  {0x6600, 0x6600, 0x6600, 0x6600},  // O
+  {0x6C00, 0x4620, 0x06C0, 0x8C40},  // S
+  {0x4E00, 0x4640, 0x0E40, 0x4C40},  // T
+  {0xC600, 0x2640, 0x0C60, 0x4C80},  // Z
+};
+const char NAMES[] = "IJLOSTZ";
+
+// A 3x5 font: just the characters this screen uses.
+const char GLYPH_CHARS[] = "0123456789ACEGILMNORSTVX";
+const byte GLYPHS[][5] = {
+  {7,5,5,5,7}, {2,6,2,2,7}, {7,1,7,4,7}, {7,1,7,1,7}, {5,5,7,1,1},
+  {7,4,7,1,7}, {7,4,7,5,7}, {7,1,1,1,1}, {7,5,7,5,7}, {7,5,7,1,7},
+  {2,5,7,5,5}, {7,4,4,4,7}, {7,4,6,4,7}, {7,4,5,5,7}, {7,2,2,2,7},
+  {4,4,4,4,7}, {5,7,7,5,5},
+  {6,5,5,5,5}, {7,5,5,5,7}, {6,5,6,5,5}, {7,4,7,1,7}, {7,2,2,2,2},
+  {5,5,5,5,2}, {5,5,2,5,5},
+};
+
+byte board[ROWS][COLS];   // settled blocks: 0 empty, else a colour index
+byte shown[ROWS][COLS];   // what is on the panel right now
+byte piece, rot, nextPiece;
+int px, py;
+unsigned long score;
+int lines;
+bool over;
+unsigned long lastFall, fallMs, beepUntil;
+byte prevButtons;
+unsigned long holdStart, lastRepeat;
+byte dealt;
+unsigned int seed = 1;
+
+// ------------------------------------------------------------ the panel
+
+void command(byte c) {
+  digitalWrite(TFT_DC, LOW);
+  digitalWrite(TFT_CS, LOW);
+  SPI.transfer(c);
+  digitalWrite(TFT_CS, HIGH);
+}
+
+void data(byte d) {
+  digitalWrite(TFT_DC, HIGH);
+  digitalWrite(TFT_CS, LOW);
+  SPI.transfer(d);
+  digitalWrite(TFT_CS, HIGH);
+}
+
+void fillRect(int x, int y, int w, int h, uint16_t colour) {
+  digitalWrite(TFT_CS, LOW);
+  digitalWrite(TFT_DC, LOW);
+  SPI.transfer(0x2A);                      // CASET: the columns
+  digitalWrite(TFT_DC, HIGH);
+  SPI.transfer(0); SPI.transfer(x + X_OFFSET);
+  SPI.transfer(0); SPI.transfer(x + w - 1 + X_OFFSET);
+  digitalWrite(TFT_DC, LOW);
+  SPI.transfer(0x2B);                      // RASET: the rows
+  digitalWrite(TFT_DC, HIGH);
+  SPI.transfer(0); SPI.transfer(y + Y_OFFSET);
+  SPI.transfer(0); SPI.transfer(y + h - 1 + Y_OFFSET);
+  digitalWrite(TFT_DC, LOW);
+  SPI.transfer(0x2C);                      // RAMWR: pixels follow
+  digitalWrite(TFT_DC, HIGH);
+  byte hi = colour >> 8, lo = colour & 0xFF;
+  for (long i = (long)w * h; i > 0; i--) {
+    SPI.transfer(hi);
+    SPI.transfer(lo);
+  }
+  digitalWrite(TFT_CS, HIGH);
+}
+
+void tftBegin() {
+  pinMode(TFT_CS, OUTPUT);
+  pinMode(TFT_DC, OUTPUT);
+  pinMode(TFT_RST, OUTPUT);
+  digitalWrite(TFT_CS, HIGH);
+  digitalWrite(TFT_RST, LOW);   // hardware reset
+  delay(20);
+  digitalWrite(TFT_RST, HIGH);
+  delay(120);
+  SPI.begin();
+  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+  command(0x01); delay(150);    // software reset
+  command(0x11); delay(120);    // sleep out
+  command(0x3A); data(0x05);    // 16-bit colour
+  command(0x36); data(0x00);    // rows top to bottom, RGB order
+  command(0x29);                // display on
+}
+
+void drawText(int x, int y, const char *text, uint16_t colour, int scale) {
+  for (; *text; text++, x += 4 * scale) {
+    const char *at = strchr(GLYPH_CHARS, *text);
+    if (*text == ' ' || !at) continue;
+    const byte *g = GLYPHS[at - GLYPH_CHARS];
+    for (int r = 0; r < 5; r++)
+      for (int c = 0; c < 3; c++)
+        if (g[r] & (4 >> c)) fillRect(x + c * scale, y + r * scale, scale, scale, colour);
+  }
+}
+
+void drawNumber(int x, int y, unsigned long value) {
+  char text[7];
+  ultoa(value, text, 10);
+  fillRect(x, y, 46, 10, BLACK);
+  drawText(x, y, text, WHITE, 2);
+}
+
+// ------------------------------------------------------------ the game
+
+bool cellOf(uint16_t shape, int r, int c) {
+  return (shape >> (15 - (r * 4 + c))) & 1;
+}
+
+bool fits(byte p, byte r, int x, int y) {
+  uint16_t shape = SHAPES[p][r];
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 4; j++) {
+      if (!cellOf(shape, i, j)) continue;
+      int bx = x + j, by = y + i;
+      if (bx < 0 || bx >= COLS || by >= ROWS) return false;
+      if (by >= 0 && board[by][bx]) return false;
+    }
+  return true;
+}
+
+byte deal() {
+  const byte opening[3] = {0, 0, 3};       // I, I, O
+  if (dealt < 3) return opening[dealt++];
+  seed = seed * 109 + 89;
+  return (seed >> 8) % 7;
+}
+
+void drawNext() {
+  fillRect(SIDE_X, 26, 26, 14, BLACK);
+  uint16_t shape = SHAPES[nextPiece][0];
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 4; j++)
+      if (cellOf(shape, i, j)) fillRect(SIDE_X + j * 6, 26 + i * 6, 5, 5, COLOURS[nextPiece + 1]);
+}
+
+void beep(int ms) {
+  digitalWrite(BUZZER, HIGH);
+  beepUntil = millis() + ms;
+}
+
+void gameOver() {
+  over = true;
+  Serial.print("GAME OVER  score ");
+  Serial.print(score);
+  Serial.print("  lines ");
+  Serial.println(lines);
+  drawText(SIDE_X, 118, "GAME", RED, 2);
+  drawText(SIDE_X, 132, "OVER", RED, 2);
+  beep(500);
+}
+
+void spawn() {
+  piece = nextPiece;
+  nextPiece = deal();
+  rot = 0;
+  px = 3;
+  py = 0;
+  drawNext();
+  if (!fits(piece, rot, px, py)) {
+    gameOver();
+    return;
+  }
+  Serial.print("piece ");
+  Serial.println(NAMES[piece]);
+}
+
+void clearLines() {
+  int cleared = 0;
+  for (int r = ROWS - 1; r >= 0; r--) {
+    bool full = true;
+    for (int c = 0; c < COLS; c++) if (!board[r][c]) full = false;
+    if (!full) continue;
+    for (int k = r; k > 0; k--) memcpy(board[k], board[k - 1], COLS);
+    memset(board[0], 0, COLS);
+    cleared++;
+    r++;                                   // look at the row that moved down into this one
+  }
+  if (!cleared) return;
+  const int points[5] = {0, 100, 300, 500, 800};
+  score += points[cleared];
+  lines += cleared;
+  fallMs = 500 - min(lines, 30) * 12;
+  Serial.print("lines ");
+  Serial.print(lines);
+  Serial.print("  score ");
+  Serial.println(score);
+  drawNumber(SIDE_X, 62, score);
+  drawNumber(SIDE_X, 92, lines);
+  beep(60);
+}
+
+void lockPiece() {
+  uint16_t shape = SHAPES[piece][rot];
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 4; j++)
+      if (cellOf(shape, i, j) && py + i >= 0) board[py + i][px + j] = piece + 1;
+  clearLines();
+  spawn();
+}
+
+void render() {
+  uint16_t shape = SHAPES[piece][rot];
+  for (int r = 0; r < ROWS; r++)
+    for (int c = 0; c < COLS; c++) {
+      byte v = board[r][c];
+      int i = r - py, j = c - px;
+      if (!over && i >= 0 && i < 4 && j >= 0 && j < 4 && cellOf(shape, i, j)) v = piece + 1;
+      if (v == shown[r][c]) continue;
+      shown[r][c] = v;
+      fillRect(FIELD_X + c * CELL, FIELD_Y + r * CELL, CELL - 1, CELL - 1, COLOURS[v]);
+    }
+}
+
+void newGame() {
+  memset(board, 0, sizeof(board));
+  memset(shown, 0, sizeof(shown));
+  fillRect(0, 0, 128, 160, BLACK);
+  drawText(FIELD_X, 3, "TETRIS", 0x07FF, 2);
+  // The well: a frame one pixel outside the playfield.
+  fillRect(FIELD_X - 2, FIELD_Y - 2, COLS * CELL + 3, 1, GREY);
+  fillRect(FIELD_X - 2, FIELD_Y + ROWS * CELL, COLS * CELL + 3, 1, GREY);
+  fillRect(FIELD_X - 2, FIELD_Y - 2, 1, ROWS * CELL + 3, GREY);
+  fillRect(FIELD_X + COLS * CELL, FIELD_Y - 2, 1, ROWS * CELL + 3, GREY);
+  drawText(SIDE_X, 16, "NEXT", GREY, 1);
+  drawText(SIDE_X, 54, "SCORE", GREY, 1);
+  drawText(SIDE_X, 84, "LINES", GREY, 1);
+  score = 0;
+  lines = 0;
+  over = false;
+  fallMs = 500;
+  drawNumber(SIDE_X, 62, 0);
+  drawNumber(SIDE_X, 92, 0);
+  seed += millis();
+  nextPiece = deal();
+  Serial.println("TETRIS: new game");
+  spawn();
+  lastFall = millis();
+}
+
+byte readButtons() {
+  byte b = 0;
+  if (digitalRead(BTN_LEFT) == LOW) b |= 1;
+  if (digitalRead(BTN_ROTATE) == LOW) b |= 2;
+  if (digitalRead(BTN_RIGHT) == LOW) b |= 4;
+  if (digitalRead(BTN_DROP) == LOW) b |= 8;
+  return b;
+}
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(BTN_LEFT, INPUT_PULLUP);
+  pinMode(BTN_ROTATE, INPUT_PULLUP);
+  pinMode(BTN_RIGHT, INPUT_PULLUP);
+  pinMode(BTN_DROP, INPUT_PULLUP);
+  pinMode(BUZZER, OUTPUT);
+  tftBegin();
+  newGame();
+}
+
+void loop() {
+  unsigned long now = millis();
+  if (beepUntil && now >= beepUntil) {
+    digitalWrite(BUZZER, LOW);
+    beepUntil = 0;
+  }
+  byte buttons = readButtons();
+  byte pressed = buttons & ~prevButtons;
+  prevButtons = buttons;
+
+  if (over) {
+    if (pressed) newGame();             // any button starts again
+    return;
+  }
+
+  // Left and right repeat while held, after a pause, as handhelds do.
+  byte sideways = buttons & 5;
+  if (pressed & 5) {
+    holdStart = now;
+    lastRepeat = now;
+  } else if (sideways && now - holdStart > 220 && now - lastRepeat > 80) {
+    pressed |= sideways;
+    lastRepeat = now;
+  }
+
+  bool moved = false;
+  if ((pressed & 1) && fits(piece, rot, px - 1, py)) { px--; moved = true; }
+  if ((pressed & 4) && fits(piece, rot, px + 1, py)) { px++; moved = true; }
+  if (pressed & 2) {
+    byte r = (rot + 1) & 3;
+    const int kicks[4] = {0, -1, 1, -2};    // try in place, then nudge off a wall
+    for (int k = 0; k < 4; k++)
+      if (fits(piece, r, px + kicks[k], py)) { rot = r; px += kicks[k]; moved = true; break; }
+  }
+  if (pressed & 8) {
+    int fell = 0;
+    while (fits(piece, rot, px, py + 1)) { py++; fell++; }
+    score += 2 * fell;
+    lockPiece();
+    lastFall = now;
+    moved = true;
+  } else if (now - lastFall >= fallMs) {
+    lastFall = now;
+    if (fits(piece, rot, px, py + 1)) py++;
+    else lockPiece();
+    moved = true;
+  }
+  if (moved) render();
+}
+`;
+
+const tetris: BuiltinProject = {
+  id: 'cp_tft_tetris',
+  title: 'Tetris on a colour TFT',
+  description:
+    'The full game on a 1.8" ST7735 colour display: seven pieces in their colours, rotation with wall kicks, ' +
+    'hard drop, line clears with a buzzer chirp, a next-piece preview and a score that speeds the game up. The ' +
+    'display is driven straight from its datasheet over hardware SPI — no graphics library — and only the cells ' +
+    'that change are redrawn, which is what keeps an Uno fast enough to play on. Press Run, then click the four ' +
+    'buttons on the canvas: left, rotate, right, drop.',
+  author: 'creator',
+  tags: ['game', 'tft', 'st7735', 'spi'],
+  baseLikes: 92,
+  createdAt: '2026-10-26T20:15:00.000Z',
+  build: () => {
+    const p = emptyProject('Tetris on a colour TFT');
+    const uno = inst('board.arduino-uno', 40, 300);
+    const tft = inst('comp.st7735', 420, 20);
+    // Laid out as a direction pad: rotate on top, drop underneath.
+    const left = inst('comp.push-button', 400, 340);
+    const rotate = inst('comp.push-button', 460, 290);
+    const right = inst('comp.push-button', 520, 340);
+    const drop = inst('comp.push-button', 460, 390);
+    left.label = 'LEFT';
+    rotate.label = 'ROTATE';
+    right.label = 'RIGHT';
+    drop.label = 'DROP';
+    const buzzer = inst('comp.buzzer', 640, 120);
+    const w = new Wiring(uno, '5V', 'GND_PWR1');
+    // The module runs from 3.3 V.
+    w.link(tft, 'vcc', uno, '3V3', RED);
+    w.link(tft, 'gnd', uno, 'GND_PWR2', BLACK);
+    w.link(uno, 'D13', tft, 'sck', YELLOW);
+    w.link(uno, 'D11', tft, 'mosi', GREEN);
+    w.link(uno, 'D10', tft, 'cs', PURPLE);
+    w.link(uno, 'D9', tft, 'dc', BLUE);
+    w.link(uno, 'D8', tft, 'rst', ORANGE);
+    // Each button pulls its pin to ground; the pull-ups are the Uno's own.
+    for (const [button, pin, colour] of [
+      [left, 'D2', TEAL],
+      [rotate, 'D3', PINK],
+      [right, 'D4', TEAL],
+      [drop, 'D5', ORANGE],
+    ] as [ComponentInstance, string, string][]) {
+      w.link(uno, pin, button, '1a', colour);
+      w.link(button, '2b', uno, 'GND_TOP', BLACK);
+    }
+    w.link(uno, 'D6', buzzer, 'plus', ORANGE);
+    w.link(buzzer, 'minus', uno, 'GND_TOP', BLACK);
+    p.boardInstances = [uno];
+    p.componentInstances = [tft, left, rotate, right, drop, buzzer];
+    p.connections = w.connections;
+    p.codeFiles = [code('sketch.ino', TETRIS_SKETCH)];
+    const tap = (id: string, atMs: number) => [
+      { atMs, action: 'press' as const, componentId: id },
+      { atMs: atMs + 60, action: 'release' as const, componentId: id },
+    ];
+    p.tests = [
+      bench(
+        'The opening clears a line',
+        'I all the way left, I one to the right, O all the way right: the bottom row fills and clears.',
+        [
+          { kind: 'serial-contains', text: 'TETRIS: new game', withinMs: 1500 },
+          { kind: 'serial-contains', text: 'piece I', withinMs: 1500 },
+          { kind: 'serial-contains', text: 'piece O', withinMs: 2600 },
+          { kind: 'serial-contains', text: 'lines 1  score', withinMs: 3800 },
+          { kind: 'pin-toggles', pin: 6, minToggles: 2, withinMs: 3800 },
+        ],
+        {
+          events: [
+            ...tap(left.id, 1000), ...tap(left.id, 1150), ...tap(left.id, 1300), ...tap(drop.id, 1450),
+            ...tap(right.id, 1700), ...tap(drop.id, 1850),
+            ...tap(right.id, 2100), ...tap(right.id, 2250), ...tap(right.id, 2400), ...tap(right.id, 2550),
+            ...tap(drop.id, 2700),
+          ],
+          timeoutMs: 4000,
+        },
+      ),
+    ];
+    return p;
+  },
+};
+
+export const CREATOR_PROJECTS: BuiltinProject[] = [logicComputer, snake, tetris, keypadSafe, weatherStation, twoBoardLink];

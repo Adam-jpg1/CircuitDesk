@@ -7,6 +7,7 @@
 
 import { Lcd1602Device, LCD1602_ADDRESSES } from '../src/simulation/devices/lcd1602';
 import { Max7219Device, MAX7219_REG } from '../src/simulation/devices/max7219';
+import { SpiBus } from '../src/simulation/devices/spiBus';
 import { COMPONENT_DEFINITIONS } from '../src/components-library/definitions';
 
 let failures = 0;
@@ -194,6 +195,34 @@ section('3. two MAX7219s in a chain');
   chainWord([[MAX7219_REG.DIGIT0, 0xff], [MAX7219_REG.DIGIT0, 0x0f]]);
   check(first.litCount !== second.litCount, `the two panels received different data (${first.litCount} vs ${second.litCount})`);
   check(first.litCount > 0 && second.litCount > 0, 'and both received something');
+}
+
+// ================================================ 3b. through the SPI bus =====
+section('3b. a MAX7219 driven through the shared SPI bus');
+{
+  // How firmware actually reaches it: the bus re-reads chip select before
+  // every byte and calls select() each time, and the CS pin's own edge
+  // listener calls it again. A part that treats a repeated select as a new
+  // transaction loses the address byte before the data byte arrives, and the
+  // panel stays dark however correct the sketch is.
+  const bus = new SpiBus();
+  const [device] = bus.sync([{ instanceId: 'mx', csPin: 10, create: () => new Max7219Device('mx', 'cs') }]) as Max7219Device[];
+  let cs: 'high' | 'low' = 'high';
+  const readPin = (pin: number) => (pin === 10 ? cs : undefined);
+  const ctrl = { mode: 0 as const, bitOrder: 'msbFirst' as const };
+  const word = (address: number, data: number) => {
+    cs = 'low';
+    bus.refreshSelection(readPin);
+    bus.transferByte(address, ctrl, readPin);
+    bus.transferByte(data, ctrl, readPin);
+    cs = 'high';
+    bus.refreshSelection(readPin);
+  };
+  word(MAX7219_REG.SHUTDOWN, 0x01);
+  check(device.isAwake, 'a shutdown word sent through the bus wakes it');
+  word(MAX7219_REG.DIGIT0 + 3, 0b00111000);
+  check(device.pixels[3] === 0b00111000 && device.litCount === 3, `a row word lights that row (${device.litCount} lit)`);
+  check(bus.unselectedByteCount === 0, 'and no byte went out with nothing selected');
 }
 
 // ================================================ 4. library and definitions ==

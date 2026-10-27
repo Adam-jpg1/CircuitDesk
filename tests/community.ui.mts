@@ -136,13 +136,116 @@ try {
   await page.getByTitle(/Run \(Ctrl\+Enter\)/).click();
   await page.getByText('Serial', { exact: true }).first().click().catch(() => undefined);
   let serialText = '';
-  for (let i = 0; i < 120 && !/HALT at PC=5 {2}ACC=\d+\s/.test(serialText); i++) {
+  for (let i = 0; i < 120 && !/PC=7 {2}JC {2}6 {2}taken\s/.test(serialText); i++) {
     await page.waitForTimeout(500);
     serialText = await page.locator('.mono-out').first().innerText().catch(() => '');
   }
   const compilerText = await page.locator('.mono-out').first().innerText().catch(() => '');
   check(!/compiler is busy/i.test(compilerText + serialText), 'pressing Run straight after opening the 4-bit computer is never refused as busy');
-  check(/PC=3 {2}ADD {2}3 {2}->  ACC=9/.test(serialText) && /HALT at PC=5 {2}ACC=2/.test(serialText), `and the chips run the program to the end (${(serialText.match(/HALT[^\n]*/) ?? ['no HALT yet'])[0]})`);
+  check(
+    /PC=3 {2}ADD {2}3 {2}->  ACC=9/.test(serialText) && /PC=6 {2}ADD {2}15 {2}->  ACC=8 {2}carry=1/.test(serialText) && /PC=7 {2}JC {2}6 {2}taken/.test(serialText),
+    `and the chips run the program, jumps included (${(serialText.match(/PC=7[^\n]*/) ?? ['no jump yet'])[0]})`,
+  );
+  // And it keeps running, which the canvas shows: the display changes.
+  const segmentsNow = () => page.locator('g[data-definition-id="comp.seven-segment"]').first().innerHTML();
+  const before7 = await segmentsNow();
+  await page.waitForTimeout(1500);
+  check((await segmentsNow()) !== before7, 'the seven-segment display on the canvas keeps changing as it runs');
+
+  // The snake, played. The reports this guards: the matrix stayed dark (the
+  // MAX7219 lost every address byte), and the joystick could only be moved by
+  // inspector sliders. Run it, see pixels, drag the stick up on the canvas and
+  // see the snake turn.
+  await page.goto(`http://localhost:${PORT}/#/community`, { waitUntil: 'networkidle' });
+  await page.locator('[data-community-id="cp_matrix_snake"]').first().click();
+  await page.getByRole('button', { name: /Open a copy/ }).click();
+  await page.waitForURL(/#\/editor\//, { timeout: 15_000 });
+  await page.waitForSelector('g[data-definition-id="comp.max7219"]', { timeout: 15_000 });
+  await page.getByTitle(/Run \(Ctrl\+Enter\)/).click();
+  const lit = () => page.locator('g[data-definition-id="comp.max7219"] circle[fill="#ff4d3d"]').count();
+  let litCount = 0;
+  for (let i = 0; i < 120 && litCount === 0; i++) {
+    await page.waitForTimeout(500);
+    litCount = await lit();
+  }
+  check(litCount >= 3, `the snake and its food light the matrix on the canvas (${litCount} pixels)`);
+  const picture = () => page.locator('g[data-definition-id="comp.max7219"]').first().innerHTML();
+  await page.waitForTimeout(400);
+  const frameA = await picture();
+  await page.waitForTimeout(800);
+  check((await picture()) === frameA, 'a new game waits for the player rather than crawling into a wall');
+  await page.getByText('Serial', { exact: true }).first().click().catch(() => undefined);
+  const stick = await page.locator('g[data-definition-id="comp.joystick"]').first().boundingBox();
+  if (stick) {
+    const cx = stick.x + stick.width / 2;
+    const cy = stick.y + stick.height * 0.35;
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx, cy - 60, { steps: 6 });
+    let snakeSerial = '';
+    for (let i = 0; i < 20 && !/turn U/.test(snakeSerial); i++) {
+      await page.waitForTimeout(250);
+      snakeSerial = await page.locator('.mono-out').first().innerText().catch(() => '');
+    }
+    await page.waitForTimeout(600);
+    const frameB = await picture();
+    await page.mouse.up();
+    check(/GO\n/.test(snakeSerial) && /turn U/.test(snakeSerial), 'dragging the joystick up on the canvas starts the game and turns the snake');
+    check(frameB !== frameA, 'and the snake moves on the matrix');
+    check(!/turn [LR]/.test(snakeSerial), 'with no phantom turns from a stick nobody touched');
+  } else {
+    check(false, 'the joystick is on the canvas');
+  }
+
+  // Tetris, played with the mouse: the panel draws, the piece falls on its
+  // own, and the four buttons on the canvas play the opening that clears a
+  // line (I left, I right once, O right four times, each hard-dropped).
+  await page.goto(`http://localhost:${PORT}/#/community`, { waitUntil: 'networkidle' });
+  await page.locator('[data-community-id="cp_tft_tetris"]').first().click();
+  await page.getByRole('button', { name: /Open a copy/ }).click();
+  await page.waitForURL(/#\/editor\//, { timeout: 15_000 });
+  await page.waitForSelector('g[data-definition-id="comp.st7735"]', { timeout: 15_000 });
+  await page.getByTitle(/Run \(Ctrl\+Enter\)/).click();
+  await page.getByText('Serial', { exact: true }).first().click().catch(() => undefined);
+  const serialNow = () => page.locator('.mono-out').first().innerText().catch(() => '');
+  let tetrisSerial = '';
+  for (let i = 0; i < 120 && !/piece I/.test(tetrisSerial); i++) {
+    await page.waitForTimeout(500);
+    tetrisSerial = await serialNow();
+  }
+  const panel = () => page.locator('g[data-definition-id="comp.st7735"] image').first().getAttribute('href').catch(() => null);
+  const panelA = await panel();
+  check(!!panelA && panelA.startsWith('data:image/png'), 'the TFT shows a picture once the game starts');
+  await page.waitForTimeout(1200);
+  check((await panel()) !== panelA, 'and it changes as the piece falls on its own');
+  const button = (name: string) => page.locator('g[data-definition-id="comp.push-button"]', { hasText: name }).first().boundingBox();
+  const [leftBtn, rightBtn, dropBtn] = await Promise.all([button('LEFT'), button('RIGHT'), button('DROP')]);
+  check(!!leftBtn && !!rightBtn && !!dropBtn && !!(await button('ROTATE')), 'the four buttons are labelled on the canvas');
+  if (leftBtn && rightBtn && dropBtn) {
+    const tapAt = async (b: { x: number; y: number; width: number; height: number }) => {
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+      await page.mouse.down();
+      await page.waitForTimeout(90);
+      await page.mouse.up();
+      await page.waitForTimeout(140);
+    };
+    const waitFor = async (re: RegExp) => {
+      for (let i = 0; i < 30 && !re.test(tetrisSerial); i++) {
+        await page.waitForTimeout(200);
+        tetrisSerial = await serialNow();
+      }
+    };
+    for (let i = 0; i < 3; i++) await tapAt(leftBtn);
+    await tapAt(dropBtn);
+    await waitFor(/piece I[\s\S]*piece I/);
+    await tapAt(rightBtn);
+    await tapAt(dropBtn);
+    await waitFor(/piece O/);
+    for (let i = 0; i < 4; i++) await tapAt(rightBtn);
+    await tapAt(dropBtn);
+    await waitFor(/lines 1/);
+    check(/lines 1 {2}score \d+/.test(tetrisSerial), `clicking the buttons on the canvas plays the opening and clears a line (${(tetrisSerial.match(/lines[^\n]*/) ?? ['no line'])[0]})`);
+  }
 
   // The creator key. Only meaningful when the server under test has one; the
   // local runner sets CREATOR_TOKEN for this, a deployment sets its own.

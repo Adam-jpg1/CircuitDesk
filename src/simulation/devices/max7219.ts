@@ -46,6 +46,8 @@ export class Max7219Device implements SpiDevice {
 
   /** Bytes received since CS fell. */
   private shiftIn: number[] = [];
+  /** CS as last seen, so only a real edge starts or latches a word. */
+  private selected = false;
   /** What this device pushed out of DOUT during the current transaction. */
   private shiftOut: number[] = [];
   private log: string[] = [];
@@ -72,8 +74,14 @@ export class Max7219Device implements SpiDevice {
    *
    * Only the *last* two bytes matter: in a chain, earlier words have already
    * been shifted through to the devices further along.
+   *
+   * The bus re-asserts selection before every byte, so a repeated select is
+   * not an edge: treating it as one would throw away the address byte before
+   * the data byte arrived, and no word would ever latch.
    */
   select(selected: boolean): void {
+    if (selected === this.selected) return;
+    this.selected = selected;
     if (selected) {
       this.shiftIn = [];
       this.shiftOut = [];
@@ -161,6 +169,7 @@ export class Max7219Device implements SpiDevice {
     this.shutdown = true;
     this.displayTest = false;
     this.shiftIn = [];
+    this.selected = false;
   }
 
   snapshot(): DeviceSnapshot {

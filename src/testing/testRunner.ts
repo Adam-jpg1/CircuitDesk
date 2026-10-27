@@ -119,6 +119,10 @@ export async function runTest(project: CircuitProject, firmware: TestFirmware, t
   const timeline: { atMs: number; event: string }[] = [];
 
   try {
+    // Power-up: the circuit is on the pins before the first instruction, so a
+    // sketch reading a joystick in its first millisecond sees the stick, not
+    // 0 V. The live world does the same (SimulationWorld.runFor).
+    binding.update(controls);
     let lastYield = performance.now();
     while (runner.timeMs < totalMs) {
       // apply due input events

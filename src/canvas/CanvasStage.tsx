@@ -257,6 +257,61 @@ export function CanvasStage() {
           window.addEventListener('pointerup', release);
           return;
         }
+        if (def.simulationAdapterId === 'sim.joystick') {
+          // A thumbstick is pushed, not clicked: dragging deflects it and
+          // letting go springs it back to centre, as the real one's springs
+          // do. A press without a drag is the stick's own click switch. The
+          // drag is measured in the part's unrotated frame, so a stick turned
+          // on the canvas still pushes the way it is drawn.
+          const sim = useSimulationStore.getState();
+          const swKey = contactStateKey(inst.id, 'sw');
+          const theta = (-inst.rotation * Math.PI) / 180;
+          const start = toWorld(e.clientX, e.clientY);
+          const fullThrow = 6 * MM;
+          let dragged = false;
+          let swHeld = false;
+          const holdTimer = window.setTimeout(() => {
+            if (dragged) return;
+            swHeld = true;
+            useSimulationStore.getState().pressButton(swKey, true);
+          }, 150);
+          const move = (ev: PointerEvent) => {
+            const world = toWorld(ev.clientX, ev.clientY);
+            const wx = world.x - start.x;
+            const wy = world.y - start.y;
+            const dx = wx * Math.cos(theta) - wy * Math.sin(theta);
+            const dy = wx * Math.sin(theta) + wy * Math.cos(theta);
+            if (!dragged && Math.hypot(dx, dy) < 1.5 * MM) return;
+            dragged = true;
+            if (swHeld) {
+              swHeld = false;
+              useSimulationStore.getState().pressButton(swKey, false);
+            }
+            const axis = (d: number) => Math.min(1, Math.max(0, 0.5 + d / (2 * fullThrow)));
+            useSimulationStore.getState().setPot(`${inst.id}#x`, axis(dx));
+            useSimulationStore.getState().setPot(`${inst.id}#y`, axis(dy));
+          };
+          const release = () => {
+            window.clearTimeout(holdTimer);
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', release);
+            const st = useSimulationStore.getState();
+            st.setPot(`${inst.id}#x`, 0.5);
+            st.setPot(`${inst.id}#y`, 0.5);
+            if (swHeld) {
+              st.pressButton(swKey, false);
+            } else if (!dragged) {
+              // A quick tap: long enough for firmware polling every few
+              // milliseconds to see the switch close.
+              st.pressButton(swKey, true);
+              window.setTimeout(() => useSimulationStore.getState().pressButton(swKey, false), 120);
+            }
+          };
+          sim.setPot(`${inst.id}#x`, 0.5);
+          window.addEventListener('pointermove', move);
+          window.addEventListener('pointerup', release);
+          return;
+        }
         if (def.simulationAdapterId === 'sim.toggle-switch') {
           const cur = useSimulationStore.getState().toggleStates[inst.id] === true;
           useSimulationStore.getState().setToggle(inst.id, !cur);

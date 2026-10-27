@@ -132,6 +132,8 @@ export class SimulationWorld {
    * interfaces stay in milliseconds, so no runner had to change.
    */
   private elapsedNs = 0;
+  /** Whether the circuit has been resolved once since power-up or reset. */
+  private poweredUp = false;
 
   /** Called between slices to propagate whatever the boards just did. */
   settle: (() => void) | null = null;
@@ -312,6 +314,16 @@ export class SimulationWorld {
     const stuck = new Set<string>();
     let zeroLengthSteps = 0;
 
+    // Power-up: the circuit is there before the processors leave reset. A
+    // joystick's wipers, a sensor's output, a pull-up — all of it is on the
+    // pins at the first instruction, so it is resolved once before the first
+    // slice. Without this, a sketch that reads an input in its first
+    // millisecond reads 0 V from a stick sitting at centre.
+    if (!this.poweredUp) {
+      this.poweredUp = true;
+      this.settle?.();
+    }
+
     while (this.elapsedNs < targetNs) {
       // Anything already due runs before the boards advance, so a callback
       // scheduled for exactly now is not observed a slice late.
@@ -366,6 +378,7 @@ export class SimulationWorld {
   reset(): void {
     for (const member of this.members) member.runner.reset?.();
     this.elapsedNs = 0;
+    this.poweredUp = false;
   }
 
   /**

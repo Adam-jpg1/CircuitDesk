@@ -73,6 +73,13 @@ export interface TftControllerSpec {
   /** COLMOD values the part accepts, e.g. 0x55 for 16-bit. */
   pixelFormats: readonly number[];
   /**
+   * The COLMOD bits the part actually decodes. The ST7735 reads only the low
+   * three (IFPF); the rest are don't-care, which is why Adafruit's driver
+   * sends 0x05 for 16-bit colour and a panel shows it. Omitted means every
+   * bit counts.
+   */
+  pixelFormatMask?: number;
+  /**
    * Vendor commands this controller has, and how many parameter bytes each
    * takes. Present so the byte stream stays in step even where the command has
    * no visual effect — and absent so another controller's commands do not.
@@ -330,7 +337,9 @@ export class TftDisplayDevice implements SpiDevice {
         return;
       }
       case DCS.COLMOD: {
-        const v = args[0] ?? 0;
+        const mask = this.spec.pixelFormatMask ?? 0xff;
+        const raw = args[0] ?? 0;
+        const v = this.spec.pixelFormats.find((f) => (f & mask) === (raw & mask)) ?? raw;
         if (!this.spec.pixelFormats.includes(v)) {
           // A format the silicon does not have. Refusing it is the point: a
           // library configured for 18-bit colour on a part that only does 16
