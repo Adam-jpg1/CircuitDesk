@@ -218,22 +218,25 @@ const parsed = parseNotices(NOTICES);
   );
 
   // The two Espressif RISC-V boards' claims in particular must not have grown.
-  // Both execute real firmware and real GPIO and nothing else, and a list that
+  // Both execute real firmware, real GPIO and UART0 — Serial, which
+  // tests/esp.uart.mts runs on both chips — and nothing else, and a list that
   // quietly gained a peripheral would be the first sign of a claim outrunning
   // the runtime.
   const c6 = getBoardDefinition('board.esp32-c6-devkitc-1')!;
   const c6Apis = (c6.simulation?.supportedApis ?? []).join(' ').toLowerCase();
-  for (const unclaimed of ['uart', 'serial', 'analogread', 'adc', 'wire', 'i2c', 'spi', 'analogwrite', 'pwm', 'wifi', 'bluetooth', 'ble', 'zigbee', 'thread', 'usb']) {
+  check(/serial \(uart0 /.test(c6Apis), 'the ESP32-C6 claims Serial as UART0, and only as UART0');
+  for (const unclaimed of ['analogread', 'adc', 'wire', 'i2c', 'spi', 'analogwrite', 'pwm', 'wifi', 'bluetooth', 'ble', 'zigbee', 'thread', 'usb']) {
     check(!c6Apis.includes(unclaimed), `the ESP32-C6 does not claim ${unclaimed}`);
   }
   const c6Limitation = (c6.metadata?.limitation ?? '').toLowerCase();
-  for (const named of ['wi-fi', 'bluetooth', 'zigbee', 'thread', 'usb', 'adc', 'pwm', 'i2c', 'spi', 'uart']) {
+  for (const named of ['wi-fi', 'bluetooth', 'zigbee', 'thread', 'usb', 'adc', 'pwm', 'i2c', 'spi']) {
     check(c6Limitation.includes(named), `and its limitation note names ${named} as unsupported`);
   }
 
   const c3 = getBoardDefinition('board.esp32-c3')!;
   const apis = (c3.simulation?.supportedApis ?? []).join(' ').toLowerCase();
-  for (const unclaimed of ['uart', 'serial', 'analogread', 'adc', 'wire', 'i2c', 'spi', 'analogwrite', 'pwm', 'wifi', 'bluetooth', 'ble']) {
+  check(/serial \(uart0 /.test(apis), 'the ESP32-C3 claims Serial as UART0, and only as UART0');
+  for (const unclaimed of ['analogread', 'adc', 'wire', 'i2c', 'spi', 'analogwrite', 'pwm', 'wifi', 'bluetooth', 'ble']) {
     check(!apis.includes(unclaimed), `the ESP32-C3 still does not claim ${unclaimed}`);
   }
   check(apis.includes('digitalwrite') && apis.includes('digitalread'), 'while keeping the claims it earned');

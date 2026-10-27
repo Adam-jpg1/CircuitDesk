@@ -21,6 +21,7 @@ import { RegisterFile } from './registerFile';
 import { FlashMmu, SpiMemController, SPI_MEM_BASE } from './spiMem';
 import { Esp32C3Gpio } from './gpio';
 import { InterruptMatrix, INTERRUPT_SOURCE, SystemRegisters, type InterruptingPeripheral } from './interrupts';
+import { EspUart, ESP32C3_UART_LAYOUT } from '../espRiscv/uart';
 
 export { RegisterFile } from './registerFile';
 import type { SerialNorFlash } from './spiFlash';
@@ -497,6 +498,8 @@ export function createStartupPeripherals(clock: SimulatedClock, flash?: SerialNo
     new SystemConfiguration(),
     ...gpioPeripherals(clock),
     new SysTimer(clock),
+    // UART0: Serial, through the IDF driver.
+    new EspUart('uart0', PERIPHERAL_BASE.uart0, clock, INTERRUPT_SOURCE.uart0, ESP32C3_UART_LAYOUT),
 
   ];
 }

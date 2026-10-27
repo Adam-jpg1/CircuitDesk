@@ -187,6 +187,15 @@ export function parseEspApplicationImage(
         `Segment ${i} claims ${length} bytes but only ${buffer.length - offset} remain — the image is truncated.`,
       );
     }
+    // Load addresses below 0x10000000 are reserved for things that are not
+    // loaded: esptool pads the image to align its flash mappings with a
+    // segment at address 0, and ESP-IDF's bootloader (should_load() in
+    // esp_image_format.c) skips them. Rejecting one rejected any sketch whose
+    // size happened to need the padding.
+    if (loadAddress < 0x10000000) {
+      offset += length;
+      continue;
+    }
     const region = regions.find((r) => loadAddress >= r.start && loadAddress + length <= r.end);
     if (!region) {
       throw new EspImageRejectedError(

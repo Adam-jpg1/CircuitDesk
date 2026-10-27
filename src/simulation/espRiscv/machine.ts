@@ -274,6 +274,15 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
     this.interruptsDirty = true;
   }
 
+  /**
+   * Tells the machine a source changed without a register write — bytes
+   * arriving at a UART from the outside world, say — so the next step looks
+   * rather than waiting for the next write or scheduled check.
+   */
+  interruptSourceChanged(): void {
+    this.interruptsDirty = true;
+  }
+
   // ------------------------------------------------------ interrupt delivery
 
   /**

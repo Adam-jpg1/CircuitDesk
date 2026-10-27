@@ -18,6 +18,7 @@
 // This module imports the emulators, so it must only ever be reached through
 // an adapter's dynamic import. Nothing in the startup bundle may import it.
 
+import { EspUart } from './espRiscv/uart';
 import { Esp32C3Machine } from './esp32c3/esp32c3Machine';
 import { parseEspApplicationImage, type EspApplicationImage } from './esp32c3/espImage';
 import { createStartupPeripherals } from './esp32c3/peripherals';
@@ -39,7 +40,7 @@ export interface EspRunnerConfig {
   /** Every GPIO the chip has, whether or not a given board brings it out. */
   pinCount: number;
   /** Builds the machine and its peripherals, and returns its GPIO block. */
-  build(flash: SerialNorFlash): { machine: EspRiscvMachine; gpio: Esp32C3Gpio };
+  build(flash: SerialNorFlash): { machine: EspRiscvMachine; gpio: Esp32C3Gpio; uart?: EspUart };
 }
 
 /**
@@ -74,6 +75,8 @@ export class EspRiscvRunner implements BoardRunner {
 
   private readonly machine: EspRiscvMachine;
   private readonly gpio: Esp32C3Gpio;
+  /** UART0, which is Serial. */
+  private readonly uart: EspUart | undefined;
   private readonly pinCount: number;
   private readonly flash: SerialNorFlash;
   private readonly image: EspApplicationImage;
@@ -107,6 +110,8 @@ export class EspRiscvRunner implements BoardRunner {
     const built = config.build(this.flash);
     this.machine = built.machine;
     this.gpio = built.gpio;
+    this.uart = built.uart;
+    if (this.uart) this.uart.onByte = (byte: number) => this.onSerialByte?.(byte);
 
     for (let i = 0; i < this.pinCount; i++) this.history.push(this.freshHistory());
     this.gpio.onPinChange((change) => this.recordChange(change));
@@ -173,10 +178,12 @@ export class EspRiscvRunner implements BoardRunner {
       // would burn the whole budget to reach the same state.
       if (this.machine.stalled) {
         this.machine.timeLimitNanos = undefined;
+        this.uart?.sync();
         return;
       }
     }
     this.machine.timeLimitNanos = undefined;
+    this.uart?.sync();
   }
 
   /**
@@ -277,7 +284,16 @@ export class EspRiscvRunner implements BoardRunner {
   }
 
   /** The hardware UART is not modelled yet, so no byte can be queued into it. */
-  queueSerialInput(): void {}
+  queueSerialInput(text: string): void {
+    if (!this.uart) return;
+    this.uart.receive(new TextEncoder().encode(text));
+    this.machine.interruptSourceChanged();
+  }
+
+  /** The rate Serial.begin() programmed into UART0. */
+  get uartBaudRate(): number | undefined {
+    return this.uart?.baudRate;
+  }
 
   /**
    * Runs a callback after a delay in simulated microseconds.
@@ -351,7 +367,8 @@ export const ESP32C3_RUNNER: EspRunnerConfig = {
     for (const peripheral of peripherals) machine.addPeripheral(peripheral);
     const gpio = peripherals.find((p): p is Esp32C3Gpio => p instanceof Esp32C3Gpio);
     if (!gpio) throw new Error('The ESP32-C3 machine was built without a GPIO block.');
-    return { machine, gpio };
+    const uart = peripherals.find((p): p is EspUart => p instanceof EspUart && p.name === 'uart0');
+    return { machine, gpio, uart };
   },
 };
 

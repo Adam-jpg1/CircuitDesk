@@ -251,7 +251,7 @@ export const ESP32_C3_SUPERMINI = headerBoard({
   color: '#1b2a36',
   description:
     'A widely cloned ESP32-C3 board the size of a postage stamp. The RISC-V core executes the compiled '
-    + 'application image for real; Wi-Fi, Bluetooth, the ADC, PWM, I2C, SPI and the hardware UART are not simulated.',
+    + 'application image for real, with GPIO and Serial; Wi-Fi, Bluetooth, the ADC, PWM, I2C and SPI are not simulated.',
   left: [
     g3('IO5', 'IO5'), g3('IO6', 'IO6'), g3('IO7', 'IO7'),
     g3('IO8', 'IO8', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }),

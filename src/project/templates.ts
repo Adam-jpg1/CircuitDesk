@@ -436,12 +436,13 @@ void loop() {
 const ESP32C6_GPIO_CODE = `// Showcase - ESP32-C6: what is real, and what is not
 //
 // This board executes the compiled RISC-V application image for real: ESP-IDF
-// startup, FreeRTOS, setup() and loop(), and GPIO with its pull resistors.
+// startup, FreeRTOS, setup() and loop(), GPIO with its pull resistors, and
+// Serial on UART0.
 //
 // It does NOT simulate Wi-Fi, Bluetooth, Zigbee, Thread, USB Serial/JTAG, the
-// ADC, PWM, I2C, SPI or the hardware UART. Sketches using them compile and
-// run and quietly do nothing, so this showcase uses only what is real: pins
-// in, pins out, and timing from the actual CPU.
+// ADC, PWM, I2C or SPI. Sketches using them compile and run and quietly do
+// nothing, so this showcase uses only what is real: pins in, pins out, and
+// timing from the actual CPU.
 
 const int LEDS[] = {15, 18, 19, 20};
 const int BUTTON = 9;      // the board's BOOT button, active low
@@ -506,9 +507,9 @@ void loop() {
 const C6_BLINK_CODE = `// Starter - ESP32-C6 Blink
 //
 // The compiled RISC-V image really executes: ESP-IDF startup, FreeRTOS, then
-// setup() and loop(). GPIO and its pull resistors are simulated; Wi-Fi,
-// Bluetooth, the ADC, PWM, I2C, SPI and the hardware UART are not, so a
-// sketch using them compiles, runs, and quietly does nothing.
+// setup() and loop(). GPIO, its pull resistors and Serial (UART0) are
+// simulated; Wi-Fi, Bluetooth, the ADC, PWM, I2C and SPI are not, so a sketch
+// using them compiles, runs, and quietly does nothing.
 //
 // Pin numbers are IO numbers - the pad's own name, as printed on the board.
 
@@ -518,6 +519,8 @@ const int BUTTON = 9;    // BOOT button, active low
 void setup() {
   pinMode(LED, OUTPUT);
   pinMode(BUTTON, INPUT_PULLUP);
+  Serial.begin(115200);
+  Serial.println("ESP32-C6 ready");
 }
 
 void loop() {
@@ -1254,8 +1257,8 @@ void loop() {
     name: 'ESP32-C6: what is real, and what is not',
     description:
       'Real RISC-V execution of the compiled application image — ESP-IDF startup, FreeRTOS, setup() and loop(), ' +
-      'and GPIO with its pulls. Wi-Fi, Bluetooth, the ADC, PWM, I2C, SPI and the hardware UART are not simulated, ' +
-      'so this uses only what genuinely runs.',
+      'GPIO with its pulls, and Serial. Wi-Fi, Bluetooth, the ADC, PWM, I2C and SPI are not simulated, so this ' +
+      'uses only what genuinely runs.',
     tags: ['simulated', 'esp32', 'gpio'],
     kind: 'showcase',
     board: 'ESP32-C6-DevKitC-1',

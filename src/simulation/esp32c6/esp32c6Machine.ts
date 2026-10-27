@@ -11,6 +11,7 @@
 // that would not have shown up as a crash are the dangerous ones, and the flash
 // MMU's inverted valid bit is the clearest of them.
 
+import type { EspUart } from '../espRiscv/uart';
 import { EspRiscvMachine, type EspMachineOptions } from '../espRiscv/machine';
 import { ESP32C6_SOC } from '../espRiscv/soc';
 import { createEsp32C6Peripherals, type Esp32C6Peripherals } from './peripherals';
@@ -47,6 +48,7 @@ export class Esp32C6Machine extends EspRiscvMachine {
 export interface Esp32C6MachineParts {
   machine: Esp32C6Machine;
   gpio: Esp32C3Gpio;
+  uart0: EspUart;
   interrupts: Esp32C6InterruptController;
 }
 
@@ -68,5 +70,5 @@ export function createEsp32C6Machine(flash?: SerialNorFlash, options: EspMachine
   // software interrupts.
   machine.useInterruptRouter(parts.interrupts);
   installRomFlashDevice(machine.romState, machine.flashDevice);
-  return { machine, gpio: parts.gpio, interrupts: parts.interrupts };
+  return { machine, gpio: parts.gpio, uart0: parts.uart0, interrupts: parts.interrupts };
 }

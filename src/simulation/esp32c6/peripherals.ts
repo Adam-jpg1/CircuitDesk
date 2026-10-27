@@ -15,6 +15,7 @@
 //
 // Base addresses are from `soc/esp32c6/include/soc/reg_base.h`.
 
+import { EspUart, ESP32C6_UART_LAYOUT } from '../espRiscv/uart';
 import { RegisterFile } from '../esp32c3/registerFile';
 import { SysTimer, TimerGroup } from '../esp32c3/peripherals';
 import { SpiMemController } from '../esp32c3/spiMem';
@@ -95,6 +96,7 @@ export function esp32c6Gpio(clock: SimulatedClock): Esp32C3Gpio {
 export interface Esp32C6Peripherals {
   peripherals: Peripheral[];
   gpio: Esp32C3Gpio;
+  uart0: EspUart;
   interrupts: Esp32C6InterruptController;
   mmu: Esp32C6FlashMmu;
 }
@@ -110,6 +112,12 @@ export function createEsp32C6Peripherals(clock: SimulatedClock, flash?: SerialNo
   const mmu = new Esp32C6FlashMmu();
   const interrupts = new Esp32C6InterruptController();
   const gpio = esp32c6Gpio(clock);
+  // UART0: Serial, through the IDF driver.
+  // Its clock source and divider live in PCR on this part (PCR_UART0_SCLK_CONF).
+  const pcr = new Esp32C6Pcr();
+  const uart0 = new EspUart('uart0', ESP32C6_PERIPHERAL_BASE.uart0, clock, ESP32C6_INTERRUPT_SOURCE.uart0, ESP32C6_UART_LAYOUT, () =>
+    pcr.readUint32(0x4),
+  );
 
   const peripherals: Peripheral[] = [
     // SPI0 is the cache's own controller and carries the MMU's access port, so
@@ -121,7 +129,7 @@ export function createEsp32C6Peripherals(clock: SimulatedClock, flash?: SerialNo
     ...interrupts.peripherals,
     // PCR is not storage that starts at zero: 76 of its registers have a
     // documented non-zero reset value, and firmware asserts on some of them.
-    new Esp32C6Pcr(),
+    pcr,
     new RegisterFile('assist_debug', ESP32C6_PERIPHERAL_BASE.assistDebug, 0x1000),
     new RegisterFile('extmem', ESP32C6_PERIPHERAL_BASE.extMem, 0x1000),
     // The modem clock control blocks. Configuration registers: startup enables
@@ -142,7 +150,8 @@ export function createEsp32C6Peripherals(clock: SimulatedClock, flash?: SerialNo
     gpio,
     gpio.ioMux,
     new SysTimer(clock, ESP32C6_PERIPHERAL_BASE.systimer, ESP32C6_INTERRUPT_SOURCE.systimerTarget0),
+    uart0,
   ];
 
-  return { peripherals, gpio, interrupts, mmu };
+  return { peripherals, gpio, uart0, interrupts, mmu };
 }

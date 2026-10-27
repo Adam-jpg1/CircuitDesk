@@ -135,6 +135,7 @@ const ESP32C3_SIM_APIS = [
   'digitalRead',
   'delay/millis/micros',
   'setup() and repeated loop()',
+  'Serial (UART0 through the ESP-IDF driver, both directions, at the baud rate set)',
 ];
 
 const ESP32C3_SIM_PERIPHERALS = [
@@ -142,6 +143,7 @@ const ESP32C3_SIM_PERIPHERALS = [
   'System timer, which drives the FreeRTOS tick',
   'Interrupt matrix and CPU interrupt controller',
   'SPI flash and the flash MMU',
+  'UART0 — FIFOs, the TX-empty, RX-full, RX-timeout and TX-done interrupts, baud from the programmed divider',
 ];
 
 /**
@@ -149,8 +151,8 @@ const ESP32C3_SIM_PERIPHERALS = [
  * does is large and a student should not have to discover it by being wrong.
  */
 const ESP32C3_LIMITATION =
-  'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), and GPIO. ' +
-  'Wi-Fi, Bluetooth LE, USB Serial/JTAG, ADC, PWM, I2C, SPI to devices and the hardware UART are not simulated — ' +
+  'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO, ' +
+  'and Serial on UART0. Wi-Fi, Bluetooth LE, USB Serial/JTAG, ADC, PWM, I2C and SPI to devices are not simulated — ' +
   'sketches using them compile and run, but those peripherals do nothing.';
 
 /**
@@ -166,6 +168,7 @@ const ESP32C6_SIM_APIS = [
   'digitalRead',
   'delay/millis/micros',
   'setup() and repeated loop()',
+  'Serial (UART0 through the ESP-IDF driver, both directions, at the baud rate set)',
 ];
 
 const ESP32C6_SIM_PERIPHERALS = [
@@ -175,6 +178,7 @@ const ESP32C6_SIM_PERIPHERALS = [
   'Low-power timer, which is where the runtime reads the time',
   'SPI flash and the flash MMU',
   'ROM watchdog, heap, system-timer and flash drivers this part boots on',
+  'UART0 — FIFOs, the TX-empty, RX-full, RX-timeout and TX-done interrupts, baud from the programmed divider',
 ];
 
 /**
@@ -182,9 +186,9 @@ const ESP32C6_SIM_PERIPHERALS = [
  * uses any of it will compile, run, and quietly do nothing.
  */
 const ESP32C6_LIMITATION =
-  'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), and GPIO ' +
-  'with its pulls. Wi-Fi, Bluetooth LE, Zigbee/802.15.4, Thread, USB Serial/JTAG, ADC, PWM, I2C, SPI to devices and ' +
-  'the hardware UART are not simulated — sketches using them compile and run, but those peripherals do nothing.';
+  'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO ' +
+  'with its pulls, and Serial on UART0. Wi-Fi, Bluetooth LE, Zigbee/802.15.4, Thread, USB Serial/JTAG, ADC, PWM, ' +
+  'I2C and SPI to devices are not simulated — sketches using them compile and run, but those peripherals do nothing.';
 
 const RP2040_SIM_APIS = [
   'pinMode (INPUT, OUTPUT, INPUT_PULLUP)',
@@ -410,8 +414,9 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       supportedPeripherals: ESP32C3_SIM_PERIPHERALS,
     },
     limitation:
-      'Real RISC-V execution of the compiled image, with GPIO. Wi-Fi, Bluetooth, the ADC, PWM, I2C, SPI and the '
-      + 'hardware UART are not simulated — sketches using them compile, run, and do nothing.',
+      'Real RISC-V execution of the compiled image, with GPIO and Serial on UART0 (built through the generic C3 '
+      + 'target, so Serial is the UART rather than the native USB port). Wi-Fi, Bluetooth, the ADC, PWM, I2C and SPI '
+      + 'are not simulated — sketches using them compile, run, and do nothing.',
   },
   'board.arduino-due': {
     manufacturer: 'Arduino',

@@ -267,16 +267,24 @@ export class Rv32Core {
   step(): number {
     if (this.interruptPending) {
       const mask = this.enabledInterrupts();
-      const chosen = this.selectInterrupt?.(mask);
-      if (chosen !== undefined) {
-        this.trap(chosen, 0, true);
-        return 0;
-      }
-      // Machine external (11), timer (7) and software (3), highest first.
-      for (const bit of [11, 7, 3]) {
-        if (mask & (1 << bit)) {
-          this.trap(bit, 0, true);
+      if (this.selectInterrupt) {
+        // The chip's controller decides, and "none" is an answer: a line
+        // masked by the priority threshold — the handler's own, while it
+        // runs — must not be taken. Falling through to the standard order
+        // below re-entered any handler on line 3, 7 or 11 until its stack ran
+        // out (the C6's UART, allocated line 11, was the first to land there).
+        const chosen = this.selectInterrupt(mask);
+        if (chosen !== undefined) {
+          this.trap(chosen, 0, true);
           return 0;
+        }
+      } else {
+        // Machine external (11), timer (7) and software (3), highest first.
+        for (const bit of [11, 7, 3]) {
+          if (mask & (1 << bit)) {
+            this.trap(bit, 0, true);
+            return 0;
+          }
         }
       }
     }

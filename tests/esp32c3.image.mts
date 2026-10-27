@@ -64,6 +64,20 @@ const rejects = (build: () => unknown, what: string) => {
   check(image.entryPoint === 0x40380000, 'the entry point is read from the header');
 }
 
+// ---------- 1b. esptool's padding segment ----------
+{
+  // esptool aligns an image's flash mappings with a padding segment at load
+  // address 0, and ESP-IDF's bootloader loads nothing below 0x10000000. Whether
+  // a sketch gets one depends on its size, so rejecting it rejected sketches
+  // at random.
+  const image = parseEspApplicationImage(
+    makeImage([{ addr: 0x40380000, length: 64 }, { addr: 0x0, length: 48 }, { addr: 0x3fc8d400, length: 32 }]),
+  );
+  check(image.segments.length === 2, `a padding segment at address 0 is skipped, not rejected (${image.segments.length} loaded)`);
+  check(image.segments[1].loadAddress === 0x3fc8d400 && image.segments[1].fileOffset === 24 + 8 + 64 + 8 + 48 + 8, 'and the segment after it keeps its file offset');
+  check(image.byteLength === 96, `padding is not counted as payload (${image.byteLength})`);
+}
+
 // ---------- 2. everything malformed is refused ----------
 {
   rejects(() => parseEspApplicationImage(new Uint8Array(0)), 'an empty file');
