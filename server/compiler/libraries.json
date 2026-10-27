@@ -83,10 +83,8 @@
             "rp2040:rp2040:rpipicow",
             "rp2040:rp2040:seeed_xiao_rp2040"
           ],
-          "effect": "compiles-only",
-          "effectReason": "Arduino-Pico's Servo emits the pulse from a PIO program. rp2040js models PIO, but runs its state machines from a wall-clock setTimeout loop that is detached from CircuitDesk's simulated timeline, so the program never advances with simulated time and the pin never moves. Driving PIO from the simulated clock is an emulator change, not a library one.",
-          "workaround": "Write the pulse directly (digitalWrite / delayMicroseconds), which works on the Pico today, or use an AVR board.",
-          "note": "Arduino-Pico bundles its own Servo. Installing the Arduino one would be shadowed by it, and is not needed."
+          "effect": "works",
+          "note": "Arduino-Pico bundles its own Servo, which emits the pulse from a PIO program. The simulator runs PIO on the simulated clock, so the pulse is exact and the modelled shaft follows write() (tests/rp2040.pio.mts). Installing the Arduino Servo library is not needed and would be shadowed."
         },
         {
           "source": "core:adafruit:samd",

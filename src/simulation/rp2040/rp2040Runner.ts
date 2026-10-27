@@ -17,6 +17,7 @@
 import { RP2040, USBCDC } from 'rp2040js';
 import { buildBootStub } from './bootStub';
 import { romFloatCall, type RomFloatCore } from './romFloat';
+import { PioClock } from './pioClock';
 import { PadPullResolver } from './gpioPulls';
 import { Rp2040ClockTree } from './clockTree';
 import { installSioFifo } from './sioFifo';
@@ -75,6 +76,8 @@ const ROM_HEADER_END = 0x10;
  * never yields cannot hold the browser's main thread beyond this.
  */
 const MAX_INSTRUCTIONS_PER_CALL = 20_000_000;
+/** The longest stretch a sleeping core's PIO is run for in one step: 100 µs. */
+const PIO_IDLE_SLICE_NS = 100_000;
 
 /** ADC channels 0..3 are GP26..GP29; channel 4 is the temperature sensor. */
 const ADC_FIRST_GPIO = 26;
@@ -111,6 +114,7 @@ export class Rp2040Runner {
 
   private rp!: RP2040;
   private pads!: PadPullResolver;
+  private pioClock!: PioClock;
   private clocks!: Rp2040ClockTree;
   private readonly image: Uf2Image;
   private readonly startupCycleNs: number;
@@ -181,6 +185,7 @@ export class Rp2040Runner {
     const rp = new RP2040();
     rp.logger = { debug() {}, info() {}, warn() {}, error() {} };
     rp.loadBootrom(buildBootStub().rom);
+    this.pioClock = new PioClock(rp.pio as unknown as ConstructorParameters<typeof PioClock>[0]);
     // The ROM's float and double tables trap here (bootStub.ts); any other
     // breakpoint — the SDK's panic(), a sketch's own — is left as it was.
     rp.onBreak = (code: number) => {
@@ -288,17 +293,41 @@ export class Rp2040Runner {
     return hz > 0 && Number.isFinite(hz) ? 1e9 / hz : this.startupCycleNs;
   }
 
-  /** One instruction, or a clock advance while the core is halted on a WFI. */
+  /**
+   * One instruction, or a clock advance while the core is halted on a WFI —
+   * and the PIO state machines for the same stretch of clk_sys. While the core
+   * sleeps, PIO runs event by event (PioClock.advanceWhileIdle), so the pins a
+   * PIO program drives change at their own times rather than all at once at
+   * the next timer alarm.
+   */
   private step(): void {
     const core = this.rp.core;
     if ((core.PC & ~1) < ROM_HEADER_END) this.reportUnresolvedRomCall();
     const cycleNs = this.cycleNs;
+    const clock = this.rp.clock as unknown as { tick(ns: number): void; nanosToNextAlarm: number };
     if (core.waiting) {
-      const clock = this.rp.clock as unknown as { tick(ns: number): void; nanosToNextAlarm: number };
-      clock.tick(clock.nanosToNextAlarm || cycleNs);
+      const ns = clock.nanosToNextAlarm || cycleNs;
+      if (this.pioClock.active) {
+        // Bounded so a sleeping core with no alarm due still comes back to
+        // the run loop's time limit.
+        const start = (clock as unknown as { nanos: number }).nanos;
+        this.pioClock.advanceWhileIdle(
+          Math.min(ns, PIO_IDLE_SLICE_NS),
+          cycleNs,
+          (offset) => {
+            const target = start + offset;
+            const nowNs = (clock as unknown as { nanos: number }).nanos;
+            if (target > nowNs) clock.tick(target - nowNs);
+          },
+          () => core.waiting,
+        );
+      } else {
+        clock.tick(ns);
+      }
     } else {
-      const cycles = core.executeInstruction();
-      (this.rp.clock as unknown as { tick(ns: number): void }).tick((cycles || 1) * cycleNs);
+      const cycles = core.executeInstruction() || 1;
+      clock.tick(cycles * cycleNs);
+      if (this.pioClock.active) this.pioClock.advance(cycles);
     }
   }
 

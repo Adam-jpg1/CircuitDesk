@@ -110,7 +110,8 @@ const AVR_SIM_PERIPHERALS = ['GPIO ports', 'Timer0/1/2', 'USART0', 'ADC'];
  * exercise on real compiled firmware, not from what the chip can do.
  *
  * Deliberately absent, because nothing here tests them: Wi-Fi, USB other than
- * the CDC serial port (tests/rp2040.usbSerial.mts), PIO and the second core.
+ * the CDC serial port (tests/rp2040.usbSerial.mts) and the second core. PIO is
+ * listed for what tests/rp2040.pio.mts proves on it: Servo and tone().
  *
  * Floating point, and with it `analogWrite()` (which computes its PWM divisor
  * in floating point), goes through tables in the boot ROM. Raspberry Pi's
@@ -234,6 +235,7 @@ const RP2040_SIM_APIS = [
   'SPI (hardware SPI, all four modes, MSB first)',
   'analogWrite (PWM duty on any GP pin)',
   'float and double arithmetic, including sin/cos/sqrt/exp/log',
+  'Servo and tone() (PIO programs, on the simulated clock)',
 ];
 const RP2040_SIM_PERIPHERALS = [
   'SIO and GPIO pads (GP0-GP28, including pad pull resistors)',
@@ -242,6 +244,7 @@ const RP2040_SIM_PERIPHERALS = [
   'I2C0 and I2C1',
   'SPI0 and SPI1',
   'PWM slices',
+  'PIO state machines, run on the simulated clock',
   'system timer',
   'clock tree (PLLs, clk_sys, clk_peri)',
 ];
@@ -253,7 +256,8 @@ const RP2040_LIMITATION =
   'Buses follow whichever pins the firmware muxes, defaulting to the Arduino-Pico core\'s GP4/GP5 for Wire ' +
   'and GP18/GP19/GP16 for SPI. ' +
   'Floating point runs on CircuitDesk\'s own implementation of the boot ROM\'s float tables, not Raspberry Pi\'s. ' +
-  'PIO (and so Servo and tone()), the second core, and writing the flash chip are not simulated.';
+  'PIO runs on the simulated clock, so Servo and tone() work. ' +
+  'The second core, PIO-fed DMA and writing the flash chip are not simulated.';
 
 const avrCliCompiler = (fqbn: string): BoardCompilerInfo => ({
   provider: 'arduino-cli',

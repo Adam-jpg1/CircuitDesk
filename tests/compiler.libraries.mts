@@ -129,14 +129,21 @@ section('2. resolving a header against a board');
   check(uno.available === true, 'Servo.h is available for an Uno');
   check(uno.available === true && uno.effect === 'works', 'and it is recorded as actually working there');
 
+  // The Pico's Servo is a PIO program, and PIO runs on the simulated clock
+  // (tests/rp2040.pio.mts measures the pulse), so it works.
   const pico = resolveHeader('Servo.h', 'rp2040:rp2040:rpipico');
-  check(pico.available === true, 'Servo.h is available for a Pico — it does compile');
+  check(pico.available === true && pico.effect === 'works', 'Servo.h is available for a Pico, and works there');
+
+  // A Feather M0's Servo drives the pin from a TC interrupt the SAMD21 model
+  // does not run: it compiles, and is recorded as doing nothing.
+  const feather = resolveHeader('Servo.h', 'adafruit:samd:adafruit_feather_m0');
+  check(feather.available === true, 'Servo.h is available for a Feather M0 — it does compile');
   check(
-    pico.available === true && pico.effect === 'compiles-only',
+    feather.available === true && feather.effect === 'compiles-only',
     'but it is recorded as having no effect, which is the whole point of the distinction',
   );
   check(
-    pico.available === true && Boolean(pico.workaround),
+    feather.available === true && Boolean(feather.workaround),
     'and it offers something the user can do instead',
   );
 
@@ -182,9 +189,12 @@ section('2b. finding the includes in a sketch');
   check(warnUno.length === 0, 'an Uno sketch using Servo.h and Wire.h draws no warnings');
 
   const warnPico = includeWarnings(src, 'rp2040:rp2040:rpipico');
-  check(warnPico.length === 1 && warnPico[0].kind === 'no-effect', 'the same sketch on a Pico is warned that Servo.h does nothing');
+  check(warnPico.length === 0, 'nor does it on a Pico, where Servo runs on PIO');
+
+  const warnFeather = includeWarnings(src, 'adafruit:samd:adafruit_feather_m0');
+  check(warnFeather.length === 1 && warnFeather[0].kind === 'no-effect', 'the same sketch on a Feather M0 is warned that Servo.h does nothing');
   check(
-    warnPico[0]?.reason.includes('PIO'),
+    /\bTC\b/.test(warnFeather[0]?.reason ?? ''),
     'and the reason names the peripheral rather than shrugging',
   );
 
@@ -317,33 +327,48 @@ const AVR_SWEEP = [
 }
 
 // ============================== 5. and reports honestly where it does not ====
-section('5. the Pico build says the library does nothing, and it does nothing');
+//
+// The Pico used to be the example here: its Servo is a PIO program, and PIO
+// ran on the wall clock. It now runs on the simulated clock, so the Pico's
+// shaft follows the sweep like the Uno's. The Feather M0's Servo drives the pin
+// from a TC interrupt the SAMD21 model does not run — that is the case a user
+// must be told about.
+section('5. the Pico now moves the shaft; the Feather M0 says it cannot');
 {
-  const PICO_SWEEP = [
+  const SWEEP = (pin: string) => [
     '#include <Servo.h>',
     'Servo sv;',
-    'void setup() { sv.attach(15); sv.write(0); }',
+    `void setup() { sv.attach(${pin}); sv.write(0); }`,
     'void loop() {',
     '  if (millis() > 3000) sv.write(180);',
     '  else if (millis() > 1500) sv.write(90);',
     '}',
   ].join('\n');
 
-  const { ran, angles, notes } = await sweep(
-    'board.raspberry-pi-pico',
-    { sig: 'GP15', gnd: 'GND3', vcc: '3V3' },
-    PICO_SWEEP,
-  );
-  if (!ran) {
+  const pico = await sweep('board.raspberry-pi-pico', { sig: 'GP15', gnd: 'GND3', vcc: '3V3' }, SWEEP('15'));
+  if (!pico.ran) {
     skip('the RP2040 toolchain is unavailable');
   } else {
-    console.log(`   angles: ${angles.map((a) => a?.toFixed(1) ?? '—').join(', ')}`);
+    const [a0, a90, a180] = pico.angles;
+    console.log(`   Pico: ${pico.angles.map((a) => a?.toFixed(1) ?? '—').join(', ')}`);
     check(
-      angles.every((a) => a !== undefined && Math.abs(a - 90) < 1),
-      'the shaft never moves, because the PIO pulse never reaches the pin',
+      a0 !== undefined && a90 !== undefined && a180 !== undefined && a0 < 15 && Math.abs(a90 - 90) < 15 && a180 > 165,
+      'on a Pico the shaft follows write(0), write(90) and write(180)',
+    );
+    check(!pico.notes.includes('no-effect:Servo.h'), 'and the build report has no caveat to give');
+  }
+
+  const feather = await sweep('board.adafruit-feather', { sig: 'D10', gnd: 'GND1', vcc: '3V3' }, SWEEP('10'));
+  if (!feather.ran) {
+    skip('the SAMD toolchain is unavailable');
+  } else {
+    console.log(`   Feather M0: ${feather.angles.map((a) => a?.toFixed(1) ?? '—').join(', ')}`);
+    check(
+      feather.angles.every((a) => a !== undefined && Math.abs(a - 90) < 1),
+      'on a Feather M0 the shaft never moves, because the TC interrupt that makes the pulse is not modelled',
     );
     check(
-      notes.includes('no-effect:Servo.h'),
+      feather.notes.includes('no-effect:Servo.h'),
       'and the build report says so rather than reporting an unqualified success',
     );
   }

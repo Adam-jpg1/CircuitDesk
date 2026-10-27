@@ -170,10 +170,10 @@ function projectWith(boardDefId: string): CircuitProject {
     !pico.simulation?.supportedApis.some((a) => /wifi/i.test(a)),
     'Pico claims no Wi-Fi APIs',
   );
+  // PIO is claimed: tests/rp2040.pio.mts measures Servo and tone() on it.
   check(
-    // Word-bounded, so "GPIO pads" is not mistaken for a PIO claim.
-    !pico.simulation?.supportedPeripherals.some((p) => /\bPIO\b|USB|Wi-?Fi|second core/i.test(p)),
-    'Pico claims no PIO, USB, Wi-Fi or second core peripheral',
+    !pico.simulation?.supportedPeripherals.some((p) => /USB|Wi-?Fi|second core/i.test(p)),
+    'Pico claims no USB, Wi-Fi or second core peripheral',
   );
   // Pico GP pins never resolve to Arduino pin numbers (no D0-D13 interpretation)
   check(arduinoPinNumber(pico, 'GP0') === undefined && arduinoPinNumber(pico, 'GP26') === undefined,

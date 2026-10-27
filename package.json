@@ -30,6 +30,7 @@
     "test:rp2040:buses": "tsx tests/rp2040.buses.mts",
     "test:rp2040:usb": "tsx tests/rp2040.usbSerial.mts",
     "test:rp2040:float": "tsx tests/rp2040.romFloat.mts",
+    "test:rp2040:pio": "tsx tests/rp2040.pio.mts",
     "test:samd21": "tsx tests/samd21.runtime.mts && tsx tests/samd21.starter.mts && tsx tests/samd21.pwm.mts && tsx tests/samd21.buses.mts",
     "test:pwm:brightness": "tsx tests/sim.pwmBrightness.mts",
     "test:uart:boards": "tsx tests/uart.boards.mts",
