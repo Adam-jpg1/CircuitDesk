@@ -116,7 +116,7 @@ export interface BoardTarget {
   id: string;
   fqbn: string;
   name: string;
-  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6';
+  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21';
   /** arduino-cli core that provides this target. */
   core: string;
   fCpuHz: number;
@@ -258,6 +258,41 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     fCpuHz: 160_000_000,
     flashMaxBytes: 1_310_720,
     ramMaxBytes: 327_680,
+  },
+  // SAMD21 boards: Adafruit's core, which links the application at 0x2000,
+  // above the boards' 8 KB UF2 bootloader — hence 248 KB of the 256 KB flash.
+  {
+    id: 'board.adafruit-feather',
+    fqbn: 'adafruit:samd:adafruit_feather_m0',
+    name: 'Adafruit Feather M0 (ATSAMD21G18)',
+    arch: 'samd21',
+    core: 'adafruit:samd',
+    mcu: 'samd21g18a',
+    fCpuHz: 48_000_000,
+    flashMaxBytes: 253_952,
+    ramMaxBytes: 32_768,
+  },
+  {
+    id: 'board.adafruit-qtpy',
+    fqbn: 'adafruit:samd:adafruit_qtpy_m0',
+    name: 'Adafruit QT Py M0 (ATSAMD21E18)',
+    arch: 'samd21',
+    core: 'adafruit:samd',
+    mcu: 'samd21e18a',
+    fCpuHz: 48_000_000,
+    flashMaxBytes: 253_952,
+    ramMaxBytes: 32_768,
+  },
+  {
+    id: 'board.seeed-xiao',
+    fqbn: 'Seeeduino:samd:seeed_XIAO_m0',
+    name: 'Seeed Studio XIAO SAMD21 (ATSAMD21G18)',
+    arch: 'samd21',
+    core: 'Seeeduino:samd',
+    mcu: 'samd21g18a',
+    fCpuHz: 48_000_000,
+    flashMaxBytes: 253_952,
+    ramMaxBytes: 32_768,
   },
   {
     id: 'board.esp32-c6-devkitc-1',

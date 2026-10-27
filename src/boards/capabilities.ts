@@ -190,6 +190,37 @@ const ESP32C6_LIMITATION =
   'with its pulls, and Serial on UART0. Wi-Fi, Bluetooth LE, Zigbee/802.15.4, Thread, USB Serial/JTAG, ADC, PWM, ' +
   'I2C and SPI to devices are not simulated — sketches using them compile and run, but those peripherals do nothing.';
 
+const SAMD21_SIM_APIS = [
+  'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
+  'digitalWrite',
+  'digitalRead',
+  'analogRead (10-bit, 3.3 V reference)',
+  'delay/millis/micros',
+  'Serial (native USB CDC, to the serial monitor, both directions; while (!Serial) returns once connected)',
+  'Serial1 (the hardware UART, both directions — a part wired to RX/TX reaches it)',
+];
+
+const SAMD21_SIM_PERIPHERALS = [
+  'PORT, with pulls and the single-cycle IOBUS',
+  'SysTick, which millis() counts',
+  'ADC, single conversions',
+  'USB device controller — the CDC serial port, enumerated by a modelled host',
+  'the SERCOM USART behind Serial1 (SERCOM0 on the Adafruit boards, SERCOM4 on the XIAO), with its receive interrupt',
+];
+
+const SAMD21_LIMITATION =
+  'Real SAMD21 firmware on a Cortex-M0+ core: startup, setup() and loop(), GPIO, analogRead, Serial over native USB and Serial1 on the UART pins. ' +
+  'PWM (analogWrite), I2C, SPI, external interrupts, DMA, the DAC and sleep are not simulated — sketches using them ' +
+  'compile and run, but those peripherals do nothing.';
+
+const samd21Compiler = (fqbn: string): BoardCompilerInfo => ({
+  provider: 'arduino-cli',
+  fqbn,
+  requiredCore: 'adafruit:samd',
+  supported: true,
+  note: `Built with Adafruit's SAMD core (${fqbn}), linked above the board's 8 KB bootloader.`,
+});
+
 const RP2040_SIM_APIS = [
   'pinMode (INPUT, OUTPUT, INPUT_PULLUP)',
   'digitalWrite',
@@ -439,22 +470,76 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
   'board.adafruit-feather': {
     manufacturer: 'Adafruit',
     identityNote:
-      'Feather M0 is a family of boards sharing the Feather pin layout. This entry models the shared layout rather than one specific variant.',
+      'Built and run as the Feather M0 Basic, whose pin layout the radio and Wi-Fi Feather M0 variants share.',
     architecture: 'samd',
     aliases: ['feather-m0'],
-    limitation: 'SAMD21 toolchain not installed; wiring only.',
+    processorProfileId: 'proc.samd21',
+    compileProfileId: 'compile.samd21-adafruit',
+    runtimeProfileId: 'runtime.samd21',
+    serverTargetId: 'board.adafruit-feather',
+    // The Feather's labels and the pads behind them, from the core's variant.
+    padMap: {
+      A0: 'PA02', A1: 'PB08', A2: 'PB09', A3: 'PA04', A4: 'PA05', A5: 'PB02',
+      SCK: 'PB11', MOSI: 'PB10', MISO: 'PA12', RX: 'PA11', TX: 'PA10',
+      D13: 'PA17', D12: 'PA19', D11: 'PA16', D10: 'PA18', D9: 'PA07', D6: 'PA20', D5: 'PA15',
+      SCL: 'PA23', SDA: 'PA22',
+    },
+    compiler: samd21Compiler('adafruit:samd:adafruit_feather_m0'),
+    simulation: {
+      engine: 'samd21',
+      supported: true,
+      supportedApis: SAMD21_SIM_APIS,
+      supportedPeripherals: SAMD21_SIM_PERIPHERALS,
+    },
+    limitation: SAMD21_LIMITATION,
   },
   'board.adafruit-qtpy': {
     manufacturer: 'Adafruit',
     architecture: 'samd',
-    aliases: ['qt-py', 'adafruit qt py', 'qt py'],
-    limitation: 'SAMD21 toolchain not installed; wiring only.',
+    aliases: ['qt-py', 'adafruit qt py', 'qt py', 'qt py m0'],
+    processorProfileId: 'proc.samd21',
+    compileProfileId: 'compile.samd21-adafruit',
+    runtimeProfileId: 'runtime.samd21',
+    serverTargetId: 'board.adafruit-qtpy',
+    padMap: {
+      A0: 'PA02', A1: 'PA03', A2: 'PA04', A3: 'PA05', SDA: 'PA16', SCL: 'PA17', TX: 'PA06',
+      RX: 'PA07', SCK: 'PA11', MISO: 'PA09', MOSI: 'PA10',
+    },
+    compiler: samd21Compiler('adafruit:samd:adafruit_qtpy_m0'),
+    simulation: {
+      engine: 'samd21',
+      supported: true,
+      supportedApis: SAMD21_SIM_APIS,
+      supportedPeripherals: SAMD21_SIM_PERIPHERALS,
+    },
+    limitation: SAMD21_LIMITATION,
   },
   'board.seeed-xiao': {
     manufacturer: 'Seeed Studio',
     architecture: 'samd',
-    aliases: ['xiao', 'seeeduino-xiao', 'seeed studio xiao', 'xiao'],
-    limitation: 'SAMD21 toolchain not installed; wiring only.',
+    aliases: ['xiao', 'seeeduino-xiao', 'seeed studio xiao', 'xiao samd21'],
+    processorProfileId: 'proc.samd21',
+    compileProfileId: 'compile.samd21-seeed',
+    runtimeProfileId: 'runtime.samd21',
+    serverTargetId: 'board.seeed-xiao',
+    padMap: {
+      A0: 'PA02', A1: 'PA04', A2: 'PA10', A3: 'PA11', SDA: 'PA08', SCL: 'PA09', TX: 'PB08', RX: 'PB09',
+      A8: 'PA07', A9: 'PA05', A10: 'PA06',
+    },
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'Seeeduino:samd:seeed_XIAO_m0',
+      requiredCore: 'Seeeduino:samd',
+      supported: true,
+      note: "Built with Seeed's SAMD core (Seeeduino:samd:seeed_XIAO_m0), linked above the board's 8 KB bootloader.",
+    },
+    simulation: {
+      engine: 'samd21',
+      supported: true,
+      supportedApis: SAMD21_SIM_APIS,
+      supportedPeripherals: SAMD21_SIM_PERIPHERALS,
+    },
+    limitation: SAMD21_LIMITATION,
   },
 
   // ---------------- RP2040 ----------------

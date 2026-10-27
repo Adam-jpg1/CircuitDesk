@@ -304,6 +304,11 @@ export class AVRRunner {
     this.usb?.sendSerial(bytes);
   }
 
+  queueUartInput(text: string): void {
+    for (const ch of new TextEncoder().encode(text)) this.serialRxQueue.push(ch);
+    this.pumpSerialRx();
+  }
+
   /**
    * The baud the firmware programmed into UBRR.
    *

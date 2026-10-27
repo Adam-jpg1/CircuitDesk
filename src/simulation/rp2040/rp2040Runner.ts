@@ -522,6 +522,10 @@ export class Rp2040Runner {
     }
   }
 
+  queueUartInput(text: string): void {
+    for (const byte of new TextEncoder().encode(text)) this.rp.uart[0].feedByte(byte);
+  }
+
   // ----------------------------------------------------------------- timing
 
   /** Schedules a callback on the simulated clock, for edge-timed devices. */

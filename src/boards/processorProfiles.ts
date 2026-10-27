@@ -33,7 +33,7 @@ import type { BoardArchitecture } from '../types';
  * family is carried alongside as `boardArchitecture` rather than derived by
  * string matching, so the two vocabularies stay explicitly linked.
  */
-export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6';
+export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21';
 
 export interface PeripheralController {
   /** Controller id as the chip's own documentation names it: `i2c0`, `usart1`. */
@@ -327,6 +327,47 @@ const ESP32C6: ProcessorProfile = {
   ],
 };
 
+/**
+ * The ATSAMD21 (G18 on the Feather M0, E18 on the QT Py M0).
+ *
+ * The bus tables are empty on purpose. SERCOM can put a UART, I2C or SPI on
+ * many pad combinations, and none of that muxing is modelled yet, so claiming
+ * any of it here would let validation approve wiring the runtime cannot honour.
+ * The board's own pin capabilities say what its labelled pins are for.
+ */
+const SAMD21: ProcessorProfile = {
+  id: 'proc.samd21',
+  name: 'ATSAMD21 (Cortex-M0+)',
+  architecture: 'samd21',
+  boardArchitecture: 'samd',
+  vendor: 'Microchip',
+  clockHz: 48_000_000,
+  flashBytes: 262_144,
+  ramBytes: 32_768,
+  pads: [
+    ...Array.from({ length: 32 }, (_, i) => `PA${String(i).padStart(2, '0')}`),
+    ...Array.from({ length: 32 }, (_, i) => `PB${String(i).padStart(2, '0')}`),
+  ],
+  // AIN<n> behind each pad, from the datasheet's I/O multiplexing table.
+  adcChannels: {
+    PA02: 0, PA03: 1, PB08: 2, PB09: 3, PA04: 4, PA05: 5, PA06: 6, PA07: 7,
+    PB00: 8, PB01: 9, PB02: 10, PB03: 11, PB04: 12, PB05: 13, PB06: 14, PB07: 15,
+    PA08: 16, PA09: 17, PA10: 18, PA11: 19,
+  },
+  pwmPads: [],
+  uarts: [],
+  i2c: [],
+  spi: [],
+  interruptPads: [],
+  logicVolts: 3.3,
+  notModelled: [
+    'PWM (TC/TCC), so analogWrite produces no modulation',
+    'SERCOM I2C and SPI, and any SERCOM UART beyond the one behind Serial1',
+    'external interrupts (EIC), DMA, the DAC, the RTC and sleep modes',
+    'USB other than the CDC serial port',
+  ],
+};
+
 export const PROCESSOR_PROFILES: ProcessorProfile[] = [
   ATMEGA328P,
   ATMEGA2560,
@@ -334,6 +375,7 @@ export const PROCESSOR_PROFILES: ProcessorProfile[] = [
   RP2040,
   ESP32C3,
   ESP32C6,
+  SAMD21,
 ];
 
 export function processorProfile(id: string): ProcessorProfile | undefined {

@@ -31,7 +31,7 @@ export interface FirmwareArtifact {
 }
 
 export interface BoardSimulatorAdapter {
-  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6';
+  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21';
   /**
    * Processor profiles this adapter genuinely executes.
    *
@@ -155,7 +155,18 @@ const esp32c6Adapter: BoardSimulatorAdapter = {
   },
 };
 
-const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32c3Adapter, esp32c6Adapter];
+const samd21Adapter: BoardSimulatorAdapter = {
+  engine: 'samd21',
+  processorProfileIds: ['proc.samd21'],
+  firmwareFormat: 'intel-hex',
+  async createRunner(firmware, board) {
+    assertFormat(this, firmware, board);
+    const { Samd21Runner } = await import('./samd21/samd21Runner');
+    return new Samd21Runner(firmware.data);
+  },
+};
+
+const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32c3Adapter, esp32c6Adapter, samd21Adapter];
 
 /**
  * The adapter for a board, or null when the board is not genuinely simulated.

@@ -18,7 +18,7 @@ import { getSimulatorAdapter, assertFirmwareMatchesBoard, type FirmwareArtifact 
 import { arduinoPinLabel } from '../boards/pinMaps';
 import { resolveDefinition } from '../project/partsRegistry';
 import { CircuitBinding, emptyControls } from '../simulation/circuitSim';
-import type { BoardRunner } from '../simulation/boardRunner';
+import { runnerPinIndex, type BoardRunner } from '../simulation/boardRunner';
 import type { BoardDefinition, CircuitProject, TestAssertion, TestCase, TestResult, TestAssertionResult } from '../types';
 
 /** Simulated milliseconds per step. Small enough to place an event precisely. */
@@ -219,12 +219,12 @@ function evaluateAssertion(
   // number is CALLED depends on the board: D13 and A0 on an AVR, GP15 on an
   // RP2040, IO8 on an ESP32. The label is for the person reading the result,
   // so it comes from the board rather than from an assumption about Arduino
-  // numbering that only one architecture has.
+  // numbering that only one architecture has. Elsewhere the number is the
+  // runner's pad (GP15, IO8, PA17), named by the pin the board prints there.
   const label = (p?: number) => {
     if (p === undefined) return '?';
     if ((board.architecture ?? 'other') === 'avr') return arduinoPinLabel(board, p);
-    const named = board.pins.find((pin) => (board.padMap?.[pin.id] ?? pin.id) === `GP${p}`)
-      ?? board.pins.find((pin) => (board.padMap?.[pin.id] ?? pin.id) === `IO${p}`);
+    const named = board.pins.find((pin) => runnerPinIndex(board, pin.id) === p);
     return named ? named.label : `pin ${p}`;
   };
   switch (a.kind) {

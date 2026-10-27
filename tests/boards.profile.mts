@@ -77,13 +77,20 @@ function projectWith(boardDefId: string): CircuitProject {
   check(
     JSON.stringify(simulated) ===
       JSON.stringify([
+        // Simulated on the strength of tests/samd21.runtime.mts: real firmware
+        // from the Adafruit and Seeed SAMD cores reaching setup() and loop() on
+        // the SAMD21 model, blinking at the rate delay() asks for, with Serial
+        // over native USB (including `while (!Serial)` and typed input),
+        // Serial1 on the SERCOM UART, a pull-up, an external drive and an ADC
+        // reading, each on the pad the board's own label names.
+        'board.adafruit-feather',
+        'board.adafruit-qtpy',
         'board.arduino-leonardo',
         'board.arduino-mega2560',
         'board.arduino-nano',
         // Simulated on the strength of tests/boards.sameChip.mts: the Pro Mini
-        // is an ATmega328P at 16 MHz, built through the Uno target because the
-        // arduino:avr core has no entry of its own for it, and proven to reach
-        // a toggling D13 on real compiled firmware.
+        // is an ATmega328P at 16 MHz, built through arduino:avr's own Pro
+        // target, and proven to reach a toggling D13 on real compiled firmware.
         'board.arduino-pro-mini',
         'board.arduino-uno',
         // Simulated on the strength of tests/esp32c3.firmware.mts and
@@ -105,6 +112,7 @@ function projectWith(boardDefId: string): CircuitProject {
         'board.esp32-c6-devkitc-1',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
+        'board.seeed-xiao',
         // Simulated on the strength of tests/boards.sameChip.mts: an RP2040
         // built through the Arduino-Pico generic target, with the XIAO's own
         // D0-D10 labels translated to GP pads by its pad map — the test drives

@@ -198,7 +198,7 @@ export async function cliCompile(
   outputDir: string,
   fqbn: string,
   syntaxOnly: boolean,
-  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' = 'avr',
+  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' = 'avr',
 ): Promise<CliBuildOutput> {
   const jobs = ['--jobs', String(COMPILE_JOBS)];
   const skip = arch === 'esp32c3' || arch === 'esp32c6' ? SKIP_MERGED_IMAGE : [];

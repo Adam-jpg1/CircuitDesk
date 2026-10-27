@@ -121,13 +121,16 @@ function pruneEspToolchains(keepChips) {
 function install(core) {
   const args = ['core', 'install', `${core.id}@${core.version}`];
   if (core.additionalUrl) args.push('--additional-urls', core.additionalUrl);
-  console.log(`[cores] installing ${core.id}@${core.version}`);
-  const { code, stderr } = cli(args, { allowFailure: true });
-  if (code !== 0) {
+  // Third-party board indexes are not always reachable on the first try, so a
+  // failure is retried after re-fetching that core's own index.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    console.log(`[cores] installing ${core.id}@${core.version}${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
+    const { code, stderr } = cli(args, { allowFailure: true });
+    if (code === 0) return true;
     console.error(`[cores] FAILED ${core.id}@${core.version}: ${stderr.trim().split('\n').slice(-3).join(' ')}`);
-    return false;
+    if (core.additionalUrl) cli(['core', 'update-index', '--additional-urls', core.additionalUrl], { allowFailure: true });
   }
-  return true;
+  return false;
 }
 
 // ------------------------------------------------------------------- verify
@@ -147,9 +150,15 @@ if (verifyOnly) {
       bad++;
     }
   }
+  const absent = new Set();
   for (const core of CORES) {
     const version = have.get(core.id);
-    if (!version) {
+    if (!version && !core.required) {
+      // An optional core that could not be installed: its boards say so when
+      // asked to compile, and the rest of the service is unaffected.
+      console.warn(`OPTIONAL ${core.id} is not installed; its targets will report a missing core`);
+      absent.add(core.id);
+    } else if (!version) {
       console.error(`MISSING  ${core.id} (want ${core.version})`);
       bad++;
     } else if (version !== core.version) {
@@ -162,6 +171,7 @@ if (verifyOnly) {
   // Cores are not enough on their own: a target has to actually resolve, which
   // is what proves the toolchain for that chip survived any pruning.
   for (const core of CORES) {
+    if (absent.has(core.id)) continue;
     for (const fqbn of core.targets) {
       const { code } = cli(['board', 'details', '-b', fqbn], { allowFailure: true });
       if (code === 0) console.log(`ok       ${fqbn}`);

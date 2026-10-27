@@ -12,15 +12,19 @@
 // someone implements the ESP UART, this file fails until the table is updated —
 // which is the point.
 //
-// The current answer, measured below:
+// The current answer, proven end to end in tests/uart.boards.mts (a wired GPS
+// parsed by compiled firmware on every Simulated board):
 //
-//   Uno, Nano, Mega, Leonardo   AVRUSART: real TX and real RX
-//   Raspberry Pi Pico / W       RP2040 UART0: real TX and real RX. UART1 is
-//                               present in the emulator and not wired up here.
-//   ESP32-C3, ESP32-C6          NO UART. Serial input is a no-op and no
-//                               peripheral emits bytes. Blocker: esp32-uart.
+//   Uno, Nano, Mega, Pro Mini,  AVRUSART: real TX and real RX
+//   Leonardo
+//   Raspberry Pi Pico / W,      RP2040 UART0: real TX and real RX. UART1 is
+//   XIAO RP2040                 present in the emulator and not wired up here.
+//   ESP32-C3, SuperMini, C6     the chip's UART0, from the IDF register layout
+//   Feather M0, QT Py M0,       the SERCOM behind Serial1: TX, and RX with its
+//   XIAO SAMD21                 RXC interrupt
 
 import { BOARD_DEFINITIONS } from '../src/boards/definitions';
+import { BOARDS_WITH_UART } from '../src/simulation/circuitSim';
 import { COMPONENT_COVERAGE } from '../src/components-library/componentCoverage';
 import { validateProject } from '../src/validation/validator';
 import { emptyProject } from '../src/project/templates';
@@ -50,15 +54,18 @@ const UART_SUPPORT: Record<string, { tx: boolean; rx: boolean; note: string }> =
   'board.arduino-leonardo': { tx: true, rx: true, note: 'AVRUSART; Serial1 on D0/D1' },
   'board.raspberry-pi-pico': { tx: true, rx: true, note: 'RP2040 UART0; UART1 exists in the emulator and is not wired' },
   'board.raspberry-pi-pico-w': { tx: true, rx: true, note: 'RP2040 UART0; UART1 not wired' },
-  'board.esp32-c3': { tx: false, rx: false, note: 'no UART peripheral is modelled — blocker: esp32-uart' },
-  'board.esp32-c6-devkitc-1': { tx: false, rx: false, note: 'no UART peripheral is modelled — blocker: esp32-uart' },
+  'board.esp32-c3': { tx: true, rx: true, note: 'ESP32-C3 UART0 behind Serial, on IO21/IO20' },
+  'board.esp32-c6-devkitc-1': { tx: true, rx: true, note: 'ESP32-C6 UART0 behind Serial, on IO16/IO17' },
   // The boards that carry a chip already executed here. The peripheral belongs
   // to the silicon, so the entry is the silicon's — and the TX claims are
   // watched arriving in tests/boards.sameChip.mts rather than inferred from
   // the chip, because a table is where an inference goes to look true.
   'board.arduino-pro-mini': { tx: true, rx: true, note: 'AVRUSART, the ATmega328P USART0 behind Serial on D0/D1' },
   'board.seeed-xiao-rp2040': { tx: true, rx: true, note: 'RP2040 UART0 behind Serial1, on the pads printed D6/D7' },
-  'board.esp32-c3-supermini': { tx: false, rx: false, note: 'no UART peripheral is modelled — blocker: esp32-uart' },
+  'board.esp32-c3-supermini': { tx: true, rx: true, note: 'ESP32-C3 UART0 behind Serial, on the pads printed TX/RX (IO21/IO20)' },
+  'board.adafruit-feather': { tx: true, rx: true, note: 'SAMD21 SERCOM0 behind Serial1; Serial is native USB' },
+  'board.adafruit-qtpy': { tx: true, rx: true, note: 'SAMD21 SERCOM0 behind Serial1; Serial is native USB' },
+  'board.seeed-xiao': { tx: true, rx: true, note: 'SAMD21 SERCOM4 behind Serial1; Serial is native USB' },
 };
 
 // ==================================== 1. the table matches the shipped boards
@@ -87,13 +94,11 @@ for (const [boardId, claim] of Object.entries(UART_SUPPORT)) {
   check(claim.note.length > 10, `${boardId} says which peripheral, or which one is missing`);
 }
 
-// =============== 3. the ESP limitation is recorded, not quietly worked around
-section('3. the ESP boards say they have no UART');
+// ===================== 3. the table agrees with the set the world links from
+section('3. the boards with a UART are the ones the world attaches parts to');
 {
-  for (const id of ['board.esp32-c3', 'board.esp32-c6-devkitc-1', 'board.esp32-c3-supermini']) {
-    const claim = UART_SUPPORT[id];
-    check(!claim.tx && !claim.rx, `${id} claims no UART`);
-    check(/esp32-uart/.test(claim.note), `${id} names the blocker rather than shrugging`);
+  for (const [id, claim] of Object.entries(UART_SUPPORT)) {
+    check((claim.tx && claim.rx) === BOARDS_WITH_UART.has(id), `${id}: table and BOARDS_WITH_UART agree`);
   }
   // The endpoint exists now, so a UART part may be simulated — but only if it
   // is genuinely tested. The rule that must never break is the other one: a
@@ -119,18 +124,15 @@ section('3. the ESP boards say they have no UART');
 // ============================ 4. AVR and RP2040 genuinely move bytes both ways
 section('4. the boards that do have a UART have both directions');
 {
-  // Asserted as a property of the interface rather than by running firmware:
-  // queueSerialInput exists on every runner, and on the ESP it is a no-op, so
-  // presence proves nothing. What the table records is which ones are wired to
-  // a peripheral, and section 2 prints it. Here we only guard the invariant
-  // that no board claims RX without TX — a receive-only UART is not a thing,
+  // Running firmware for each is tests/uart.boards.mts. Here we only guard the
+  // invariant that no board claims RX without TX — a receive-only UART is not a thing,
   // and a table that drifted into claiming one would be wrong in a way that
   // silently half-works.
   for (const [boardId, claim] of Object.entries(UART_SUPPORT)) {
     check(!(claim.rx && !claim.tx), `${boardId} does not claim receive without transmit`);
   }
   const withUart = Object.entries(UART_SUPPORT).filter(([, c]) => c.tx && c.rx);
-  check(withUart.length === 8, `eight boards carry a real UART today (${withUart.length})`);
+  check(withUart.length === 14, `fourteen boards carry a real UART today (${withUart.length})`);
 }
 
 
@@ -153,12 +155,12 @@ section('5. a UART part on a board without one blames the board');
     } as CircuitProject['connections'][number]);
   };
 
-  const boardDef = BOARD_DEFINITIONS.find((b) => b.id === 'board.esp32-c6-devkitc-1');
+  const boardDef = BOARD_DEFINITIONS.find((b) => b.id === 'board.esp32-devkit');
   const txPad = boardDef?.pins.find((p) => p.capabilities.includes('uart-tx'));
   const rxPad = boardDef?.pins.find((p) => p.capabilities.includes('uart-rx'));
 
-  const project = emptyProject('c6-gps');
-  const board = mk('board.esp32-c6-devkitc-1');
+  const project = emptyProject('esp32-gps');
+  const board = mk('board.esp32-devkit');
   const gps = mk('comp.gps');
   project.boardInstances.push(board);
   project.componentInstances.push(gps);
@@ -172,7 +174,7 @@ section('5. a UART part on a board without one blames the board');
   if (found) {
     console.log(`   title: ${found.title}`);
     check(
-      found.title === 'ESP32-C6-DevKitC-1 physical UART simulation is not yet supported.',
+      found.title === 'ESP32 DevKit V1 physical UART simulation is not yet supported.',
       'and the title names the board and the capability',
     );
     check(!/NEO-6M unsupported/.test(found.title), 'rather than calling the part unsupported');

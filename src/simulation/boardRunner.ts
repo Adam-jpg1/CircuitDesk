@@ -41,7 +41,7 @@ export interface PinSnapshot {
 }
 
 export interface BoardRunner {
-  readonly engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6';
+  readonly engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21';
 
   /** Advances the simulation by a slice of simulated time. Always bounded. */
   runFor(simMs: number): void;
@@ -68,7 +68,16 @@ export interface BoardRunner {
    * wire carries it, so nothing on the canvas may hear it.
    */
   onUsbSerialByte?: ((byte: number) => void) | null;
+  /** Typed into the Serial Monitor: whatever the board's console is on the other end of. */
   queueSerialInput(text: string): void;
+  /**
+   * Bytes arriving on the board's UART RX pad from something wired to it — a
+   * GPS, a modem, another board. Distinct from the monitor on boards whose
+   * console is native USB (Leonardo, Pico, SAMD21): a GPS sentence on RX
+   * belongs to Serial1 and must never appear at Serial.read(). Absent where
+   * the console and the UART are the same port, and the monitor input is used.
+   */
+  queueUartInput?(text: string): void;
 
   /**
    * The baud the firmware configured its UART for, when the engine knows it.
@@ -131,9 +140,22 @@ export function runnerPinIndex(board: BoardDefinition, pinId: string): number | 
   // user sees never moves, however correctly the firmware drove pad 15.
   const pad = board.padMap?.[pinId] ?? pinId;
   if (board.architecture === 'rp2040') return rp2040PinIndex(pad);
+  if (board.architecture === 'samd') return samdPadIndex(pad);
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPadIndex(pad, espPads);
   return arduinoPinNumber(board, pinId);
+}
+
+/**
+ * PA17 is 17 and PB08 is 40: group * 32 + bit, which is how the SAMD21 runner
+ * numbers its pads. A board's labels reach these through its pad map.
+ */
+export function samdPadIndex(pad: string): number | undefined {
+  const match = /^P([AB])(\d{2})$/.exec(pad);
+  if (!match) return undefined;
+  const bit = Number(match[2]);
+  if (bit > 31) return undefined;
+  return (match[1] === 'B' ? 32 : 0) + bit;
 }
 
 /**
@@ -227,6 +249,11 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
   // channel. Reporting one and then returning an invented conversion would look
   // like a working sensor while telling the student nothing true.
   if (isEspRiscv(board)) return undefined;
+  if (board.architecture === 'samd') {
+    // AIN<n> behind the pad the label reaches, from the chip's mux table.
+    const pad = board.padMap?.[pinId] ?? pinId;
+    return processorProfile('proc.samd21')?.adcChannels?.[pad];
+  }
   if (board.architecture === 'rp2040') {
     const index = rp2040PinIndex(board.padMap?.[pinId] ?? pinId);
     if (index === undefined) return undefined;
@@ -241,13 +268,15 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
 
 /** Full-scale ADC reference for a board, in volts. */
 export function boardAdcReference(board: BoardDefinition): number {
-  if (board.architecture === 'rp2040' || isEspRiscv(board)) return 3.3;
+  if (board.architecture === 'rp2040' || board.architecture === 'samd' || isEspRiscv(board)) return 3.3;
   return 5;
 }
 
 /** How many runner pin indices a board's engine exposes. */
 export function runnerPinCount(board: BoardDefinition): number {
   if (board.architecture === 'rp2040') return 30;
+  // PA00-PA31 and PB00-PB31, as the SAMD21 runner numbers them.
+  if (board.architecture === 'samd') return 64;
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPads;
   return avrProfileFor(board)?.pinCount ?? 0;

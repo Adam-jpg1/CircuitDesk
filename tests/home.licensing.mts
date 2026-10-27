@@ -197,6 +197,9 @@ const parsed = parseNotices(NOTICES);
   check(
     JSON.stringify(simulated) ===
       JSON.stringify([
+        // The SAMD21 boards, earned in tests/samd21.runtime.mts.
+        'board.adafruit-feather',
+        'board.adafruit-qtpy',
         'board.arduino-leonardo',
         'board.arduino-mega2560',
         'board.arduino-nano',
@@ -212,6 +215,7 @@ const parsed = parseNotices(NOTICES);
         'board.esp32-c6-devkitc-1',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
+        'board.seeed-xiao',
         'board.seeed-xiao-rp2040',
       ]),
     `the set of Simulated boards is unchanged (${simulated.join(', ')})`,

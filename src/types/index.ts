@@ -94,7 +94,7 @@ export interface BoardCompilerInfo {
 }
 
 export interface BoardSimulationInfo {
-  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'none';
+  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'none';
   supported: boolean;
   /** APIs genuinely exercised by automated tests for this board. */
   supportedApis: string[];

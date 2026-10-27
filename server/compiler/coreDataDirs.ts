@@ -30,7 +30,7 @@
 
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, symlink, lstat } from 'node:fs/promises';
+import { mkdir, readdir, readlink, symlink, lstat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { CLI_CACHE_ROOT } from './buildCache.js';
@@ -63,10 +63,15 @@ export function packagerOf(fqbnOrCore: string): string | undefined {
   return vendor && /^[a-z0-9_.-]+$/i.test(vendor) ? vendor : undefined;
 }
 
+/**
+ * Links `linkPath` to `target`, replacing a link left pointing somewhere else
+ * (the cores were reinstalled into another data directory since it was made).
+ */
 async function linkIfAbsent(target: string, linkPath: string): Promise<void> {
   try {
-    await lstat(linkPath);
-    return; // already there
+    const st = await lstat(linkPath);
+    if (!st.isSymbolicLink() || (await readlink(linkPath)) === target) return; // already there
+    await unlink(linkPath);
   } catch {
     /* create it */
   }

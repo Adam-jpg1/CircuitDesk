@@ -522,13 +522,15 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     'board.adafruit-feather', 'Adafruit Feather M0', 'Adafruit', 'SAMD21 (Cortex-M0+)', 22.9, 51, 3.3,
     [reset('RST'), p3v3('3V3'), { id: 'AREF', label: 'AREF', type: 'aref' as const, caps: [] }, gnd('GND1'), a3('A0', 'A0'), a3('A1', 'A1'), a3('A2', 'A2'), a3('A3', 'A3'), a3('A4', 'A4'), a3('A5', 'A5'), g3('SCK', 'SCK', { caps: ['digital-in', 'digital-out', 'spi-sck'] }), g3('MOSI', 'MOSI', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }), g3('MISO', 'MISO', { caps: ['digital-in', 'digital-out', 'spi-miso'] }), g3('RX', 'RX', { caps: ['digital-in', 'uart-rx'] }), g3('TX', 'TX', { caps: ['digital-out', 'uart-tx'] })],
     [{ id: 'VBAT', label: 'BAT', type: 'power-vin' as const, caps: ['power' as const], voltage: 3.7 }, { id: 'EN', label: 'EN', type: 'digital' as const, caps: ['digital-in' as const], voltage: 3.3 }, { ...p5v('VUSB', 'USB') }, g3('D13', 'D13'), g3('D12', 'D12'), g3('D11', 'D11'), g3('D10', 'D10'), g3('D9', 'D9'), g3('D6', 'D6'), g3('D5', 'D5'), g3('SCL', 'SCL', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('SDA', 'SDA', { caps: ['digital-in', 'digital-out', 'i2c-sda'] })],
-    'wiring', { color: '#12262e' },
+    'wiring', { color: '#12262e', description: 'Adafruit Feather M0: an ATSAMD21G18 at 48 MHz with native USB, in the Feather layout. Runs real SAMD21 firmware.' },
   ),
   simpleWiringBoard(
     'board.adafruit-qtpy', 'Adafruit QT Py SAMD21', 'Adafruit', 'SAMD21 (Cortex-M0+)', 17.8, 22.9, 3.3,
-    [a3('A0', 'A0'), a3('A1', 'A1'), a3('A2', 'A2'), a3('A3', 'A3'), g3('SDA', 'SDA', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('SCL', 'SCL', { caps: ['digital-in', 'digital-out', 'i2c-scl'] })],
-    [p5v('VUSB', '5V'), gnd('GND'), p3v3('3V3'), g3('TX', 'TX', { caps: ['digital-out', 'uart-tx'] }), g3('RX', 'RX', { caps: ['digital-in', 'uart-rx'] }), g3('SCK', 'SCK', { caps: ['digital-in', 'digital-out', 'spi-sck'] })],
-    'wiring', { usb: 'usb-c', color: '#1a1a24' },
+    // As printed: A0-A3, SDA, SCL and TX down one side; 5V, GND, 3V, MO, MI,
+    // SCK and RX down the other.
+    [a3('A0', 'A0'), a3('A1', 'A1'), a3('A2', 'A2'), a3('A3', 'A3'), g3('SDA', 'SDA', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('SCL', 'SCL', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('TX', 'TX', { caps: ['digital-out', 'uart-tx'] })],
+    [p5v('VUSB', '5V'), gnd('GND'), p3v3('3V3'), g3('MOSI', 'MO', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }), g3('MISO', 'MI', { caps: ['digital-in', 'digital-out', 'spi-miso'] }), g3('SCK', 'SCK', { caps: ['digital-in', 'digital-out', 'spi-sck'] }), g3('RX', 'RX', { caps: ['digital-in', 'uart-rx'] })],
+    'wiring', { usb: 'usb-c', color: '#1a1a24', description: 'Adafruit QT Py M0: an ATSAMD21E18 the size of a stamp, with native USB. Runs real SAMD21 firmware.' },
   ),
   simpleWiringBoard(
     'board.seeed-xiao', 'Seeed Studio XIAO SAMD21', 'Seeed Studio', 'SAMD21 (Cortex-M0+)', 17.5, 21, 3.3,

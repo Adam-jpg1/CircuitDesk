@@ -486,17 +486,34 @@ const REGULATOR_PARTS: Record<
  * From tests/uart.audit.mts, which measures this rather than assuming it. A
  * board that is not here has no UART a device can attach to, so no link is
  * created and the part reports a board capability mismatch instead of quietly
- * working. The ESP parts are absent because their UART is a register file that
- * swallows writes — blocker `esp32-uart`.
+ * working. Each one here is proven end to end, a wired GPS parsed by compiled
+ * firmware, in tests/uart.boards.mts.
  */
 export const BOARDS_WITH_UART = new Set([
   'board.arduino-uno',
   'board.arduino-nano',
   'board.arduino-mega2560',
   'board.arduino-leonardo',
+  'board.arduino-pro-mini',
   'board.raspberry-pi-pico',
   'board.raspberry-pi-pico-w',
+  'board.seeed-xiao-rp2040',
+  'board.esp32-c3',
+  'board.esp32-c3-supermini',
+  'board.esp32-c6-devkitc-1',
+  'board.adafruit-feather',
+  'board.adafruit-qtpy',
+  'board.seeed-xiao',
 ]);
+
+/**
+ * Bytes a wired part puts on a board's RX pad: to the UART, never to a native
+ * USB console that happens to be where the monitor's input goes.
+ */
+function uartInput(runner: BoardRunner, text: string): void {
+  if (runner.queueUartInput) runner.queueUartInput(text);
+  else runner.queueSerialInput(text);
+}
 
 /** UART devices, and which of their pins carry which direction. */
 export const UART_DEVICE_PARTS: Record<
@@ -1780,7 +1797,7 @@ export class CircuitBinding {
         if (listener.bus !== node.bus) continue;
         const heard = listener.device.receive(carried);
         if (heard === null) continue;
-        listener.runner.queueSerialInput(String.fromCharCode(heard));
+        uartInput(listener.runner, String.fromCharCode(heard));
       }
     }
   }
@@ -2862,7 +2879,7 @@ export class CircuitBinding {
       link.poll(nowUs);
       const bytes = link.drainToBoard(nowUs);
       if (bytes.length > 0) {
-        owner.queueSerialInput(String.fromCharCode(...bytes));
+        uartInput(owner, String.fromCharCode(...bytes));
       }
     }
 

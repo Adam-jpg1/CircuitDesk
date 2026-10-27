@@ -45,6 +45,21 @@ function ledPin(board: BoardDefinition): PinDefinition | undefined {
   return candidates.find((p) => /13$/.test(p.id)) ?? candidates[Math.floor(candidates.length / 2)];
 }
 
+/**
+ * What a user writes in pinMode() for the pin labelled `pin`. On AVR, RP2040
+ * and ESP boards the Arduino number is the runner's pad index. A SAMD21's pads
+ * (PA17 = 17) are not: its variant numbers the pins by their labels, D13 as 13
+ * and A2 as the constant A2.
+ */
+function sketchPin(board: BoardDefinition, pin: PinDefinition, pad: number): string {
+  if (board.architecture === 'samd') {
+    if (/^A\d+$/.test(pin.id)) return pin.id;
+    const d = /^D(\d+)$/.exec(pin.id);
+    if (d) return d[1];
+  }
+  return String(pad);
+}
+
 for (const board of simulated) {
   console.log(`\n--- ${board.name} (${board.id})`);
   const pin = ledPin(board);
@@ -54,8 +69,9 @@ for (const board of simulated) {
     continue;
   }
   const pad = runnerPinIndex(board, pin.id)!;
+  const arduinoPin = sketchPin(board, pin, pad);
   const sketch = `void setup() {
-  pinMode(${pad}, OUTPUT);
+  pinMode(${arduinoPin}, OUTPUT);
   Serial.begin(115200);
   // Boards whose Serial is USB need a moment for the host; this returns at
   // once on a UART and gives up after two seconds rather than hanging.
@@ -64,9 +80,9 @@ for (const board of simulated) {
 }
 unsigned long n = 0;
 void loop() {
-  digitalWrite(${pad}, HIGH);
+  digitalWrite(${arduinoPin}, HIGH);
   delay(100);
-  digitalWrite(${pad}, LOW);
+  digitalWrite(${arduinoPin}, LOW);
   delay(100);
   Serial.print("tick ");
   Serial.println(n++);

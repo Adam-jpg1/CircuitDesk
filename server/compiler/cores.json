@@ -40,6 +40,22 @@
       "required": true,
       "keepChips": ["esp32c3", "esp32c6"],
       "note": "Arduino-ESP32. CircuitDesk compiles only the two RISC-V parts it can execute, so the Xtensa toolchain and the per-chip libraries for parts it does not support are pruned after install — see installCores.mjs."
+    },
+    {
+      "id": "adafruit:samd",
+      "version": "1.7.17",
+      "additionalUrl": "https://adafruit.github.io/arduino-board-index/package_adafruit_index.json",
+      "targets": ["adafruit:samd:adafruit_feather_m0", "adafruit:samd:adafruit_qtpy_m0"],
+      "required": true,
+      "note": "Adafruit's SAMD core, for the SAMD21 boards CircuitDesk executes (Feather M0, QT Py M0). Emits Intel HEX linked above the boards' 8 KB bootloader."
+    },
+    {
+      "id": "Seeeduino:samd",
+      "version": "1.8.6",
+      "additionalUrl": "https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json",
+      "targets": ["Seeeduino:samd:seeed_XIAO_m0"],
+      "required": false,
+      "note": "Seeed's SAMD core, for the XIAO SAMD21. Emits Intel HEX linked above its 8 KB bootloader. Optional because Seeed's board index is not reliably reachable: an image built while it was down ships without it, and XIAO SAMD21 compiles report the missing core rather than the whole build failing."
     }
   ]
 }

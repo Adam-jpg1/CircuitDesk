@@ -504,6 +504,47 @@ void loop() {
 }
 `;
 
+const FEATHER_M0_BLINK_CODE = `// Starter - Feather M0 Blink
+//
+// D10 drives an LED through a 220 ohm resistor to ground, a button on D12
+// holds it on, and a potentiometer on A1 sets the blink rate. Three things
+// worth knowing about this board:
+//
+//   * it is a 3.3 V part - the ADC reads 0-3.3 V as 0-1023, and nothing
+//     above 3.3 V belongs on a pin.
+//   * Serial is the native USB port - what the serial monitor shows - and
+//     Serial1 is the hardware UART on the pins printed RX and TX.
+//   * the Arduino core keeps Serial closed for half a second after reset, so
+//     setup() waits for it below.
+
+const int LED = 10;
+const int BUTTON = 12;
+
+void setup() {
+  pinMode(LED, OUTPUT);
+  pinMode(BUTTON, INPUT_PULLUP);
+  Serial.begin(115200);
+  while (!Serial && millis() < 2000) delay(10);   // USB takes a moment to connect
+  Serial.println("feather m0 ready");
+}
+
+void loop() {
+  if (digitalRead(BUTTON) == LOW) {
+    digitalWrite(LED, HIGH);      // held: stay on
+    delay(20);
+    return;
+  }
+  int knob = analogRead(A1);      // 0-1023
+  int half = 60 + knob / 4;       // 60-315 ms
+  digitalWrite(LED, HIGH);
+  delay(half);
+  digitalWrite(LED, LOW);
+  delay(half);
+  Serial.print("knob ");
+  Serial.println(knob);
+}
+`;
+
 const C6_BLINK_CODE = `// Starter - ESP32-C6 Blink
 //
 // The compiled RISC-V image really executes: ESP-IDF startup, FreeRTOS, then
@@ -1331,6 +1372,50 @@ void loop() {
             { kind: 'pin-toggles', pin: 15, minToggles: 3, withinMs: 2000 },
           ],
           { timeoutMs: 3000 },
+        ),
+      ];
+      return p;
+    },
+  },
+  {
+    id: 'tpl.feather-m0-blink',
+    name: 'Feather M0 Blink',
+    description:
+      'Adafruit Feather M0 (SAMD21): an LED on D10, a button on D12 and a potentiometer on A1 setting the rate. ' +
+      'Real firmware from the Adafruit SAMD core runs on a Cortex-M0+; Serial is the board\'s native USB port.',
+    tags: ['simulated', 'starter', 'samd21'],
+    kind: 'starter',
+    board: 'Adafruit Feather M0',
+    teaches: 'A 3.3 V board whose Serial is USB, and whose pins are not the chip\'s pad numbers.',
+    build: () => {
+      const p = emptyProject('Feather M0 Blink');
+      const feather = inst('board.adafruit-feather', 120, 170);
+      const resistor = inst('comp.resistor', 470, 120, { resistance: 220 });
+      const led = inst('comp.led', 590, 150, { color: 'red' });
+      const button = inst('comp.push-button', 470, 300);
+      const pot = inst('comp.potentiometer', 470, 430);
+      p.boardInstances = [feather];
+      p.componentInstances = [resistor, led, button, pot];
+      p.connections = [
+        wire(feather, 'D10', resistor, 'p1', '#e8590c'),
+        wire(resistor, 'p2', led, 'anode', '#e8590c'),
+        wire(led, 'cathode', feather, 'GND1', '#212529'),
+        wire(feather, 'D12', button, '1a', '#1971c2'),
+        wire(button, '2a', feather, 'GND1', '#212529'),
+        wire(pot, 't2', feather, '3V3', '#c92a2a'),
+        wire(pot, 't1', feather, 'GND1', '#212529'),
+        wire(pot, 'wiper', feather, 'A1', '#2f9e44'),
+      ];
+      p.codeFiles = [code('sketch.ino', FEATHER_M0_BLINK_CODE)];
+      p.tests = [
+        bench(
+          'D10 blinks',
+          'The LED pin must go high and keep switching. On this board D10 is the chip\'s pad PA18, which is what the runner reports.',
+          [
+            { kind: 'pin-becomes-high', pin: 18, withinMs: 1500 },
+            { kind: 'pin-toggles', pin: 18, minToggles: 3, withinMs: 3000 },
+          ],
+          { timeoutMs: 4000 },
         ),
       ];
       return p;

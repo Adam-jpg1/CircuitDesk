@@ -84,7 +84,7 @@ export interface RuntimeProfile {
   id: string;
   name: string;
   /** The emulator that executes the artifact. */
-  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'none';
+  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'none';
   /** Processor profiles this runtime can genuinely execute. */
   processorProfileIds: string[];
   /** Formats the engine accepts. An artifact of any other format is refused. */
@@ -103,6 +103,30 @@ export interface RuntimeProfile {
 // -------------------------------------------------------- compile profiles --
 
 export const COMPILE_PROFILES: CompileProfile[] = [
+  {
+    id: 'compile.samd21-adafruit',
+    name: 'Adafruit SAMD (SAMD21)',
+    adapter: 'arduino-cli',
+    processorProfileIds: ['proc.samd21'],
+    requiredCore: 'adafruit:samd',
+    fqbn: 'adafruit:samd:adafruit_feather_m0',
+    alternateFqbns: ['adafruit:samd:adafruit_qtpy_m0'],
+    serverTargetId: 'board.adafruit-feather',
+    artifactFormat: 'intel-hex',
+    description:
+      'Adafruit\'s SAMD core, built for a SAMD21. Emits Intel HEX linked at 0x2000, above the boards\' bootloader.',
+  },
+  {
+    id: 'compile.samd21-seeed',
+    name: 'Seeed SAMD (SAMD21)',
+    adapter: 'arduino-cli',
+    processorProfileIds: ['proc.samd21'],
+    requiredCore: 'Seeeduino:samd',
+    fqbn: 'Seeeduino:samd:seeed_XIAO_m0',
+    serverTargetId: 'board.seeed-xiao',
+    artifactFormat: 'intel-hex',
+    description: 'Seeed\'s SAMD core, built for the XIAO SAMD21. Emits Intel HEX linked at 0x2000, above its bootloader.',
+  },
   {
     id: 'compile.avr-arduino',
     name: 'Arduino AVR',
@@ -201,6 +225,21 @@ const AVR_APIS = [
 ];
 
 export const RUNTIME_PROFILES: RuntimeProfile[] = [
+  {
+    id: 'runtime.samd21',
+    name: 'CircuitDesk SAMD21',
+    engine: 'samd21',
+    processorProfileIds: ['proc.samd21'],
+    acceptsFormats: ['intel-hex'],
+    supportedApis: [
+      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'delay/millis/micros',
+      'Serial (native USB CDC, both directions)', 'Serial1 (the hardware UART, both directions)',
+    ],
+    supportedPeripherals: ['PORT GPIO', 'SysTick', 'ADC', 'USB device (CDC)', 'SERCOM USART (Serial1)'],
+    description:
+      'Executes SAMD21 firmware on rp2040js\'s Cortex-M0+ core with a SAMD21 chip model: PORT, the clock and NVM ' +
+      'flags startup waits on, SysTick, the ADC and the USB device with a host on the CDC port.',
+  },
   {
     id: 'runtime.avr8js-328p',
     name: 'CircuitDesk AVR (ATmega328P)',

@@ -606,7 +606,7 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
         `${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} wired to this board's UART pins and ${
           names.length === 1 ? 'is' : 'are'
         } simulated, but ${bDef.name} has no UART peripheral connected to its runner yet, so no bytes move. ` +
-          'The same wiring works on a board that does: Uno, Nano, Mega, Leonardo, Pico or Pico W.',
+          'The same wiring works on a board that does, such as an Uno, a Pico, an ESP32-C3 or a Feather M0.',
         {
           affectedComponentIds: [boardInstance.id, ...stranded.map((i) => i.id)],
         },
