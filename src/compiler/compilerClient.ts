@@ -101,6 +101,9 @@ export async function compileProjectCode(
       durationMs: typeof raw.durationMs === 'number' ? raw.durationMs : 0,
       error: raw.error ?? (res.ok ? undefined : `Compiler service returned HTTP ${res.status}.`),
       errorCode: raw.errorCode,
+      ...(raw.errorCode === 'BUSY' || res.status === 503
+        ? { retryAfterSeconds: Math.min(30, Math.max(1, Number(res.headers.get('Retry-After')) || 3)) }
+        : {}),
       // Stamped from the requested target so cached firmware always carries the
       // board it was built for; execution paths refuse a mismatch.
       boardId: target.stampBoardId ?? target.boardId,

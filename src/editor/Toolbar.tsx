@@ -151,6 +151,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
 function stageLabel(stage: CompileStage | null): string {
   switch (stage?.step) {
     case 'preparing': return 'Preparing…';
+    case 'queued': return 'Queued — compiler busy…';
     case 'compiling': return 'Compiling…';
     case 'linking': return 'Linking…';
     case 'starting': return 'Starting…';

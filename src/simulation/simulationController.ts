@@ -39,6 +39,8 @@ import type { CompileStage } from '../app/editorStore';
 import type { BoardDefinition, CircuitProject, CompileResult, SimulationNote } from '../types';
 
 const TICK_MS = 12;
+/** How long a Run waits for a busy compiler before reporting it. */
+const BUSY_WAIT_LIMIT_MS = 45_000;
 /**
  * Most simulated milliseconds a single tick may advance.
  *
@@ -123,6 +125,11 @@ class SimulationController {
    * same bytes. Runtime state is never in here; this holds files.
    */
   private artifacts = new Map<string, FirmwareArtifact>();
+  /**
+   * Compiles in flight, by fingerprint. A background build and a Run of the
+   * same source share one request instead of asking the service twice.
+   */
+  private pendingCompiles = new Map<string, Promise<CompileResult>>();
   /**
    * Include warnings, keyed the same way the artifacts are.
    *
@@ -252,12 +259,7 @@ class SimulationController {
         outcome.alreadyReady++;
         continue;
       }
-      const result = await this.compileFn(project, {
-        boardId: target.serverBoardId,
-        stampBoardId: target.boardId,
-        fqbn: target.fqbn,
-        files: files.map((f) => ({ name: f.name, content: f.content })),
-      });
+      const result = await this.compileShared(cacheKey, project, target, files);
       if (!result.success || !result.firmware) {
         outcome.failed++;
         // A compile error is an answer about the source; anything else — busy,
@@ -279,6 +281,28 @@ class SimulationController {
       outcome.compiled++;
     }
     return outcome;
+  }
+
+  /** One request per fingerprint at a time; a second caller waits for the first. */
+  private compileShared(
+    cacheKey: string,
+    project: CircuitProject,
+    target: WorkspaceTarget,
+    files: { name: string; content: string }[],
+  ): Promise<CompileResult> {
+    const existing = this.pendingCompiles.get(cacheKey);
+    if (existing) return existing;
+    const request = this.compileFn(project, {
+      // The service is asked for the TARGET, and the artifact is stamped with
+      // the BOARD. A custom board names the RP2040 target to get RP2040
+      // firmware, and the firmware still belongs to that board.
+      boardId: target.serverBoardId,
+      stampBoardId: target.boardId,
+      fqbn: target.fqbn,
+      files: files.map((f) => ({ name: f.name, content: f.content })),
+    }).finally(() => this.pendingCompiles.delete(cacheKey));
+    this.pendingCompiles.set(cacheKey, request);
+    return request;
   }
 
   /** True when every runnable target of `project` already has its firmware cached. */
@@ -392,15 +416,19 @@ class SimulationController {
     }
 
     stage('compiling');
-    const result = await this.compileFn(project, {
-      // The service is asked for the TARGET, and the artifact is stamped with
-      // the BOARD. A custom board names the RP2040 target to get RP2040
-      // firmware, and the firmware still belongs to that board.
-      boardId: target.serverBoardId,
-      stampBoardId: target.boardId,
-      fqbn: target.fqbn,
-      files: files.map((f) => ({ name: f.name, content: f.content })),
-    });
+    // A busy service is a wait, not a failure: it says how long, and a person
+    // who pressed Run would rather the build waited its turn than be told to
+    // press Run again. Bounded, so a service that stays busy is still reported.
+    let result = await this.compileShared(cacheKey, project, target, files);
+    let waitedMs = 0;
+    while (result.errorCode === 'BUSY' && waitedMs < BUSY_WAIT_LIMIT_MS) {
+      stage('queued');
+      const pause = (result.retryAfterSeconds ?? 3) * 1000;
+      await new Promise((r) => setTimeout(r, pause));
+      waitedMs += pause;
+      stage('compiling');
+      result = await this.compileShared(cacheKey, project, target, files);
+    }
     if (!result.success || !result.firmware) {
       return {
         ...base,

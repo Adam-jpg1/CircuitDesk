@@ -123,6 +123,27 @@ try {
   await page.waitForTimeout(800);
   check((await page.locator('.cm-card', { hasText: title }).count()) === 0, 'after which it is gone');
 
+  // The report this guards: opening the 4-bit computer and pressing Run at
+  // once — while its background build is running, on a service that may
+  // still be warming up — was refused with "the compiler is busy". Run must
+  // wait its turn and then run the program.
+  await page.goto(`http://localhost:${PORT}/#/community`, { waitUntil: 'networkidle' });
+  await page.reload({ waitUntil: 'networkidle' }); // a fresh page, without the search typed above
+  await page.locator('[data-community-id="cp_logic_computer"]').first().click();
+  await page.getByRole('button', { name: /Open a copy/ }).click();
+  await page.waitForURL(/#\/editor\//, { timeout: 15_000 });
+  await page.waitForSelector('g[data-definition-id="comp.74hc574"]', { timeout: 15_000 });
+  await page.getByTitle(/Run \(Ctrl\+Enter\)/).click();
+  await page.getByText('Serial', { exact: true }).first().click().catch(() => undefined);
+  let serialText = '';
+  for (let i = 0; i < 120 && !/HALT at PC=5 {2}ACC=\d+\s/.test(serialText); i++) {
+    await page.waitForTimeout(500);
+    serialText = await page.locator('.mono-out').first().innerText().catch(() => '');
+  }
+  const compilerText = await page.locator('.mono-out').first().innerText().catch(() => '');
+  check(!/compiler is busy/i.test(compilerText + serialText), 'pressing Run straight after opening the 4-bit computer is never refused as busy');
+  check(/PC=3 {2}ADD {2}3 {2}->  ACC=9/.test(serialText) && /HALT at PC=5 {2}ACC=2/.test(serialText), `and the chips run the program to the end (${(serialText.match(/HALT[^\n]*/) ?? ['no HALT yet'])[0]})`);
+
   // The creator key. Only meaningful when the server under test has one; the
   // local runner sets CREATOR_TOKEN for this, a deployment sets its own.
   const creatorToken = process.env.CREATOR_TOKEN;

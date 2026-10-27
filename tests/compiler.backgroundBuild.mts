@@ -267,5 +267,58 @@ section('8. editing the sketch and pressing Run runs the edited sketch');
   simulationController.closeProject();
 }
 
+// ========================= 9. Run joins a background build already running ===
+section('9. pressing Run while the background build is running asks once');
+{
+  let calls = 0;
+  (simulationController as unknown as { compileFn: typeof compileProjectCode }).compileFn = async (p, t) => {
+    calls++;
+    return compileProjectCode(p, t);
+  };
+  simulationController.closeProject();
+  const project = unoProject(`// join ${Date.now()}\n${blink(321)}`);
+  const background = simulationController.prebuild(project); // not awaited: still running
+  const report = await simulationController.build(project);
+  const outcome = await background;
+  if (outcome.refused) {
+    skip('the compiler service is not reachable here');
+  } else {
+    check(calls === 1, `one request served both the background build and Run (${calls})`);
+    check(report.builds[0]?.status === 'built', `and Run got the firmware (${report.builds[0]?.status})`);
+  }
+  simulationController.closeProject();
+}
+
+// ================================= 10. a busy compiler is a wait, not a failure =
+section('10. "the compiler is busy" makes Run wait its turn');
+{
+  let calls = 0;
+  const stages: string[] = [];
+  (simulationController as unknown as { compileFn: typeof compileProjectCode }).compileFn = async (p, t) => {
+    calls++;
+    if (calls === 1) {
+      return {
+        success: false, toolchain: 'none', toolchainVersion: '', stdout: '', stderr: '', diagnostics: [], durationMs: 0,
+        error: 'Compile refused: The compiler is busy: one build is running and 2 more are already queued.',
+        errorCode: 'BUSY', retryAfterSeconds: 1,
+      };
+    }
+    return compileProjectCode(p, t);
+  };
+  simulationController.onStage = (st) => st && stages.push(st.step);
+  simulationController.closeProject();
+  const project = unoProject(`// busy ${Date.now()}\n${blink(222)}`);
+  const report = await simulationController.build(project);
+  simulationController.onStage = undefined;
+  if (calls > 1 && report.builds[0]?.status !== 'built' && /reach/.test(report.builds[0]?.detail ?? '')) {
+    skip('the compiler service is not reachable here');
+  } else {
+    check(calls === 2, `a refused build is asked for again (${calls} requests)`);
+    check(stages.includes('queued'), `the button says it is queued while it waits (${stages.join(' → ')})`);
+    check(report.builds[0]?.status === 'built', `and Run gets its firmware instead of an error (${report.builds[0]?.detail})`);
+  }
+  simulationController.closeProject();
+}
+
 section(`${failures} failing, ${skipped} skipped`);
 process.exit(failures > 0 ? 1 : 0);

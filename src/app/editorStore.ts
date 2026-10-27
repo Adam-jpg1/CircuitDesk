@@ -26,7 +26,7 @@ export type Tool = 'select' | 'wire' | 'pan';
  * nothing should say so rather than flash through the others.
  */
 export interface CompileStage {
-  step: 'preparing' | 'compiling' | 'linking' | 'starting' | 'cached';
+  step: 'preparing' | 'queued' | 'compiling' | 'linking' | 'starting' | 'cached';
   /** Sketch being built. */
   sketchName: string;
   /** Target it is being built for. */

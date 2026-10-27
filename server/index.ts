@@ -240,7 +240,7 @@ app.post('/api/compiler/compile', compileLimiter, async (req, res) => {
   }
   let result;
   try {
-    result = await compileGate.run(() => compileProject(body, false));
+    result = await compileProject(body, false, (work) => compileGate.run(work));
   } catch (err) {
     if (rejectIfBusy(err, res, 'Compile')) return;
     throw err;
@@ -256,7 +256,7 @@ app.post('/api/compiler/validate', compileLimiter, async (req, res) => {
   }
   let result;
   try {
-    result = await compileGate.run(() => compileProject(body, true));
+    result = await compileProject(body, true, (work) => compileGate.run(work));
   } catch (err) {
     if (rejectIfBusy(err, res, 'Validate')) return;
     throw err;
@@ -312,7 +312,12 @@ app.listen(PORT, HOST, () => {
         // build rather than running a second one alongside it.
         const started = Date.now();
         const outcomes = await warmCoreCaches(
-          (req) => compileGate.run(() => compileProject(req, false)),
+          // Each target waits until nobody else wants the compiler, so a
+          // person who arrives mid-warm-up waits for at most one build.
+          async (req) => {
+            await compileGate.whenIdle();
+            return compileProject(req, false, (work) => compileGate.run(work));
+          },
           (line) => console.log(line),
         );
         const failed = outcomes.filter((o) => !o.ok);

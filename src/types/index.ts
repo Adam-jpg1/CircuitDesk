@@ -405,6 +405,8 @@ export interface CompileResult {
   durationMs: number;
   error?: string;
   errorCode?: string;
+  /** When the service was too busy to take the build: how long it asked us to wait. */
+  retryAfterSeconds?: number;
   /** Board this firmware was built for — required before it may be executed. */
   boardId?: string;
   /** Toolchain target this firmware was built for. */

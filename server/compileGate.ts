@@ -35,6 +35,26 @@ export class CompileGate {
     private readonly retryAfterSeconds = 5,
   ) {}
 
+  private idleWaiters: (() => void)[] = [];
+
+  /**
+   * Resolves once nothing is running or waiting.
+   *
+   * For background work that must never stand in front of a person — the
+   * start-up warm-up — so it takes the compiler only when nobody wants it.
+   */
+  whenIdle(): Promise<void> {
+    if (this.active === 0 && this.waiting === 0) return Promise.resolve();
+    return new Promise((resolve) => this.idleWaiters.push(resolve));
+  }
+
+  private notifyIfIdle(): void {
+    if (this.active !== 0 || this.waiting !== 0) return;
+    const waiters = this.idleWaiters;
+    this.idleWaiters = [];
+    for (const w of waiters) w();
+  }
+
   get stats(): { active: number; waiting: number; maxQueued: number } {
     return { active: this.active, waiting: this.waiting, maxQueued: this.maxQueued };
   }
@@ -52,6 +72,7 @@ export class CompileGate {
         return await fn();
       } finally {
         this.active--;
+        this.notifyIfIdle();
       }
     };
     const next = this.tail.then(start, start);

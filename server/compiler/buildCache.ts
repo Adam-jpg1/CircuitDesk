@@ -279,10 +279,9 @@ function weigh(result: CompileResult): number {
 
 export function cachedResult(key: string): CompileResult | undefined {
   const entry = artifacts.get(key);
-  if (!entry) {
-    misses++;
-    return undefined;
-  }
+  // A miss is counted where a build actually starts (runDeduplicated), not
+  // here: a request that joins a build already running is not another build.
+  if (!entry) return undefined;
   hits++;
   entry.usedAt = Date.now();
   // A fresh object each time: the caller owns its copy and may stamp `source`
@@ -335,6 +334,7 @@ export async function runDeduplicated(key: string, run: () => Promise<CompileRes
   const existing = inFlight.get(key);
   if (existing) return { ...(await existing), source: 'joined' };
   const promise = run();
+  misses++; // after run(): a build the queue refused never started
   inFlight.set(key, promise);
   try {
     return await promise;

@@ -76,7 +76,23 @@ export async function getCompilerHealth(): Promise<CompilerHealth> {
  * the core version — see buildKey. Nothing about the project's layout is in
  * there, so moving a part or renaming a board can never cost a compile.
  */
-export async function compileProject(req: CompileRequest, syntaxOnly: boolean): Promise<CompileResult> {
+/**
+ * Where a build waits for the toolchain.
+ *
+ * Passed in rather than imported so the HTTP server can hand over its compile
+ * gate while tests and tools run unqueued. Only work that actually starts the
+ * toolchain goes through it: a cached result or a build already running for
+ * the same key never takes a place in the queue, so asking twice for the same
+ * firmware can never be what fills it.
+ */
+export type ToolchainSlot = <T>(work: () => Promise<T>) => Promise<T>;
+const unqueued: ToolchainSlot = (work) => work();
+
+export async function compileProject(
+  req: CompileRequest,
+  syntaxOnly: boolean,
+  slot: ToolchainSlot = unqueued,
+): Promise<CompileResult> {
   const started = Date.now();
   const base: Omit<CompileResult, 'success'> = {
     toolchain: 'none',
@@ -162,7 +178,7 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
         durationMs: Date.now() - started,
       };
     }
-    return cliBuild(req, target, fqbn, cli, syntaxOnly, notes, base, started);
+    return cliBuild(req, target, fqbn, cli, syntaxOnly, notes, base, started, slot);
   }
 
   const health = await getCompilerHealth();
@@ -177,11 +193,22 @@ export async function compileProject(req: CompileRequest, syntaxOnly: boolean): 
   }
 
   if (health.toolchain === 'arduino-cli') {
-    return cliBuild(req, target, fqbn, cli, syntaxOnly, notes, base, started);
+    return cliBuild(req, target, fqbn, cli, syntaxOnly, notes, base, started, slot);
   }
 
   // The local avr-g++ fallback. Not the deployed path, and not cached: it exists
   // so a machine without arduino-cli can still build an Uno.
+  return slot(() => gccBuild(req, target, syntaxOnly, notes, base, started));
+}
+
+async function gccBuild(
+  req: CompileRequest,
+  target: BoardTarget,
+  syntaxOnly: boolean,
+  notes: CompileResult['simulationNotes'],
+  base: Omit<CompileResult, 'success'>,
+  started: number,
+): Promise<CompileResult> {
   const buildDir = await createBuildDir();
   try {
     const gcc = await detectGccToolchain();
@@ -227,6 +254,7 @@ async function cliBuild(
   notes: CompileResult['simulationNotes'],
   base: Omit<CompileResult, 'success'>,
   started: number,
+  slot: ToolchainSlot,
 ): Promise<CompileResult> {
   const key = buildKey({
     fqbn,
@@ -239,7 +267,9 @@ async function cliBuild(
   const hit = cachedResult(key);
   if (hit) return { ...hit, durationMs: Date.now() - started };
 
-  return runDeduplicated(key, async () => {
+  // Joining a build already running for this key needs no place in the queue;
+  // only the first request for it waits for the toolchain.
+  return runDeduplicated(key, () => slot(async () => {
     const buildRoot = await buildDirFor(key);
     const prepareStart = Date.now();
     try {
@@ -274,7 +304,7 @@ async function cliBuild(
       // throw away the one that is about to be reused.
       void evictBuildDirs().catch(() => undefined);
     }
-  });
+  }));
 }
 
 function finish(
