@@ -247,6 +247,17 @@ export function emptyControls(): SimControls {
   };
 }
 
+/** How long a PWM pin's duty is averaged over, for the loads it drives. */
+const PWM_DUTY_TAU_MS = 10;
+/** How long its edge rate is averaged over, to tell PWM from a blink. */
+const PWM_RATE_TAU_MS = 20;
+/**
+ * Faster than a blink can switch, slower than any PWM: 100 Hz of toggling. A
+ * single edge moves the average by about 1 / PWM_RATE_TAU_MS = 50 per second,
+ * so a blink never reaches it.
+ */
+const PWM_MIN_EDGES_PER_S = 200;
+
 /** Pin types that count as a supply feeding a module's VCC (or an address strap). */
 const POWER_PIN_TYPES = ['power-5v', 'power-3v3', 'power-vin'];
 
@@ -2315,6 +2326,51 @@ export class CircuitBinding {
   private uartDeviceCache = new Map<string, UartPeripheral>();
   private uartLinks = new Map<string, { link: UartLink; runner: BoardRunner }>();
 
+  /**
+   * PWM as a load sees it, per pin of the primary board.
+   *
+   * The duty in a snapshot covers only the time since the previous one, and a
+   * snapshot is taken at every settle, so the window a frame gets is a slice
+   * or less — often a few microseconds, which reads a 25 % PWM pin as fully on
+   * or fully off. Each pin's duty and edge rate are therefore averaged across
+   * updates, weighted by the time each one covered. A pin counts as PWM only
+   * while it is switching fast (PWM_MIN_EDGES_PER_S); a blink or a button
+   * keeps the instantaneous behaviour it always had.
+   */
+  private pwmAverage: { duty: number; edgesPerS: number }[] = [];
+  private pwmLastToggles: number[] = [];
+  private pwmLastMs: number | null = null;
+  private pwmRunner: BoardRunner | null = null;
+
+  private trackPwm(runner: BoardRunner, snap: { duty: number[]; toggles: number[] }): void {
+    const now = runner.timeMs;
+    if (this.pwmRunner !== runner || this.pwmLastMs === null || now < this.pwmLastMs) {
+      this.pwmRunner = runner;
+      this.pwmAverage = snap.duty.map(() => ({ duty: 0, edgesPerS: 0 }));
+      this.pwmLastToggles = snap.toggles.slice();
+      this.pwmLastMs = now;
+      return;
+    }
+    const windowMs = now - this.pwmLastMs;
+    if (windowMs <= 0) return;
+    const dutyAlpha = 1 - Math.exp(-windowMs / PWM_DUTY_TAU_MS);
+    const rateAlpha = 1 - Math.exp(-windowMs / PWM_RATE_TAU_MS);
+    for (let pin = 0; pin < snap.duty.length; pin++) {
+      const avg = (this.pwmAverage[pin] ??= { duty: 0, edgesPerS: 0 });
+      const edges = Math.max(0, (snap.toggles[pin] ?? 0) - (this.pwmLastToggles[pin] ?? 0));
+      avg.duty += (snap.duty[pin] - avg.duty) * dutyAlpha;
+      avg.edgesPerS += ((edges * 1000) / windowMs - avg.edgesPerS) * rateAlpha;
+    }
+    this.pwmLastToggles = snap.toggles.slice();
+    this.pwmLastMs = now;
+  }
+
+  /** A pin's averaged duty while it is switching like PWM; undefined otherwise. */
+  private pwmDuty(pin: number): number | undefined {
+    const avg = this.pwmAverage[pin];
+    return avg && avg.edgesPerS >= PWM_MIN_EDGES_PER_S ? avg.duty : undefined;
+  }
+
   /** Serial-out taps, keyed by runner, so a re-bind cannot stack them. */
   private serialTaps = new Map<BoardRunner, () => void>();
 
@@ -3450,6 +3506,14 @@ export class CircuitBinding {
     // Per-component behavior + visuals.
     const visuals = new Map<string, ComponentVisualState>();
     const duty = runner ? runner.snapshot() : null;
+    if (runner && duty) this.trackPwm(runner, duty);
+    // A load's averaged PWM duty, when the pin feeding it is a driven output
+    // switching like PWM.
+    const pwm = (pin: number | null | undefined) =>
+      pin != null && runner?.isOutput(pin) ? this.pwmDuty(pin) : undefined;
+    // What a board pin gives at its high phase, for a load it is switching
+    // with PWM and happens to be caught low by this frame.
+    const pinHighVolts = Number(this.boardDef?.metadata.logicVoltage ?? highVolts);
     // Every user-set environment value is read through the input-control
     // registry, so the inspector and the simulation agree on keys and defaults.
     const sensorRead = (key: string) => controls.sensorValues.get(key);
@@ -3464,10 +3528,18 @@ export class CircuitBinding {
           const anode = levelOf(net('anode'));
           const cathode = levelOf(net('cathode'));
           const fV = Number(inst.properties.forwardVoltage ?? 2);
-          const on =
+          const onNow =
             anode?.volts != null && cathode?.volts != null && anode.volts - cathode.volts >= fV - 0.4;
+          // Under PWM the pin spends part of every period low; the LED is lit
+          // at the average, not dark whenever a frame lands in a low phase.
+          const pwmDutyHere = pwm(anode?.sourcePin);
+          const on =
+            onNow ||
+            (pwmDutyHere !== undefined && cathode?.volts != null && pinHighVolts - cathode.volts >= fV - 0.4);
           let brightness = on ? 1 : 0;
-          if (on && duty && anode?.sourcePin != null && runner?.isOutput(anode.sourcePin)) {
+          if (on && pwmDutyHere !== undefined) {
+            brightness = pwmDutyHere;
+          } else if (on && duty && anode?.sourcePin != null && runner?.isOutput(anode.sourcePin)) {
             brightness = duty.duty[anode.sourcePin];
           }
           visuals.set(inst.id, { ledOn: on && brightness > 0.02, brightness });
@@ -3479,7 +3551,10 @@ export class CircuitBinding {
           const rgb: [number, number, number] = [0, 0, 0];
           for (const [pinId, idx] of channels) {
             const level = levelOf(net(pinId));
-            if (level?.volts != null && cathode?.volts != null && level.volts - cathode.volts >= 1.6) {
+            const pwmDutyHere = pwm(level?.sourcePin);
+            if (pwmDutyHere !== undefined && cathode?.volts != null && pinHighVolts - cathode.volts >= 1.6) {
+              rgb[idx] = pwmDutyHere;
+            } else if (level?.volts != null && cathode?.volts != null && level.volts - cathode.volts >= 1.6) {
               rgb[idx] =
                 duty && level.sourcePin != null && runner?.isOutput(level.sourcePin)
                   ? duty.duty[level.sourcePin]
@@ -3570,9 +3645,14 @@ export class CircuitBinding {
         case 'sim.buzzer': {
           const plus = levelOf(net('plus'));
           const minus = levelOf(net('minus'));
-          const on = plus?.volts != null && minus?.volts != null && plus.volts - minus.volts >= 2.5;
+          const pwmDutyHere = pwm(plus?.sourcePin);
+          const on =
+            (plus?.volts != null && minus?.volts != null && plus.volts - minus.volts >= 2.5) ||
+            (pwmDutyHere !== undefined && minus?.volts != null && pinHighVolts - minus.volts >= 2.5);
           let level = on ? 1 : 0;
-          if (on && duty && plus?.sourcePin != null && runner?.isOutput(plus.sourcePin)) {
+          if (on && pwmDutyHere !== undefined) {
+            level = pwmDutyHere;
+          } else if (on && duty && plus?.sourcePin != null && runner?.isOutput(plus.sourcePin)) {
             level = duty.duty[plus.sourcePin];
           }
           visuals.set(inst.id, { buzzerOn: on && level > 0.02 });

@@ -118,6 +118,66 @@ function pruneEspToolchains(keepChips) {
   return { removed };
 }
 
+/**
+ * Drops what an M0 build never reads from an ARM core's tools: CMSIS's
+ * prebuilt DSP libraries for every other Cortex core, its documentation and
+ * packs, and the compiler's HTML manuals. Each SAMD core carries its own
+ * copy of CMSIS (448 MB for Adafruit's, 345 MB for Seeed's), and a SAMD21
+ * build uses three things from it: Core/Include, DSP/Include and
+ * libarm_cortexM0l_math.a, which `keepLibs` names.
+ *
+ * Like the ESP pruning, it never reaches inside the compiler itself.
+ */
+function pruneArmTools(vendor, keepLibs) {
+  const tools = join(dataDir(), 'packages', vendor, 'tools');
+  const removed = [];
+  const rm = (path) => {
+    rmSync(path, { recursive: true, force: true });
+    removed.push(path.slice(tools.length + 1));
+  };
+  // Only the GCC build of the libraries named, wherever a CMSIS keeps them.
+  const pruneLib = (lib) => {
+    if (!existsSync(lib)) return;
+    for (const entry of readdirSync(lib)) {
+      if (entry !== 'GCC') {
+        rm(join(lib, entry));
+        continue;
+      }
+      for (const file of readdirSync(join(lib, 'GCC'))) {
+        if (!keepLibs.includes(file)) rm(join(lib, 'GCC', file));
+      }
+    }
+  };
+  const cmsis = join(tools, 'CMSIS');
+  for (const version of existsSync(cmsis) ? readdirSync(cmsis) : []) {
+    const root = join(cmsis, version);
+    for (const entry of readdirSync(root)) {
+      if (!['CMSIS', 'Device', 'LICENSE.txt', 'ARM.CMSIS.pdsc'].includes(entry)) rm(join(root, entry));
+    }
+    const inner = join(root, 'CMSIS');
+    if (!existsSync(inner)) continue;
+    for (const entry of readdirSync(inner)) {
+      if (entry === 'Core' || entry === 'Include') continue;
+      if (entry === 'Lib') {
+        pruneLib(join(inner, 'Lib'));
+      } else if (entry === 'DSP') {
+        for (const sub of readdirSync(join(inner, 'DSP'))) {
+          if (sub === 'Lib') pruneLib(join(inner, 'DSP', 'Lib'));
+          else if (sub !== 'Include') rm(join(inner, 'DSP', sub));
+        }
+      } else {
+        rm(join(inner, entry));
+      }
+    }
+  }
+  const gcc = join(tools, 'arm-none-eabi-gcc');
+  for (const version of existsSync(gcc) ? readdirSync(gcc) : []) {
+    const doc = join(gcc, version, 'share', 'doc');
+    if (existsSync(doc)) rm(doc);
+  }
+  return { removed };
+}
+
 function install(core) {
   const args = ['core', 'install', `${core.id}@${core.version}`];
   if (core.additionalUrl) args.push('--additional-urls', core.additionalUrl);
@@ -200,6 +260,11 @@ for (const core of CORES) {
   if (core.id === 'esp32:esp32' && core.keepChips) {
     const { removed } = pruneEspToolchains(core.keepChips);
     console.log(`[cores] pruned ${removed.length} unused ESP32 tool bundle(s): ${removed.join(', ') || 'none'}`);
+  }
+  if (core.keepCmsisLibs) {
+    const vendor = core.id.split(':')[0];
+    const { removed } = pruneArmTools(vendor, core.keepCmsisLibs);
+    console.log(`[cores] pruned ${removed.length} unused ${vendor} CMSIS and documentation entr(ies)`);
   }
 }
 

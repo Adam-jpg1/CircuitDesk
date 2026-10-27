@@ -23,6 +23,7 @@
 //     a board that maps a pin to a pad that does not exist.
 
 import type { BoardArchitecture } from '../types';
+import { TIMER_FUNCTION_E, TIMER_FUNCTION_F } from '../simulation/samd21/timers';
 
 /**
  * Architectures a processor profile can belong to.
@@ -330,10 +331,11 @@ const ESP32C6: ProcessorProfile = {
 /**
  * The ATSAMD21 (G18 on the Feather M0, E18 on the QT Py M0).
  *
- * The bus tables are empty on purpose. SERCOM can put a UART, I2C or SPI on
- * many pad combinations, and none of that muxing is modelled yet, so claiming
- * any of it here would let validation approve wiring the runtime cannot honour.
- * The board's own pin capabilities say what its labelled pins are for.
+ * The bus tables are empty on purpose. A SERCOM can put a UART, I2C or SPI on
+ * many pad combinations; the runtime follows whichever the firmware muxes
+ * (src/simulation/samd21/sercomPads.ts), and a board's own pin capabilities
+ * say which pins its Wire, SPI and Serial1 use. A table here would claim every
+ * combination as a board-independent fact, which validation would then approve.
  */
 const SAMD21: ProcessorProfile = {
   id: 'proc.samd21',
@@ -354,15 +356,19 @@ const SAMD21: ProcessorProfile = {
     PB00: 8, PB01: 9, PB02: 10, PB03: 11, PB04: 12, PB05: 13, PB06: 14, PB07: 15,
     PA08: 16, PA09: 17, PA10: 18, PA11: 19,
   },
-  pwmPads: [],
+  // Every pad a TCC or TC can drive (peripheral function E or F).
+  pwmPads: [...new Set([...Object.keys(TIMER_FUNCTION_E), ...Object.keys(TIMER_FUNCTION_F)].map(Number))]
+    .sort((a, b) => a - b)
+    .map((pad) => `P${pad < 32 ? 'A' : 'B'}${String(pad % 32).padStart(2, '0')}`),
   uarts: [],
   i2c: [],
   spi: [],
   interruptPads: [],
   logicVolts: 3.3,
   notModelled: [
-    'PWM (TC/TCC), so analogWrite produces no modulation',
-    'SERCOM I2C and SPI, and any SERCOM UART beyond the one behind Serial1',
+    'timer modes other than normal PWM, so Servo and tone() do nothing',
+    'SERCOM I2C and SPI beyond the bus behind Wire and SPI, and any UART beyond Serial1',
+    'I2C slave mode, SPI slave mode, DMA',
     'external interrupts (EIC), DMA, the DAC, the RTC and sleep modes',
     'USB other than the CDC serial port',
   ],

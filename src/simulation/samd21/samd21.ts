@@ -17,6 +17,7 @@
 
 import { RP2040 } from 'rp2040js';
 import { RegisterBlock } from './registerBlock';
+import { Samd21Timer, TIMER_FUNCTION_E, TIMER_FUNCTION_F, type TimerHost } from './timers';
 import { Samd21Usb } from './usb';
 
 export { RegisterBlock } from './registerBlock';
@@ -38,6 +39,17 @@ export const SAMD21_IRQ = {
   SERCOM0: 9,
   ADC: 23,
 } as const;
+
+/** What a SERCOM in I2C master mode drives: start, address, bytes, stop. */
+export interface Samd21I2cBus {
+  start(repeated: boolean): void;
+  /** True when a device acknowledged the address. */
+  connect(address: number, write: boolean): boolean;
+  /** True when the device acknowledged the byte. */
+  writeByte(value: number): boolean;
+  readByte(ack: boolean): number;
+  stop(): void;
+}
 
 /** One of the PORT controller's two 32-pin groups. */
 interface PortGroup {
@@ -70,7 +82,18 @@ export class Samd21 extends RP2040 {
   onPinChange: ((pin: number, high: boolean) => void) | null = null;
   private lastLevels = [0, 0];
 
-  private readonly sercoms: { isUsart(): boolean; receive(byte: number): boolean; baud(): number | undefined }[] = [];
+  private readonly timers: Samd21Timer[] = [];
+  private readonly sercoms: {
+    mode(): number;
+    isUsart(): boolean;
+    ctrla(): number;
+    receive(byte: number): boolean;
+    baud(): number | undefined;
+  }[] = [];
+  /** The I2C bus Wire's transactions reach; nothing attached NACKs every address. */
+  i2cHandler: Samd21I2cBus | null = null;
+  /** One SPI byte exchanged: MOSI in, MISO out. */
+  onSpiTransfer: ((mosi: number, mode: 0 | 1 | 2 | 3, lsbFirst: boolean) => number) | null = null;
   /** Bytes the firmware sends out of a SERCOM USART (Serial1). */
   onUartByte: ((byte: number) => void) | null = null;
   /** Volts on each ADC input, for analogRead. */
@@ -209,8 +232,17 @@ export class Samd21 extends RP2040 {
     this.add(new RegisterBlock('PAC2', 0x42000000, 0x400));
     this.add(new RegisterBlock('EVSYS', 0x42000400, 0x400));
     for (let i = 0; i < 6; i++) this.buildSercom(i, 0x42000800 + i * 0x400);
-    for (let i = 0; i < 3; i++) this.add(new RegisterBlock(`TCC${i}`, 0x42002000 + i * 0x400, 0x400));
-    for (let i = 3; i < 8; i++) this.add(new RegisterBlock(`TC${i}`, 0x42002c00 + (i - 3) * 0x400, 0x400));
+    const clock = (this as unknown as { clock: { createAlarm: TimerHost['createAlarm'] } }).clock;
+    const host: TimerHost = {
+      clockHz: SAMD21_CPU_HZ,
+      createAlarm: (callback) => clock.createAlarm(callback),
+      outputsChanged: () => this.portChanged(),
+    };
+    for (let i = 0; i < 8; i++) {
+      const timer = new Samd21Timer(i, i < 3 ? 0x42002000 + i * 0x400 : 0x42002c00 + (i - 3) * 0x400, host);
+      this.timers.push(timer);
+      this.add(timer.block);
+    }
     this.buildAdc();
     this.add(new RegisterBlock('AC', 0x42004400, 0x400));
     this.add(new RegisterBlock('DAC', 0x42004800, 0x400));
@@ -293,6 +325,8 @@ export class Samd21 extends RP2040 {
   pinHigh(g: number, bit: number): boolean {
     const group = this.groups[g];
     const m = 1 << bit;
+    const pwm = this.timerLevel(g, bit);
+    if (pwm !== undefined) return pwm;
     if (group.dir & m) return (group.out & m) !== 0;
     const ext = group.external[bit];
     if (ext !== undefined) return ext;
@@ -300,12 +334,26 @@ export class Samd21 extends RP2040 {
     return false;
   }
 
-  /** Whether firmware has the pin as an output (and not handed to a peripheral). */
+  /**
+   * Whether a pin is driven: a PORT output not handed to a peripheral, or a
+   * pad muxed to a timer that is generating PWM.
+   */
   isOutput(pin: number): boolean {
     const g = pin >> 5;
     const bit = pin & 31;
     const group = this.groups[g];
+    if (this.timerLevel(g, bit) !== undefined) return true;
     return (group.dir & (1 << bit)) !== 0 && (group.pincfg[bit] & PINCFG_PMUXEN) === 0;
+  }
+
+  /** The level a timer drives onto a pad muxed to it (function E or F), if it is running. */
+  private timerLevel(g: number, bit: number): boolean | undefined {
+    const group = this.groups[g];
+    if (!(group.pincfg[bit] & PINCFG_PMUXEN)) return undefined;
+    const fn = (group.pmux[bit >> 1] >>> (bit & 1 ? 4 : 0)) & 0xf;
+    const pad = g * 32 + bit;
+    const route = fn === 4 ? TIMER_FUNCTION_E[pad] : fn === 5 ? TIMER_FUNCTION_F[pad] : undefined;
+    return route ? this.timers[route[0]]?.output(route[1]) : undefined;
   }
 
   /** Drives a pin from outside the chip, or releases it (undefined). */
@@ -330,29 +378,55 @@ export class Samd21 extends RP2040 {
   // ---------------------------------------------------------------- SERCOM
 
   /**
-   * A SERCOM, as far as the Arduino core's begin() and Serial1 need it.
+   * A SERCOM, in the three modes the Arduino core uses.
    *
    * Every begin() — USART, SPI or I2C — starts with a software reset and spins
    * until CTRLA.SWRST clears itself and SYNCBUSY drops, so all six have that.
-   * One configured as a USART (CTRLA.MODE 1, internal clock) is a board's
-   * Serial1 — SERCOM0 on the Adafruit boards, SERCOM4 on the XIAO:
-   *   * its data register is always empty and the last byte always sent, so
-   *     writes never wait, and every byte written goes out of onUartByte;
-   *   * a byte arriving on its RX pad (receiveUart) raises RXC and, with RXC
-   *     enabled in INTEN as the core's begin() leaves it, the SERCOM's NVIC
-   *     line — the core's Uart::IrqHandler reads DATA, which pops the byte.
-   * SPI and I2C transfers are not modelled.
+   *
+   * USART (CTRLA.MODE 1) is a board's Serial1 — SERCOM0 on the Adafruit
+   * boards, SERCOM4 on the XIAO. Its data register is always empty and the last
+   * byte always sent, so writes go straight out of onUartByte; a byte arriving
+   * on its RX pad (receiveUart) raises RXC and, with RXC enabled in INTEN as
+   * the core leaves it, the SERCOM's NVIC line.
+   *
+   * SPI master (MODE 3) exchanges each byte written to DATA with the SPI bus at
+   * once and raises RXC, which SPI.transfer() waits for.
+   *
+   * I2C master (MODE 5) runs Wire's transactions against the I2C bus: writing
+   * ADDR starts (or repeats) and addresses, raising MB for a write — or SB with
+   * the first byte for a read — with STATUS.RXNACK when nobody answered; DATA
+   * writes a byte and raises MB; CTRLB.CMD 2 reads the next byte and 3 stops.
+   * BUSSTATE follows, idle to owner and back, as Wire checks it.
    */
   private buildSercom(index: number, base: number): void {
     const s = this.add(new RegisterBlock(`SERCOM${index}`, base, 0x400));
     const rx: number[] = [];
     let inten = 0;
-    const isUsart = () => ((s.peek(0x00, 4) >>> 2) & 0x7) === 1;
-    const receiving = () => isUsart() && (s.peek(0x00, 4) & 0x2) !== 0 && (s.peek(0x04, 4) & (1 << 17)) !== 0;
-    // DRE | TXC always; RXC while a received byte waits in DATA.
-    const intflag = () => (isUsart() ? 0x03 | (receiving() && rx.length > 0 ? 0x04 : 0) : s.peek(0x18, 1));
+    // I2C master state: MB and SB, RXNACK, BUSSTATE (1 idle, 2 owner).
+    let i2cFlags = 0;
+    let rxnack = false;
+    let busState = 0;
+    let i2cData = 0xff;
+    let spiRx: number | undefined;
+    const mode = () => (s.peek(0x00, 4) >>> 2) & 0x7;
+    const isUsart = () => mode() === 1;
+    const enabled = () => (s.peek(0x00, 4) & 0x2) !== 0;
+    const receiving = () => isUsart() && enabled() && (s.peek(0x04, 4) & (1 << 17)) !== 0;
+    const intflag = () => {
+      switch (mode()) {
+        case 1: // USART: DRE | TXC, and RXC while a byte waits
+          return 0x03 | (receiving() && rx.length > 0 ? 0x04 : 0);
+        case 3: // SPI master: DRE | TXC, and RXC after a transfer
+          return 0x03 | (spiRx !== undefined ? 0x04 : 0);
+        case 5: // I2C master: MB (bit 0) and SB (bit 1)
+          return i2cFlags;
+        default:
+          return s.peek(0x18, 1);
+      }
+    };
     const irq = SAMD21_IRQ.SERCOM0 + index;
     const update = () => this.setInterrupt(irq, isUsart() && (intflag() & inten) !== 0);
+    const i2c = () => this.i2cHandler;
     s.on(0x00, {
       width: 4,
       read: () => s.peek(0x00, 4) & ~1,
@@ -361,28 +435,125 @@ export class Samd21 extends RP2040 {
           s.bytes.fill(0);
           rx.length = 0;
           inten = 0;
+          i2cFlags = 0;
+          rxnack = false;
+          busState = 0;
+          spiRx = undefined;
         }
         update();
       },
     });
-    s.on(0x04, { width: 4, write: () => update() }); // CTRLB: RXEN
+    // CTRLB: RXEN for the USART; CMD (bits 16-17) and ACKACT (bit 18) for I2C.
+    s.on(0x04, {
+      width: 4,
+      write: (v) => {
+        if (mode() === 5) {
+          const cmd = (v >>> 16) & 0x3;
+          if (cmd !== 0) {
+            // CMD reads back as zero; ACKACT stays.
+            s.poke(0x04, v & ~(0x3 << 16), 4);
+            i2cFlags = 0;
+            if (cmd === 2 && busState === 2) {
+              i2cData = i2c()?.readByte(true) ?? 0xff;
+              i2cFlags = 0x2;
+            } else if (cmd === 3) {
+              if (busState === 2) i2c()?.stop();
+              busState = 1;
+            }
+          }
+        }
+        update();
+      },
+    });
     s.on(0x14, { width: 1, read: () => inten, write: (v) => { inten &= ~v; update(); } });
     s.on(0x16, { width: 1, read: () => inten, write: (v) => { inten |= v; update(); } });
+    s.on(0x18, {
+      width: 1,
+      read: intflag,
+      // I2C flags clear by writing one, as well as by the next operation.
+      write: (v) => {
+        if (mode() === 5) i2cFlags &= ~v;
+      },
+    });
+    // STATUS: for I2C, RXNACK (bit 2) and BUSSTATE (bits 4-5), which Wire sets
+    // to idle once at begin() and the bus moves on from there.
+    s.on(0x1a, {
+      width: 2,
+      read: () => (mode() === 5 ? (rxnack ? 0x04 : 0) | (busState << 4) : s.peek(0x1a, 2)),
+      write: (v) => {
+        if (mode() === 5) {
+          const requested = (v >>> 4) & 0x3;
+          if (requested !== 0) busState = requested;
+        }
+      },
+    });
     s.on(0x1c, { width: 4, read: () => 0 }); // SYNCBUSY
-    s.on(0x18, { width: 1, read: intflag });
+    // I2C ADDR: a (repeated) start and the address byte.
+    s.on(0x24, {
+      width: 4,
+      write: (v) => {
+        if (mode() !== 5 || !enabled()) return;
+        const bus = i2c();
+        const address = (v >>> 1) & 0x7f;
+        const read = (v & 1) === 1;
+        bus?.start(busState === 2);
+        busState = 2;
+        const ack = bus ? bus.connect(address, !read) : false;
+        rxnack = !ack;
+        if (read && ack) {
+          i2cData = bus?.readByte(true) ?? 0xff;
+          i2cFlags = 0x2; // SB: a byte is in
+        } else {
+          i2cFlags = 0x1; // MB: address sent (and, when NACKed, that is all)
+        }
+      },
+    });
     s.on(0x28, {
       width: 2,
       read: () => {
-        const byte = rx.shift() ?? 0;
-        update();
-        return byte;
+        switch (mode()) {
+          case 1: {
+            const byte = rx.shift() ?? 0;
+            update();
+            return byte;
+          }
+          case 3: {
+            const byte = spiRx ?? 0xff;
+            spiRx = undefined;
+            return byte;
+          }
+          case 5:
+            return i2cData;
+          default:
+            return s.peek(0x28, 2);
+        }
       },
       write: (v) => {
-        if (isUsart()) this.onUartByte?.(v & 0xff);
+        switch (mode()) {
+          case 1:
+            this.onUartByte?.(v & 0xff);
+            break;
+          case 3: {
+            const ctrla = s.peek(0x00, 4);
+            const spiMode = ((((ctrla >>> 29) & 1) << 1) | ((ctrla >>> 28) & 1)) as 0 | 1 | 2 | 3;
+            const lsbFirst = ((ctrla >>> 30) & 1) === 1;
+            spiRx = (this.onSpiTransfer?.(v & 0xff, spiMode, lsbFirst) ?? 0xff) & 0xff;
+            break;
+          }
+          case 5: {
+            if (busState !== 2) return;
+            const ack = i2c()?.writeByte(v & 0xff) ?? false;
+            rxnack = !ack;
+            i2cFlags = 0x1;
+            break;
+          }
+        }
       },
     });
     this.sercoms.push({
+      mode,
       isUsart,
+      ctrla: () => s.peek(0x00, 4),
       receive: (byte) => {
         if (!receiving()) return false;
         rx.push(byte & 0xff);
@@ -401,6 +572,22 @@ export class Samd21 extends RP2040 {
         return (SAMD21_CPU_HZ / oversample) * (1 - baud / 65536);
       },
     });
+  }
+
+  /** The peripheral function (0 = A … 7 = H) a pin is muxed to, when PMUXEN is set. */
+  pinFunction(pin: number): number | undefined {
+    const group = this.groups[pin >> 5];
+    const bit = pin & 31;
+    if (!group || !(group.pincfg[bit] & PINCFG_PMUXEN)) return undefined;
+    return (group.pmux[bit >> 1] >>> (bit & 1 ? 4 : 0)) & 0xf;
+  }
+
+  /** The SERCOMs running in `mode` (3 SPI master, 5 I2C master), with their CTRLA. */
+  sercomsInMode(mode: number): { index: number; ctrla: number }[] {
+    return this.sercoms
+      .map((sercom, index) => ({ index, mode: sercom.mode(), ctrla: sercom.ctrla() }))
+      .filter((sercom) => sercom.mode === mode)
+      .map(({ index, ctrla }) => ({ index, ctrla }));
   }
 
   /**

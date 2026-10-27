@@ -195,6 +195,9 @@ const SAMD21_SIM_APIS = [
   'digitalWrite',
   'digitalRead',
   'analogRead (10-bit, 3.3 V reference)',
+  'analogWrite (PWM on the pins the board gives a TCC or TC, at ~732 Hz)',
+  'Wire (I2C master, on the board\'s SDA/SCL)',
+  'SPI (master, on the board\'s SCK/MOSI/MISO)',
   'delay/millis/micros',
   'Serial (native USB CDC, to the serial monitor, both directions; while (!Serial) returns once connected)',
   'Serial1 (the hardware UART, both directions — a part wired to RX/TX reaches it)',
@@ -204,13 +207,15 @@ const SAMD21_SIM_PERIPHERALS = [
   'PORT, with pulls and the single-cycle IOBUS',
   'SysTick, which millis() counts',
   'ADC, single conversions',
+  'TCC0-2 and TC3-7 in normal PWM, driving the pads muxed to them',
+  'SERCOM I2C master and SPI master, on the shared device buses',
   'USB device controller — the CDC serial port, enumerated by a modelled host',
   'the SERCOM USART behind Serial1 (SERCOM0 on the Adafruit boards, SERCOM4 on the XIAO), with its receive interrupt',
 ];
 
 const SAMD21_LIMITATION =
-  'Real SAMD21 firmware on a Cortex-M0+ core: startup, setup() and loop(), GPIO, analogRead, Serial over native USB and Serial1 on the UART pins. ' +
-  'PWM (analogWrite), I2C, SPI, external interrupts, DMA, the DAC and sleep are not simulated — sketches using them ' +
+  'Real SAMD21 firmware on a Cortex-M0+ core: startup, setup() and loop(), GPIO, analogRead, analogWrite (PWM), Wire, SPI, Serial over native USB and Serial1 on the UART pins. ' +
+  'Servo, tone(), external interrupts, DMA, the DAC and sleep are not simulated — sketches using them ' +
   'compile and run, but those peripherals do nothing.';
 
 const samd21Compiler = (fqbn: string): BoardCompilerInfo => ({
@@ -477,6 +482,8 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     compileProfileId: 'compile.samd21-adafruit',
     runtimeProfileId: 'runtime.samd21',
     serverTargetId: 'board.adafruit-feather',
+    // PWM where the variant gives the pin a TCC or TC: A1-A4 as well as the D pins.
+    extraPinCaps: [{ pattern: /^A[1-4]$/, add: ['pwm'] }],
     // The Feather's labels and the pads behind them, from the core's variant.
     padMap: {
       A0: 'PA02', A1: 'PB08', A2: 'PB09', A3: 'PA04', A4: 'PA05', A5: 'PB02',
@@ -501,6 +508,8 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     compileProfileId: 'compile.samd21-adafruit',
     runtimeProfileId: 'runtime.samd21',
     serverTargetId: 'board.adafruit-qtpy',
+    // PWM where the variant gives the pin a TCC or TC: every pin but A0 and A1.
+    extraPinCaps: [{ pattern: /^(A2|A3|SDA|SCL|TX|RX|SCK|MISO|MOSI)$/, add: ['pwm'] }],
     padMap: {
       A0: 'PA02', A1: 'PA03', A2: 'PA04', A3: 'PA05', SDA: 'PA16', SCL: 'PA17', TX: 'PA06',
       RX: 'PA07', SCK: 'PA11', MISO: 'PA09', MOSI: 'PA10',
@@ -522,6 +531,15 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     compileProfileId: 'compile.samd21-seeed',
     runtimeProfileId: 'runtime.samd21',
     serverTargetId: 'board.seeed-xiao',
+    // PWM where the variant gives the pin a TCC or TC: every pin but A0. And
+    // SPI on the three pins printed A8/SCK, A9/MISO and A10/MOSI — SERCOM0,
+    // which the variant's SPI uses.
+    extraPinCaps: [
+      { pattern: /^(A([1-9]|10)|SDA|SCL|TX|RX)$/, add: ['pwm'] },
+      { pattern: /^A8$/, add: ['spi-sck'] },
+      { pattern: /^A9$/, add: ['spi-miso'] },
+      { pattern: /^A10$/, add: ['spi-mosi'] },
+    ],
     padMap: {
       A0: 'PA02', A1: 'PA04', A2: 'PA10', A3: 'PA11', SDA: 'PA08', SCL: 'PA09', TX: 'PB08', RX: 'PB09',
       A8: 'PA07', A9: 'PA05', A10: 'PA06',

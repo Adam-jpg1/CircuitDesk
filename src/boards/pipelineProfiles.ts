@@ -232,10 +232,10 @@ export const RUNTIME_PROFILES: RuntimeProfile[] = [
     processorProfileIds: ['proc.samd21'],
     acceptsFormats: ['intel-hex'],
     supportedApis: [
-      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'delay/millis/micros',
+      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'Wire', 'SPI', 'delay/millis/micros',
       'Serial (native USB CDC, both directions)', 'Serial1 (the hardware UART, both directions)',
     ],
-    supportedPeripherals: ['PORT GPIO', 'SysTick', 'ADC', 'USB device (CDC)', 'SERCOM USART (Serial1)'],
+    supportedPeripherals: ['PORT GPIO', 'SysTick', 'ADC', 'TCC/TC PWM', 'USB device (CDC)', 'SERCOM USART (Serial1)', 'SERCOM I2C and SPI master'],
     description:
       'Executes SAMD21 firmware on rp2040js\'s Cortex-M0+ core with a SAMD21 chip model: PORT, the clock and NVM ' +
       'flags startup waits on, SysTick, the ADC and the USB device with a host on the CDC port.',

@@ -5,7 +5,7 @@
 // AVR simulation never fetches the RP2040 engine and vice versa.
 
 import type { BoardDefinition } from '../types';
-import type { BoardRunner } from './boardRunner';
+import { runnerPinIndex, type BoardRunner } from './boardRunner';
 // Pure data (no avr8js), already part of the main chunk — imported statically
 // so only the emulator itself is lazily loaded.
 import { avrProfileForProcessor } from '../boards/pinMaps';
@@ -162,7 +162,19 @@ const samd21Adapter: BoardSimulatorAdapter = {
   async createRunner(firmware, board) {
     assertFormat(this, firmware, board);
     const { Samd21Runner } = await import('./samd21/samd21Runner');
-    return new Samd21Runner(firmware.data);
+    // Where the board's Wire and SPI are before begin() muxes them, so a part
+    // wired on the canvas is on the bus from the first transaction.
+    const padOf = (cap: string) => {
+      const pin = board.pins.find((p) => p.capabilities.includes(cap as never));
+      return pin ? runnerPinIndex(board, pin.id) : undefined;
+    };
+    return new Samd21Runner(firmware.data, {
+      sda: padOf('i2c-sda'),
+      scl: padOf('i2c-scl'),
+      sck: padOf('spi-sck'),
+      mosi: padOf('spi-mosi'),
+      miso: padOf('spi-miso'),
+    });
   },
 };
 

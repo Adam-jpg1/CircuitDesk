@@ -14,6 +14,9 @@
 // adapter's dynamic import.
 
 import { Samd21, SAMD21_CPU_HZ, SAMD21_FLASH_BYTES } from './samd21';
+import { pinForSercomPad } from './sercomPads';
+import { I2cBus } from '../devices/i2cBus';
+import { SpiBus } from '../devices/spiBus';
 import { parseIntelHex, intelHexHighestAddress } from '../intelHex';
 import { samdPadIndex, type PinLevel, type PinSnapshot } from '../boardRunner';
 import { processorProfile } from '../../boards/processorProfiles';
@@ -42,6 +45,18 @@ interface DutyTracker {
 
 export class FirmwareRejectedError extends Error {}
 
+/** A board's labelled bus pins, as pads: where its Wire and SPI are before begin() muxes them. */
+export interface Samd21BusDefaults {
+  sda?: number;
+  scl?: number;
+  sck?: number;
+  mosi?: number;
+  miso?: number;
+}
+
+/** SPI CTRLA.DOPO: which pads carry data out and the clock. */
+const DOPO_PADS: readonly (readonly [dataOut: number, clock: number])[] = [[0, 1], [2, 3], [3, 1], [0, 3]];
+
 export class Samd21Runner {
   readonly engine = 'samd21' as const;
 
@@ -51,6 +66,10 @@ export class Samd21Runner {
   private readonly pinListeners = new Set<(pin: number, high: boolean) => void>();
   private readonly external = new Map<number, boolean>();
   private disposed = false;
+  /** Wire's bus: devices on the canvas wired to SDA/SCL attach here. */
+  readonly i2cBus = new I2cBus();
+  /** SPI's bus, for the parts wired to SCK/MOSI/MISO. */
+  readonly spiBus = new SpiBus();
 
   /** SERCOM0's USART: Serial1 on the boards here. */
   onSerialByte: ((byte: number) => void) | null = null;
@@ -58,7 +77,7 @@ export class Samd21Runner {
   onUsbSerialByte: ((byte: number) => void) | null = null;
   onPinChange: ((pin: number, high: boolean) => void) | null = null;
 
-  constructor(hex: string) {
+  constructor(hex: string, private readonly busDefaults: Samd21BusDefaults = {}) {
     let highest: number;
     try {
       highest = intelHexHighestAddress(hex);
@@ -88,6 +107,7 @@ export class Samd21Runner {
     chip.onPinChange = (pin, high) => this.padChanged(pin, high);
     chip.onUartByte = (byte) => this.onSerialByte?.(byte);
     chip.usb.onSerialData = (byte) => this.onUsbSerialByte?.(byte);
+    this.attachBuses(chip);
     for (const [pin, level] of this.external) chip.setExternal(pin, level);
 
     // What the bootloader does on a normal reset.
@@ -95,6 +115,67 @@ export class Samd21Runner {
     core.VTOR = SAMD21_APP_BASE;
     core.SP = chip.readUint32(SAMD21_APP_BASE);
     core.PC = chip.readUint32(SAMD21_APP_BASE + 4) & ~1;
+  }
+
+  /**
+   * Wire and SPI reach the shared device buses. With nothing attached the I2C
+   * bus NACKs every address — Wire.endTransmission() returns 2, as on a bare
+   * board — and SPI reads back an idle bus.
+   */
+  private attachBuses(chip: Samd21): void {
+    let acked = false;
+    let read = 0xff;
+    const handler = this.i2cBus.handler({
+      completeStart: () => {},
+      completeStop: () => {},
+      completeConnect: (ack) => (acked = ack),
+      completeWrite: (ack) => (acked = ack),
+      completeRead: (value) => (read = value),
+    });
+    chip.i2cHandler = {
+      start: (repeated) => handler.start(repeated),
+      connect: (address, write) => {
+        handler.connectToSlave(address, write);
+        return acked;
+      },
+      writeByte: (value) => {
+        handler.writeByte(value);
+        return acked;
+      },
+      readByte: (ack) => {
+        handler.readByte(ack);
+        return read;
+      },
+      stop: () => handler.stop(),
+    };
+    chip.onSpiTransfer = (mosi, mode, lsbFirst) =>
+      this.spiBus.transferByte(mosi, { mode, bitOrder: lsbFirst ? 'lsbFirst' : 'msbFirst' }, (pin) => this.digitalPinLevel(pin));
+  }
+
+  /** The pads carrying I2C: SERCOM PAD0/PAD1 of the one in I2C master mode, or the board's SDA/SCL before Wire.begin(). */
+  activeI2cPins(): { sda?: number; scl?: number } {
+    const sercom = this.chip.sercomsInMode(5)[0];
+    if (sercom) {
+      const fn = (pin: number) => this.chip.pinFunction(pin);
+      const sda = pinForSercomPad(sercom.index, 0, fn);
+      const scl = pinForSercomPad(sercom.index, 1, fn);
+      if (sda !== undefined && scl !== undefined) return { sda, scl };
+    }
+    return { sda: this.busDefaults.sda, scl: this.busDefaults.scl };
+  }
+
+  /** The pads carrying SPI, from the SPI master's DOPO/DIPO, or the board's labelled pins before SPI.begin(). */
+  activeSpiPins(): { sck?: number; mosi?: number; miso?: number } {
+    const sercom = this.chip.sercomsInMode(3)[0];
+    if (sercom) {
+      const fn = (pin: number) => this.chip.pinFunction(pin);
+      const [dataOut, clock] = DOPO_PADS[(sercom.ctrla >>> 16) & 0x3];
+      const sck = pinForSercomPad(sercom.index, clock, fn);
+      const mosi = pinForSercomPad(sercom.index, dataOut, fn);
+      const miso = pinForSercomPad(sercom.index, (sercom.ctrla >>> 20) & 0x3, fn);
+      if (sck !== undefined) return { sck, mosi, miso };
+    }
+    return { sck: this.busDefaults.sck, mosi: this.busDefaults.mosi, miso: this.busDefaults.miso };
   }
 
   private get core(): { VTOR: number; SP: number; PC: number; waiting: boolean; executeInstruction(): number } {
@@ -173,12 +254,14 @@ export class Samd21Runner {
     const g = pin >> 5;
     const bit = pin & 31;
     const group = this.chip.groups[g];
-    if (group.dir & (1 << bit)) return group.out & (1 << bit) ? 'high' : 'low';
+    // Driven by PORT or by a timer the pad is muxed to (analogWrite).
+    if (this.chip.isOutput(pin)) return this.chip.pinHigh(g, bit) ? 'high' : 'low';
     const pulled = (group.pincfg[bit] & 0x04) !== 0 && (group.out & (1 << bit)) !== 0;
     return pulled ? 'input-pullup' : 'input';
   }
 
   isOutput(pin: number): boolean {
+    if (pin < 0 || pin >= SAMD21_PIN_COUNT) return false;
     return this.chip.isOutput(pin);
   }
 
