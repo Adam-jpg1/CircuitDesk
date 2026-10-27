@@ -86,7 +86,8 @@ function run(runner: AVRRunner, binding: CircuitBinding, controls: ReturnType<ty
   check(LEO.portMap[0].port === 'D' && LEO.portMap[0].index === 2, 'pin 0 → PD2 (Uno would be PD0)');
   // A6-A11 are alternate functions, not addressable pins on this profile.
   check(LEO.portMap[24] === undefined, 'A6-A11 are not exposed as separate pins (unsupported ADC channels)');
-  check(LEO.unsupported.some((u) => /native USB/i.test(u)), 'native USB declared unsupported in the profile');
+  check(!LEO.unsupported.some((u) => /Serial \(native USB/i.test(u)), 'the USB Serial port is no longer declared unsupported');
+  check(LEO.unsupported.some((u) => /USB HID/i.test(u)), 'while USB HID still is');
   check(LEO.unsupported.some((u) => /Timer4/.test(u)), 'Timer4 (D6/D13 PWM) declared unsupported');
   check(LEO.unsupported.some((u) => /ADC channels 8-13/.test(u)), 'A6-A11 ADC channels declared unsupported');
 }
@@ -224,16 +225,20 @@ void loop(){}`);
   const flat = (d: number) => d < 0.02 || d > 0.98;
   check(flat(snap.duty[13]) && flat(snap.duty[6]), `Timer4 PWM on D13/D6 produces no modulation, as declared (duty ${snap.duty[13].toFixed(2)}/${snap.duty[6].toFixed(2)})`);
 
-  // (b) The native-USB "Serial" object must produce nothing — the alternative
-  //     would be silently routing USB CDC onto USART1 and calling it Serial.
+  // (b) The native-USB "Serial" object goes out over USB, and only there — the
+  //     alternative would be silently routing USB CDC onto USART1 and calling
+  //     it Serial. tests/leonardo.usbSerial.mts covers the USB side in full.
   const usbHex = await compileLeo(`void setup(){ Serial.begin(9600); Serial1.begin(9600); }
 void loop(){ Serial.println("USB-CDC"); Serial1.println("UART1"); delay(50); }`);
   const usbRunner = new AVRRunner(usbHex, LEO);
   let out = '';
+  let usbOut = '';
   usbRunner.onSerialByte = (b) => (out += String.fromCharCode(b));
+  usbRunner.onUsbSerialByte = (b) => (usbOut += String.fromCharCode(b));
   usbRunner.runToCycles(0.4 * F_CPU);
   check(out.includes('UART1'), 'Serial1 output is emitted from the emulated USART1');
-  check(!out.includes('USB-CDC'), 'native USB Serial is NOT mapped onto USART1 — it produces no output, as declared');
+  check(!out.includes('USB-CDC'), 'native USB Serial is NOT mapped onto USART1');
+  check(usbOut.includes('USB-CDC') && !usbOut.includes('UART1'), 'it goes out over USB instead, and only USB');
 }
 
 // ---------- 8. Serial1 receive path ----------

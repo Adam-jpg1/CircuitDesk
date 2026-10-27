@@ -105,7 +105,7 @@ npm run test:mega      # ATmega2560 runtime suite: GPIO in/out, 150 ms timing,
                        # the Mega-only Timer5, wrong-MCU firmware rejection
 npm run test:leonardo  # ATmega32U4 runtime suite: GPIO in/out, millis, Serial1
                        # both directions, ADC, PWM on Timer0/1/3, and proof that
-                       # native USB Serial is not faked onto the UART
+                       # native USB Serial goes over USB, never onto the UART
 npm run test:boards    # board profiles, honest badges, no Uno fallbacks
 npm run test:ui        # quick Playwright smoke test
 npx tsx tests/customBoard.demos.mts

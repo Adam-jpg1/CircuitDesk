@@ -156,8 +156,7 @@ const ATMEGA32U4_LEONARDO: AvrBoardProfile = {
   ports: ['B', 'C', 'D', 'E', 'F'],
   portMap: atmega32u4Map(),
   unsupported: [
-    'Serial (native USB CDC) — the ATmega32U4 USB device is not emulated; only Serial1 (USART1 on D0/D1) produces output',
-    'USB HID: Keyboard, Mouse and other native-USB libraries',
+    'USB HID: Keyboard, Mouse and other native-USB libraries enumerate, but nothing reads their reports',
     'Timer4 (high-speed 10-bit) — analogWrite on D6 and D13 produces no PWM',
     'ADC channels 8-13 (the A6-A11 alternate functions of D4/D6/D8/D9/D10/D12) — MUX5 sits at a different ADCSRB bit on this MCU than the engine assumes',
     'External interrupts INT0-INT3/INT6 (attachInterrupt) and pin-change interrupts (PCINT0)',

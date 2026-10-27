@@ -12,6 +12,7 @@
 import { CPU, avrInstruction, AVRIOPort, AVRTimer, AVRUSART, AVRADC, AVRTWI, AVRSPI, PinState } from 'avr8js';
 import { parseIntelHex, intelHexHighestAddress } from './intelHex';
 import { AVR_BOARD_PROFILES, type AvrBoardProfile, type AvrPortName } from '../boards/pinMaps';
+import { Atmega32u4Usb } from './avr/usb32u4';
 import { MCU_CONFIGS, PORT_CONFIGS } from './avr/mcuConfig';
 import { I2cBus } from './devices/i2cBus';
 import { SpiBus, type SpiController } from './devices/spiBus';
@@ -83,6 +84,12 @@ export class AVRRunner {
   private readonly portPins = new Map<AvrPortName, [number, number][]>();
 
   onSerialByte: ((byte: number) => void) | null = null;
+  /**
+   * What the firmware sends over the chip's own USB, on boards that have it
+   * (the Leonardo's `Serial`). For the monitor only: no wire carries it.
+   */
+  onUsbSerialByte: ((byte: number) => void) | null = null;
+  private readonly usb: Atmega32u4Usb | null = null;
   /** Called on any digital pin change with (arduinoPin, isHigh). */
   onPinChange: ((pin: number, high: boolean) => void) | null = null;
 
@@ -135,6 +142,11 @@ export class AVRRunner {
     // Narrow per-MCU hardware avr8js has no class for (e.g. the 32U4's USB PLL
     // lock bit, without which the Arduino core never reaches setup()).
     mcu.installExtras?.(this.cpu);
+    // The 32U4's own USB port, which is `Serial` on a Leonardo.
+    if (profile.mcu === 'atmega32u4') {
+      this.usb = new Atmega32u4Usb(this.cpu, F_CPU);
+      this.usb.onSerialData = (byte: number) => this.onUsbSerialByte?.(byte);
+    }
 
     this.timers = mcu.timers.map((cfg) => new AVRTimer(this.cpu, cfg));
     this.usart = new AVRUSART(this.cpu, mcu.usart, F_CPU);
@@ -284,8 +296,12 @@ export class AVRRunner {
   }
 
   queueSerialInput(text: string): void {
-    for (const ch of new TextEncoder().encode(text)) this.serialRxQueue.push(ch);
+    const bytes = new TextEncoder().encode(text);
+    for (const ch of bytes) this.serialRxQueue.push(ch);
     this.pumpSerialRx();
+    // And to the USB port, where there is one: the monitor is what is on the
+    // other end of it.
+    this.usb?.sendSerial(bytes);
   }
 
   /**

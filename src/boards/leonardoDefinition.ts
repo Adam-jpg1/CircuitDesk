@@ -175,7 +175,7 @@ export const ARDUINO_LEONARDO: BoardDefinition = {
   supportLevel: 'simulated',
   isBoard: true,
   description:
-    'Leonardo-compatible board with an ATmega32U4 at 16 MHz. Simulated on its own profile: 18 digital pins (D0-D17), A0-A5 analog inputs, Timer0/1/3 PWM and Serial1 on D0/D1. Native USB (the "Serial" object, Keyboard and Mouse) is not emulated.',
+    'Leonardo-compatible board with an ATmega32U4 at 16 MHz. Simulated on its own profile: 18 digital pins (D0-D17), A0-A5 analog inputs, Timer0/1/3 PWM, Serial over its native USB port and Serial1 on D0/D1. USB Keyboard and Mouse are not emulated.',
   metadata: {
     logicVoltage: 5,
     maxPinCurrentMa: 40,

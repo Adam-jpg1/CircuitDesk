@@ -387,8 +387,8 @@ const atmega32u4Adc: ADCConfig = {
  * never appears and firmware hangs forever in the boot loop. Reflecting PLLE
  * into PLOCK models exactly that one behavior.
  *
- * This is NOT USB support: no device, endpoints, enumeration or CDC serial are
- * emulated, and the board's capability list says so.
+ * The USB controller itself is modelled separately (avr/usb32u4.ts), and the
+ * runner attaches it for this MCU.
  */
 const PLLCSR = 0x49;
 const PLLE = 0b10;

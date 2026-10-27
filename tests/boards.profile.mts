@@ -150,9 +150,15 @@ function projectWith(boardDefId: string): CircuitProject {
     `Pico is Simulated through the RP2040 engine (${pico.supportLevel}/${pico.simulation?.engine})`,
   );
   // The badge must not be read as a claim about everything the chip can do.
+  // USB is claimed for exactly one thing, the CDC serial port, which
+  // tests/rp2040.usbSerial.mts exercises; not HID, not mass storage.
   check(
-    !pico.simulation?.supportedApis.some((a) => /analogWrite|wifi|usb\b/i.test(a)),
-    'Pico claims no analogWrite, Wi-Fi or USB APIs',
+    pico.simulation?.supportedApis.filter((a) => /usb/i.test(a)).every((a) => /^Serial \(USB CDC/.test(a)) === true,
+    'Pico claims USB only as the CDC Serial port',
+  );
+  check(
+    !pico.simulation?.supportedApis.some((a) => /analogWrite|wifi/i.test(a)),
+    'Pico claims no analogWrite or Wi-Fi APIs',
   );
   check(
     // Word-bounded, so "GPIO pads" is not mistaken for a PIO claim.
@@ -358,13 +364,15 @@ function projectWith(boardDefId: string): CircuitProject {
     'D18-D21 keep their real hardware interrupt capability metadata',
   );
 
-  // ---- Leonardo: native USB and Timer4 must never be claimed ----
+  // ---- Leonardo: Serial is the modelled USB port; Timer4 is never claimed ----
   const leonardo = getBoardDefinition('board.arduino-leonardo')!;
   const leoApis = leonardo.simulation!.supportedApis;
   check(!leoApis.includes('external interrupts'), 'Leonardo does not claim external interrupts');
+  // Serial is claimed as what it is — the USB CDC port, tests/leonardo.usbSerial.mts
+  // — and never as a UART, which would be the old lie of routing it onto USART1.
   check(
-    !leoApis.some((a) => /^Serial \(/.test(a)) && leoApis.some((a) => /^Serial1 /.test(a)),
-    'Leonardo claims Serial1 (USART1) and never the native-USB "Serial"',
+    leoApis.some((a) => /^Serial \(native USB CDC/.test(a)) && !leoApis.some((a) => /^Serial \((hardware )?UART/i.test(a)) && leoApis.some((a) => /^Serial1 /.test(a)),
+    'Leonardo claims Serial as its USB CDC port, never as a UART, and Serial1 as USART1',
   );
   check(
     leoApis.some((a) => /analogWrite \(PWM on D3, D5, D9, D10, D11\)/.test(a)),
@@ -376,8 +384,8 @@ function projectWith(boardDefId: string): CircuitProject {
   );
   const leoLimitation = String(leonardo.metadata.limitation ?? '');
   check(
-    /native USB/i.test(leoLimitation) && /Timer4/.test(leoLimitation) && /while \(!Serial\)/.test(leoLimitation),
-    'Leonardo limitation text names native USB, Timer4 and the "while (!Serial)" stall',
+    /native USB/i.test(leoLimitation) && /Timer4/.test(leoLimitation) && /HID/.test(leoLimitation) && !/while \(!Serial\)" will never/.test(leoLimitation),
+    'Leonardo limitation text names native USB, HID and Timer4, and no longer warns of a while (!Serial) stall',
   );
   check(describeSupport(leonardo).includes(leoLimitation), 'the Leonardo badge tooltip states its limitations');
   const leoProfile = AVR_BOARD_PROFILES['board.arduino-leonardo'];

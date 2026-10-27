@@ -191,7 +191,7 @@ const ATMEGA32U4: ProcessorProfile = {
   interruptPads: [],
   logicVolts: 5,
   notModelled: [
-    'native USB — the USB CDC Serial object, Keyboard and Mouse produce nothing',
+    'native USB beyond the CDC serial port — Keyboard and Mouse enumerate, but nothing reads their reports',
     'Timer4, so no PWM on the two pads it drives',
     'external and pin-change interrupts',
     'SPI, I2C and EEPROM persistence',

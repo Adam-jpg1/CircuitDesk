@@ -92,13 +92,15 @@ const MEGA_SIM_APIS = AVR_SIM_APIS.filter((api) => api !== 'external interrupts'
 
 /**
  * The Leonardo's list is written out rather than filtered, because two entries
- * differ in meaning: "Serial" on this board is native USB CDC (not emulated),
- * so only Serial1 is claimed, and PWM exists on five of the seven physical
- * PWM pins because Timer4 is not modeled.
+ * differ in meaning: "Serial" on this board is native USB CDC, served by the
+ * 32U4 USB controller model (tests/leonardo.usbSerial.mts) rather than by a
+ * UART, and PWM exists on five of the seven physical PWM pins because Timer4
+ * is not modeled.
  */
 const LEONARDO_SIM_APIS = [
   'pinMode', 'digitalWrite', 'digitalRead', 'analogRead (A0-A5)',
   'analogWrite (PWM on D3, D5, D9, D10, D11)', 'delay/millis/micros',
+  'Serial (native USB CDC, to the serial monitor, both directions; while (!Serial) returns once connected)',
   'Serial1 (hardware UART on D0/D1, both directions)', 'timers',
 ];
 const AVR_SIM_PERIPHERALS = ['GPIO ports', 'Timer0/1/2', 'USART0', 'ADC'];
@@ -299,13 +301,14 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
         'GPIO ports B/C/D/E/F (D0-D17, A0-A5)',
         'Timer0, Timer1 and Timer3 (PWM on D3, D5, D9, D10, D11)',
         'USART1 — Arduino Serial1 on D0/D1',
+        'USB device controller — the CDC serial port (Arduino Serial), enumerated by a modelled host',
         'ADC channels 0-7 (A0-A5)',
       ],
     },
     analogPinBase: 18,
     limitation:
       'Runs its own ATmega32U4 profile (2.5 KB SRAM, 32U4 vector table, ports B-F) — never the Uno profile. ' +
-      'Native USB is NOT emulated: the "Serial" object (USB CDC), Keyboard and Mouse produce nothing, and a sketch that waits on "while (!Serial)" will never proceed — use Serial1 (D0/D1), which is genuinely emulated. ' +
+      'Serial is the native USB port and reaches the serial monitor; USB HID (Keyboard, Mouse) enumerates but nothing reads its reports. ' +
       'Timer4 is not modeled, so analogWrite on D6 and D13 produces no PWM (digitalWrite on those pins works normally). ' +
       'The A6-A11 alternate ADC channels, attachInterrupt (INT0-INT3/INT6), pin-change interrupts, SPI, I2C and EEPROM persistence are not emulated.',
   },

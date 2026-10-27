@@ -238,7 +238,7 @@ export const RUNTIME_PROFILES: RuntimeProfile[] = [
       'Serial1 (hardware UART)', 'timers',
     ],
     supportedPeripherals: ['GPIO ports B/C/D/E/F', 'Timer0, Timer1, Timer3', 'USART1', 'ADC channels 0-7'],
-    description: 'Executes ATmega32U4 firmware on avr8js. Native USB is not emulated.',
+    description: 'Executes ATmega32U4 firmware on avr8js, with the 32U4 USB controller serving the CDC serial port.',
   },
   {
     id: 'runtime.rp2040js',
@@ -251,7 +251,7 @@ export const RUNTIME_PROFILES: RuntimeProfile[] = [
       'delay/millis/micros', 'Serial1 (hardware UART)', 'Wire (I2C)', 'SPI',
     ],
     supportedPeripherals: ['SIO GPIO', 'ADC', 'PWM slices', 'UART0/1', 'I2C0/1', 'SPI0/1', 'timers'],
-    description: 'Executes RP2040 UF2 images on rp2040js. PIO, USB and the second core are not modelled.',
+    description: 'Executes RP2040 UF2 images on rp2040js, with a USB host on the CDC serial port. PIO, other USB classes and the second core are not modelled.',
   },
   {
     id: 'runtime.esp32c3',
