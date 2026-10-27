@@ -10,7 +10,7 @@
 // granted only to a request carrying CREATOR_TOKEN, compared in constant time,
 // and with no token configured nobody can publish as the creator at all.
 
-import type { Express, Request, Response } from 'express';
+import express, { type Express, type Request, type Response } from 'express';
 import path from 'node:path';
 import { rateLimit } from '../rateLimit.js';
 import { CommunityStore, sameSecret, type CommunityPost } from './store.js';
@@ -37,6 +37,8 @@ function isCreatorRequest(req: Request): boolean {
 function fail(res: Response, status: number, error: string, errorCode: string): void {
   res.status(status).json({ success: false, error, errorCode });
 }
+
+export const COMMUNITY_RESTORE_PATH = '/api/community/restore';
 
 /** The data file, or null to keep everything in memory (tests). */
 export function communityDataFile(): string | null {
@@ -124,6 +126,34 @@ export async function registerCommunityRoutes(app: Express, store?: CommunitySto
   };
   app.put('/api/community/projects/:id/like', likeLimit, like(true));
   app.delete('/api/community/projects/:id/like', likeLimit, like(false));
+
+  // ---- backup and restore, for the creator ----
+  //
+  // A copy of everything published — posts, likes, the like salt — and a way
+  // to merge one back in. For an offline backup, or for moving to another host
+  // without losing the community. Restore never deletes: see importData().
+  const backupLimit = rateLimit({ windowMs: 60 * 60_000, max: 30, name: 'community backup' });
+  app.get('/api/community/backup', backupLimit, async (req, res) => {
+    if (!isCreatorRequest(req)) return fail(res, 403, 'Only the creator can download a backup.', 'FORBIDDEN');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    res.setHeader('Content-Disposition', `attachment; filename="circuitdesk-community-${stamp}.json"`);
+    res.json(community.exportData());
+  });
+  app.post(COMMUNITY_RESTORE_PATH, backupLimit, express.json({ limit: '200mb' }), async (req, res) => {
+    if (!isCreatorRequest(req)) return fail(res, 403, 'Only the creator can restore a backup.', 'FORBIDDEN');
+    try {
+      const outcome = community.importData(req.body, CREATOR_NAME);
+      await community.flush();
+      res.json({ success: true, ...outcome, storage: community.storageStatus() });
+    } catch (err) {
+      if (err instanceof CommunityInputError) return fail(res, 400, err.message, 'INVALID');
+      if (err instanceof Error && err.message === 'COMMUNITY_FULL') {
+        return fail(res, 507, 'The backup would take the community past its limit.', 'FULL');
+      }
+      console.error('[CircuitDesk] community restore failed:', err);
+      fail(res, 500, 'Could not restore the backup.', 'INTERNAL');
+    }
+  });
 
   app.delete('/api/community/projects/:id', deleteLimit, (req, res) => {
     const token = req.get('x-delete-token') ?? '';

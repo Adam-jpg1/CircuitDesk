@@ -3,11 +3,16 @@
 // Deliberately small: one process, one file, written atomically (a temporary
 // file renamed over the old one, so a crash mid-write leaves the previous
 // version rather than half of a new one), debounced so a burst of likes is one
-// write. That is the right size for this service, which runs as a single
-// instance — and it is honest about its one real limit: the file lives where
-// COMMUNITY_DATA_DIR says, and on a host whose disk is replaced at every
-// deploy, posts published since the last deploy go with it. The built-in
-// projects come back regardless, because they ship with the code.
+// write, and flushed when the process is told to stop, so a deploy does not
+// drop the last few seconds. That is the right size for this service, which
+// runs as a single instance.
+//
+// Surviving a deploy is a matter of where the file lives: COMMUNITY_DATA_DIR
+// has to be on a disk the deploy does not replace (on Render, an attached
+// persistent disk — render.yaml mounts one). storageStatus() says whether the
+// directory is on its own mounted volume, and the server reports that on
+// /health and warns at startup when it is not. The built-in projects come
+// back regardless, because they ship with the code.
 //
 // Likes are kept as hashes of an anonymous per-browser id, salted with a
 // secret that never leaves the server, so the file does not hold anything that
@@ -16,10 +21,10 @@
 // the rate limiter bounds how far that goes.
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { CommunityPreview } from './validate.js';
+import { cleanAuthor, cleanPreview, cleanProject, cleanTags, cleanText, CommunityInputError, LIMITS, type CommunityPreview } from './validate.js';
 
 export interface CommunityPost {
   id: string;
@@ -62,10 +67,47 @@ export interface CommunitySummary {
   liked: boolean;
 }
 
-interface StoreFile {
+export interface StoreFile {
   version: 1;
   salt: string;
   posts: CommunityPost[];
+}
+
+/** Where the store keeps its file, and whether that is likely to survive a deploy. */
+export interface StorageStatus {
+  /** 'file' when posts are written to disk; 'memory' when nothing is kept. */
+  mode: 'file' | 'memory';
+  directory: string | null;
+  /**
+   * Whether the directory is on a volume mounted separately from the
+   * container's own filesystem — what a persistent disk is. A host whose
+   * whole disk persists reads false here; COMMUNITY_DISK_PERSISTENT=1 says so.
+   */
+  persistent: boolean;
+  posts: number;
+  publishedPosts: number;
+  lastSavedAt: string | null;
+  lastError: string | null;
+}
+
+/** The nearest directory that exists at or above `dir`. */
+function existingAncestor(dir: string): string {
+  let at = path.resolve(dir);
+  while (!existsSync(at)) {
+    const up = path.dirname(at);
+    if (up === at) break;
+    at = up;
+  }
+  return at;
+}
+
+/** Whether `dir` sits on a different device from the root filesystem: a mounted volume. */
+export function onMountedVolume(dir: string): boolean {
+  try {
+    return statSync(existingAncestor(dir)).dev !== statSync('/').dev;
+  } catch {
+    return false;
+  }
 }
 
 export const MAX_POSTS = 5000;
@@ -86,6 +128,8 @@ export class CommunityStore {
   private salt = '';
   private writeTimer: NodeJS.Timeout | null = null;
   private writing: Promise<void> = Promise.resolve();
+  private lastSavedAt: string | null = null;
+  private lastError: string | null = null;
 
   constructor(
     private readonly file: string | null,
@@ -225,6 +269,7 @@ export class CommunityStore {
     this.writeTimer = setTimeout(() => {
       this.writeTimer = null;
       this.writing = this.writing.then(() => this.writeNow()).catch((err) => {
+        this.lastError = err instanceof Error ? err.message : String(err);
         console.error('[CircuitDesk] community store write failed:', err);
       });
     }, 300);
@@ -248,5 +293,114 @@ export class CommunityStore {
     const tmp = `${this.file}.${process.pid}.tmp`;
     await writeFile(tmp, JSON.stringify(body), 'utf8');
     await rename(tmp, this.file);
+    this.lastSavedAt = new Date().toISOString();
+    this.lastError = null;
+  }
+
+  storageStatus(): StorageStatus {
+    const directory = this.file ? path.dirname(this.file) : null;
+    const asserted = process.env.COMMUNITY_DISK_PERSISTENT === '1';
+    return {
+      mode: this.file ? 'file' : 'memory',
+      directory,
+      persistent: directory !== null && (asserted || onMountedVolume(directory)),
+      posts: this.posts.size,
+      publishedPosts: [...this.posts.values()].filter((p) => !p.builtIn).length,
+      lastSavedAt: this.lastSavedAt,
+      lastError: this.lastError,
+    };
+  }
+
+  /**
+   * Everything a restore needs: the salt, so likes keep matching the browsers
+   * that gave them, and every published post with its likes and delete-token
+   * hash. Built-in posts are left out — they come from the code — except for
+   * the likes they have gathered.
+   */
+  exportData(): StoreFile {
+    return {
+      version: 1,
+      salt: this.salt,
+      posts: [...this.posts.values()].map((p) => (p.builtIn ? { ...p, project: {}, preview: p.preview } : p)),
+    };
+  }
+
+  /**
+   * Merges a backup in. Nothing is deleted: a post already here keeps its
+   * content and gains the backup's likes; a post that is not is added, after
+   * the same checks a publish goes through, so a backup file cannot carry in
+   * what the API would refuse. When this store holds nothing published yet,
+   * it adopts the backup's salt, so existing likes still recognise their
+   * browsers. Returns how many posts were added and how many gained likes.
+   */
+  importData(data: unknown, creatorName: string): { added: number; merged: number; skipped: number } {
+    const file = data as Partial<StoreFile> | null;
+    if (!file || file.version !== 1 || !Array.isArray(file.posts)) {
+      throw new CommunityInputError('That is not a CircuitDesk community backup.');
+    }
+    const nothingPublished = ![...this.posts.values()].some((p) => !p.builtIn);
+    if (nothingPublished && typeof file.salt === 'string' && /^[0-9a-f]{16,128}$/.test(file.salt)) {
+      this.salt = file.salt;
+    }
+    let added = 0;
+    let merged = 0;
+    let skipped = 0;
+    for (const raw of file.posts) {
+      const incoming = raw as Partial<CommunityPost>;
+      const likers = Array.isArray(incoming.likers)
+        ? incoming.likers.filter((h): h is string => typeof h === 'string' && /^[0-9a-f]{64}$/.test(h))
+        : [];
+      const existing = typeof incoming.id === 'string' ? this.posts.get(incoming.id) : undefined;
+      if (existing) {
+        const before = existing.likers.length;
+        existing.likers = [...new Set([...existing.likers, ...likers])];
+        if (existing.likers.length > before) merged++;
+        continue;
+      }
+      if (incoming.builtIn) {
+        skipped++; // a built-in the code no longer ships
+        continue;
+      }
+      if (this.posts.size >= MAX_POSTS) throw new Error('COMMUNITY_FULL');
+      try {
+        if (typeof incoming.id !== 'string' || !/^cp_[0-9a-z]{6,40}$/.test(incoming.id)) {
+          throw new CommunityInputError('bad id');
+        }
+        const createdAt = typeof incoming.createdAt === 'string' && !Number.isNaN(Date.parse(incoming.createdAt))
+          ? new Date(incoming.createdAt).toISOString()
+          : new Date().toISOString();
+        const project = cleanProject(incoming.project);
+        const boards = project.boardInstances as { definitionId?: unknown }[];
+        const boardId = typeof boards[0]?.definitionId === 'string' ? boards[0].definitionId.slice(0, LIMITS.boardId) : '';
+        const post: CommunityPost = {
+          id: incoming.id,
+          title: cleanText(incoming.title, LIMITS.title, 'Title'),
+          description: cleanText(incoming.description, LIMITS.description, 'Description', { multiline: true }),
+          authorName: cleanAuthor(incoming.authorName, incoming.creator === true, creatorName),
+          creator: incoming.creator === true,
+          tags: cleanTags(incoming.tags),
+          board: cleanText(incoming.board, LIMITS.board, 'Board') || boardId,
+          boardId,
+          partCount:
+            (project.boardInstances as unknown[]).length + ((project.componentInstances as unknown[] | undefined)?.length ?? 0),
+          preview: cleanPreview(incoming.preview),
+          project,
+          createdAt,
+          baseLikes: 0,
+          likers,
+          deleteTokenHash:
+            typeof incoming.deleteTokenHash === 'string' && /^[0-9a-f]{64}$/.test(incoming.deleteTokenHash)
+              ? incoming.deleteTokenHash
+              : undefined,
+        };
+        this.posts.set(post.id, post);
+        added++;
+      } catch (err) {
+        if (!(err instanceof CommunityInputError)) throw err;
+        skipped++;
+      }
+    }
+    if (added || merged) this.scheduleWrite();
+    return { added, merged, skipped };
   }
 }

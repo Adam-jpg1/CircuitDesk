@@ -59,14 +59,46 @@ The test fails if the file is stale.
 
 ## Where posts are kept
 
-There is one JSON file, written atomically, in `COMMUNITY_DATA_DIR`. The
-default is `.community-data/` in the working directory.
+There is one JSON file, written atomically, in `COMMUNITY_DATA_DIR` (default
+`.community-data/` in the working directory). Writes are debounced; when the
+server is stopped (a deploy sends SIGTERM) it writes anything pending before it
+exits.
 
-**On a host whose disk is replaced at every deploy, published posts and likes
-are lost at the next deploy.** The built-in projects come back, because they
-ship with the code. To keep what people publish, put `COMMUNITY_DATA_DIR` on a
-persistent disk. On Render, that means attaching a disk to the service and
-pointing the variable at its mount path.
+**For posts and likes to survive a deploy, that directory must be on a disk
+the deploy does not replace.** `render.yaml` attaches a 1 GB persistent disk
+at `/var/data` and sets `COMMUNITY_DATA_DIR=/var/data/community`; Render
+snapshots it daily. The built-in projects ship with the code and come back
+either way.
+
+To check a deployment, open `/health` (or `/api/community/status`):
+`communityStorage.persistent` is `true` when the data directory is on its own
+mounted volume. At startup in production the server logs a warning when it is
+not. A host whose whole disk persists (so there is no separate mount) can say
+so with `COMMUNITY_DISK_PERSISTENT=1`.
+
+### Backups, and moving to another host
+
+With the creator token:
+
+```sh
+# download everything published, with likes
+curl -H "x-creator-token: $CREATOR_TOKEN" https://<host>/api/community/backup -o community-backup.json
+
+# merge a backup into a server (for example a new host)
+curl -X POST -H "content-type: application/json" -H "x-creator-token: $CREATOR_TOKEN" \
+  --data-binary @community-backup.json https://<host>/api/community/restore
+```
+
+A restore never deletes anything: posts already present keep their content and
+gain the backup's likes, and new ones are added after the same checks a
+publish goes through. On a server with nothing published yet it also takes the
+backup's like salt, so browsers keep seeing the projects they liked as liked.
+
+### What is not on the server
+
+Each person's own projects and the custom boards they make are stored in their
+browser (IndexedDB), not on the server, so a deploy does not touch them. A
+custom board travels with a project when that project is published.
 
 Other settings:
 

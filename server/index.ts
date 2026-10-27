@@ -13,7 +13,7 @@ import { rateLimit } from './rateLimit.js';
 import { CompileGate, CompilerBusyError } from './compileGate.js';
 import { cacheStats, evictBuildDirs } from './compiler/buildCache.js';
 import { warmCoreCaches } from './compiler/warmup.js';
-import { registerCommunityRoutes } from './community/routes.js';
+import { COMMUNITY_RESTORE_PATH, registerCommunityRoutes } from './community/routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -54,12 +54,21 @@ app.use(
 );
 
 // Request-size limit (source-size limits are additionally enforced per-file in fileService).
-app.use(express.json({ limit: '2mb' }));
+// A community restore carries the whole community and has its own, larger
+// limit on its own route, behind the creator token.
+const jsonBody = express.json({ limit: '2mb' });
+app.use((req, res, next) => (req.path === COMMUNITY_RESTORE_PATH ? next() : jsonBody(req, res, next)));
 
 // ---- health checks ----
 
 app.get('/health', (_req, res) => {
-  res.status(200).json({ status: 'ok', service: 'circuitdesk-compiler' });
+  // `community` is declared further down; by the time a request arrives it exists.
+  const storage = community.storageStatus();
+  res.status(200).json({
+    status: 'ok',
+    service: 'circuitdesk-compiler',
+    communityStorage: { persistent: storage.persistent, publishedPosts: storage.publishedPosts, lastError: storage.lastError },
+  });
 });
 
 app.get('/api/compiler/health', async (_req, res) => {
@@ -266,7 +275,47 @@ app.post('/api/compiler/validate', compileLimiter, async (req, res) => {
 
 // ---- community: shared projects and likes; see server/community ----
 const community = await registerCommunityRoutes(app);
-console.log(`[CircuitDesk] community: ${community.size} project(s)`);
+{
+  const storage = community.storageStatus();
+  console.log(
+    `[CircuitDesk] community: ${community.size} project(s), ${storage.publishedPosts} published, ` +
+      `stored ${storage.mode === 'file' ? `in ${storage.directory}` : 'in memory only'}`,
+  );
+  if (process.env.NODE_ENV === 'production' && !storage.persistent) {
+    console.warn(
+      '[CircuitDesk] WARNING: community data is not on a persistent disk. Everything published, and every like, ' +
+        'will be lost at the next deploy. Attach a persistent disk and point COMMUNITY_DATA_DIR at it (render.yaml ' +
+        'mounts one at /var/data); set COMMUNITY_DISK_PERSISTENT=1 if this host keeps its disk across deploys.',
+    );
+  }
+}
+
+// What /health reports about the community, so a deploy can be checked from
+// outside: whether published posts will survive the next one.
+app.get('/api/community/status', (_req, res) => {
+  const { persistent, posts, publishedPosts, lastSavedAt, lastError, mode } = community.storageStatus();
+  res.json({ mode, persistent, posts, publishedPosts, lastSavedAt, lastError });
+});
+
+// A deploy stops this process with SIGTERM. Writes are debounced, so the last
+// publish or like may still be waiting: write it before exiting.
+let stopping = false;
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    if (stopping) return;
+    stopping = true;
+    console.log(`[CircuitDesk] ${signal}: saving the community before exiting`);
+    const deadline = setTimeout(() => process.exit(1), 10_000);
+    deadline.unref();
+    community
+      .flush()
+      .then(() => process.exit(0))
+      .catch((err) => {
+        console.error('[CircuitDesk] could not save the community on exit:', err);
+        process.exit(1);
+      });
+  });
+}
 
 // Serve the production build when present (optional single-host deployments).
 const dist = path.resolve(__dirname, '../dist');

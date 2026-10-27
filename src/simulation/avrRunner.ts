@@ -65,23 +65,27 @@ interface DutyTracker {
 
 export class AVRRunner {
   readonly engine = 'avr8js' as const;
-  readonly cpu: CPU;
-  readonly usart: AVRUSART;
-  readonly adc: AVRADC;
+  // The chip and its peripherals. Rebuilt from the same firmware by reset(),
+  // which is why they are assigned in build() rather than declared readonly.
+  cpu!: CPU;
+  usart!: AVRUSART;
+  adc!: AVRADC;
   /** Hardware I2C controller. Device models attach through the bus below. */
-  readonly twi: AVRTWI;
+  twi!: AVRTWI;
   /** I2C devices on the canvas attach here; survives circuit re-binds. */
   readonly i2cBus = new I2cBus();
   /** Hardware SPI controller. Device models attach through the bus below. */
-  readonly spi: AVRSPI;
+  spi!: AVRSPI;
   /** SPI devices on the canvas attach here; survives circuit re-binds. */
   readonly spiBus = new SpiBus();
-  readonly timers: AVRTimer[];
+  timers!: AVRTimer[];
   readonly profile: AvrBoardProfile;
+  /** The flash image, kept so reset() can power the chip up again on it. */
+  private readonly program: Uint8Array;
 
-  private readonly ports = new Map<AvrPortName, AVRIOPort>();
+  private ports = new Map<AvrPortName, AVRIOPort>();
   /** Reverse index: port name → [arduinoPin, bitIndex][] (avoids per-change scans). */
-  private readonly portPins = new Map<AvrPortName, [number, number][]>();
+  private portPins = new Map<AvrPortName, [number, number][]>();
 
   onSerialByte: ((byte: number) => void) | null = null;
   /**
@@ -89,13 +93,13 @@ export class AVRRunner {
    * (the Leonardo's `Serial`). For the monitor only: no wire carries it.
    */
   onUsbSerialByte: ((byte: number) => void) | null = null;
-  private readonly usb: Atmega32u4Usb | null = null;
+  private usb: Atmega32u4Usb | null = null;
   /** Called on any digital pin change with (arduinoPin, isHigh). */
   onPinChange: ((pin: number, high: boolean) => void) | null = null;
 
   private trackers: DutyTracker[] = [];
   private serialRxQueue: number[] = [];
-  private readonly spiCtrl: SpiController;
+  private spiCtrl!: SpiController;
   /** Edge subscribers. Additive alongside onPinChange, which stays as-is. */
   private pinListeners = new Set<(pin: number, high: boolean) => void>();
 
@@ -133,6 +137,24 @@ export class AVRRunner {
         `Firmware could not be loaded for ${profile.mcu}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    this.program = program;
+    this.build();
+  }
+
+  /**
+   * Powers the chip up on the firmware: a fresh CPU, RAM and peripherals, as
+   * after a reset. What belongs to the runner rather than the chip — the
+   * device buses, edge listeners and serial callbacks — carries over.
+   */
+  private build(): void {
+    const profile = this.profile;
+    const mcu = MCU_CONFIGS[profile.mcu]!;
+    const program = this.program;
+    this.ports = new Map();
+    this.portPins = new Map();
+    this.trackers = [];
+    this.serialRxQueue = [];
+    this.usb = null;
 
     // avr8js allocates 0x100 of register space plus sramBytes, so the SRAM
     // allocation must span through RAMEND. The ATmega2560's extended I/O
@@ -236,6 +258,18 @@ export class AVRRunner {
         for (const listener of this.pinListeners) listener(pin, high);
       }
     }
+  }
+
+  /**
+   * The RESET pin: the firmware starts again from the top, on a chip whose RAM
+   * and peripherals are back at their power-on state. Before this existed the
+   * workbench's reset button did nothing at all on the AVR boards.
+   */
+  reset(): void {
+    this.build();
+    // The pins come back as inputs: tell anything watching an output that it
+    // has let go.
+    for (const name of this.ports.keys()) this.portChanged(name);
   }
 
   /**

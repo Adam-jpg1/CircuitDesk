@@ -19,8 +19,17 @@ services:
       # badge when publishing; set it in the dashboard, never in this file.
       - key: CREATOR_TOKEN
         sync: false
-      # Where shared projects are kept. On a disk that is replaced at deploy,
-      # published posts do not survive one; attach a persistent disk and point
-      # this at it to keep them.
+      # Where shared projects and likes are kept: on the persistent disk below,
+      # which survives deploys and restarts. /health reports
+      # communityStorage.persistent, so a deploy can be checked.
       - key: COMMUNITY_DATA_DIR
-        value: /app/.community-data
+        value: /var/data/community
+    # Everything people publish to the community, and every like, lives here.
+    # The container's own filesystem is replaced at each deploy; this disk is
+    # not. Render snapshots it daily. (A service with a disk runs as a single
+    # instance and restarts rather than overlapping during a deploy — the
+    # server writes any pending change on SIGTERM before it stops.)
+    disk:
+      name: community-data
+      mountPath: /var/data
+      sizeGB: 1
