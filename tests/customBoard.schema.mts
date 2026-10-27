@@ -96,8 +96,8 @@ section('1. a well-formed board becomes a board');
 // ============================== 2. capability is inherited, never declared ===
 section('2. a board cannot declare itself simulated');
 {
-  // The C6 runtime models GPIO and nothing else. A custom C6 board inherits
-  // exactly that — it cannot gain UART by asking.
+  // A custom C6 board inherits exactly the C6 runtime's capability — GPIO,
+  // Serial on UART0 and the ADC — and cannot gain PWM by asking.
   const c6 = goodBoard({
     id: 'custom.c6-board',
     processorProfileId: 'proc.esp32c6',
@@ -115,30 +115,30 @@ section('2. a board cannot declare itself simulated');
     const summary = capabilitySummary(board);
     check(summary.supportLevel === 'simulated', 'it is simulated, with the C6\'s own narrow capability');
     check(
-      summary.supported.every((api) => !/serial|analogread/i.test(api)),
-      `and claims no Serial or analogRead (${summary.supported.join(', ')})`,
+      summary.supported.every((api) => !/analogwrite|wire|spi/i.test(api)),
+      `and claims no analogWrite, Wire or SPI (${summary.supported.join(', ')})`,
     );
     check(
-      summary.notSimulated.some((n) => /UART/i.test(n)),
-      'and says the UART is not modelled, exactly as the native C6 does',
+      summary.notSimulated.some((n) => /PWM/i.test(n)),
+      'and says PWM is not modelled, exactly as the native C6 does',
     );
     check(/Not modelled/.test(describeLimits(board)), 'the limitation sentence comes from the processor');
   }
 
-  // An "analog" pin on a chip with no ADC channels is refused rather than
-  // silently becoming a digital pin.
+  // An "analog" pin on a pad with no ADC channel is refused rather than
+  // silently becoming a digital pin. The C6's ADC is on IO0-IO6; IO8 has none.
   const analogOnC6 = goodBoard({
     id: 'custom.c6-analog',
     processorProfileId: 'proc.esp32c6',
     compileProfileId: 'compile.esp32c6-arduino',
     runtimeProfileId: 'runtime.esp32c6',
-    pins: [{ id: 'AIN', label: 'AIN', pad: 'IO3', xMm: 2, yMm: 4, type: 'analog', capabilities: [] }],
+    pins: [{ id: 'AIN', label: 'AIN', pad: 'IO8', xMm: 2, yMm: 4, type: 'analog', capabilities: [] }],
   });
   const errors = errorsOf(analogOnC6);
-  check(errors.some((e) => e.code === 'pad-has-no-adc'), 'an analog pin on a chip with no modelled ADC is refused');
+  check(errors.some((e) => e.code === 'pad-has-no-adc'), 'an analog pin on a pad with no ADC channel is refused');
   check(
-    errors.some((e) => /ESP32-C6/.test(e.message) && /none in this profile/.test(e.message)),
-    `and the message names the chip and says it has none (${errors.find((e) => e.code === 'pad-has-no-adc')?.message ?? ''})`,
+    errors.some((e) => /ESP32-C6/.test(e.message) && /IO0, IO1/.test(e.message)),
+    `and the message names the chip and the pads that are ADC inputs (${errors.find((e) => e.code === 'pad-has-no-adc')?.message ?? ''})`,
   );
 }
 

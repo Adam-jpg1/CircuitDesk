@@ -21,8 +21,8 @@ export const ESP32C6_RUNNER_CONFIG: EspRunnerConfig = {
   engine: 'esp32c6',
   pinCount: 31,
   build(flash: SerialNorFlash) {
-    const { machine, gpio, uart0 } = createEsp32C6Machine(flash);
-    return { machine, gpio, uart: uart0 };
+    const { machine, gpio, uart0, adc } = createEsp32C6Machine(flash);
+    return { machine, gpio, uart: uart0, adc };
   },
 };
 

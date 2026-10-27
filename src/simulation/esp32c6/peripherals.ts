@@ -16,6 +16,7 @@
 // Base addresses are from `soc/esp32c6/include/soc/reg_base.h`.
 
 import { EspUart, ESP32C6_UART_LAYOUT } from '../espRiscv/uart';
+import { EspSarAdc, ESP32C6_SAR_ADC } from '../espRiscv/sarAdc';
 import { RegisterFile } from '../esp32c3/registerFile';
 import { SysTimer, TimerGroup } from '../esp32c3/peripherals';
 import { SpiMemController } from '../esp32c3/spiMem';
@@ -97,6 +98,7 @@ export interface Esp32C6Peripherals {
   peripherals: Peripheral[];
   gpio: Esp32C3Gpio;
   uart0: EspUart;
+  adc: EspSarAdc;
   interrupts: Esp32C6InterruptController;
   mmu: Esp32C6FlashMmu;
 }
@@ -115,6 +117,7 @@ export function createEsp32C6Peripherals(clock: SimulatedClock, flash?: SerialNo
   // UART0: Serial, through the IDF driver.
   // Its clock source and divider live in PCR on this part (PCR_UART0_SCLK_CONF).
   const pcr = new Esp32C6Pcr();
+  const adc = new EspSarAdc(ESP32C6_SAR_ADC);
   const uart0 = new EspUart('uart0', ESP32C6_PERIPHERAL_BASE.uart0, clock, ESP32C6_INTERRUPT_SOURCE.uart0, ESP32C6_UART_LAYOUT, () =>
     pcr.readUint32(0x4),
   );
@@ -151,7 +154,9 @@ export function createEsp32C6Peripherals(clock: SimulatedClock, flash?: SerialNo
     gpio.ioMux,
     new SysTimer(clock, ESP32C6_PERIPHERAL_BASE.systimer, ESP32C6_INTERRUPT_SOURCE.systimerTarget0),
     uart0,
+    // The SAR ADC's one-shot path: analogRead().
+    adc,
   ];
 
-  return { peripherals, gpio, uart0, interrupts, mmu };
+  return { peripherals, gpio, uart0, adc, interrupts, mmu };
 }

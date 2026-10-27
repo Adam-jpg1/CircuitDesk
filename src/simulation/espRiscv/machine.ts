@@ -202,7 +202,8 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
         threshold: soc.cpuInterrupts.threshold,
       },
     };
-    this.core = new Rv32Core(this);
+    // The C6 is RV32IMAC; the C3 has no atomics.
+    this.core = new Rv32Core(this, { atomics: soc.chip === 'esp32c6' });
     this.core.customCsrRead = (number_) => this.readChipCsr(number_);
     this.core.selectInterrupt = (mask) => this.chooseInterrupt(mask);
     this.core.customPendingInterrupts = () => this.pendingInterruptLines;

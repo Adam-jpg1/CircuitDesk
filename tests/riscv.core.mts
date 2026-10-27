@@ -427,5 +427,43 @@ function runProgram(words: number[], steps: number, setup?: (core: Rv32Core) => 
   check(core.instructionsRetired > 30, `the loop really iterated (${core.instructionsRetired} instructions)`);
 }
 
+// ---------- the A extension, on a part that has it ----------
+{
+  // AMO / LR / SC, word forms: funct5 in bits 31-27, then aq/rl (zero here).
+  const amo = (funct5: number, rd: number, rs1: number, rs2: number) => rType(funct5 << 2, rs2, rs1, 0x2, rd, 0x2f);
+  const memory = new FlatMemory();
+  const program = [
+    LUI(1, 0x1000), // x1 = 0x1000, the word operated on
+    ADDI(2, 0, 5), // x2 = 5
+    amo(0b00000, 3, 1, 2), // AMOADD.W  x3 = [x1] (7); [x1] = 12
+    amo(0b00001, 4, 1, 0), // AMOSWAP.W x4 = 12; [x1] = 0
+    ADDI(5, 0, -3), // x5 = -3
+    amo(0b10000, 6, 1, 5), // AMOMIN.W  x6 = 0; [x1] = -3
+    amo(0b11000, 7, 1, 2), // AMOMINU.W x7 = -3; [x1] = 5 (5 < 0xfffffffd unsigned)
+    amo(0b00010, 8, 1, 0), // LR.W      x8 = 5, reserve x1
+    amo(0b00011, 9, 1, 5), // SC.W      succeeds: x9 = 0, [x1] = -3
+    amo(0b00011, 10, 1, 2), // SC.W     no reservation left: x10 = 1, [x1] unchanged
+  ];
+  program.forEach((w, i) => memory.writeUint32(i * 4, w));
+  memory.writeUint32(0x1000, 7);
+  const core = new Rv32Core(memory, { atomics: true });
+  core.reset(0);
+  for (let i = 0; i < program.length; i++) core.step();
+  const r = core.registers;
+  check(r[3] === 7 && r[4] === 12, `AMOADD.W and AMOSWAP.W return the old word (${r[3]}, ${r[4]})`);
+  check(r[6] === 0 && r[7] === -3, `AMOMIN.W compares signed and AMOMINU.W unsigned (${r[6]}, ${r[7]})`);
+  check(r[8] === 5 && r[9] === 0 && r[10] === 1, `LR.W then SC.W succeeds once, and a second SC.W fails (${r[8]}, ${r[9]}, ${r[10]})`);
+  check((memory.readUint32(0x1000) | 0) === -3, `the word holds what the successful SC.W stored (${memory.readUint32(0x1000) | 0})`);
+
+  // An RV32IMC part (the C3) has no A extension: the same opcode is illegal.
+  let refused = false;
+  try {
+    runProgram([LUI(1, 0x1000), amo(0b00000, 3, 1, 0)], 2);
+  } catch (err) {
+    refused = err instanceof RiscvFault;
+  }
+  check(refused, 'without the A extension an AMO is an illegal instruction, not a silent no-op');
+}
+
 console.log(failures === 0 ? '\nRV32 core checks passed.' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

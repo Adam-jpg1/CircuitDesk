@@ -26,7 +26,8 @@
 //
 // Coverage is RV32IMC_Zicsr: the base integer set, multiply/divide, the
 // compressed 16-bit encodings, and enough CSR plumbing for a trap handler to
-// exist. That is the set real ESP32-C3 firmware is built against; anything the
+// exist — plus, for a part that has it (the ESP32-C6), the A extension's word
+// atomics. That is the set real ESP32-C3 and C6 firmware is built against; anything the
 // firmware turns out to need beyond it is added from a trace of the actual
 // image rather than from a guess about what might be used.
 
@@ -76,6 +77,8 @@ const CSR_MHARTID = 0xf14;
  * Firmware reads this to discover what it is running on.
  */
 const MISA_RV32IMC = (1 << 30) | (1 << 2) | (1 << 8) | (1 << 12);
+/** And with the A extension, for an RV32IMAC part. */
+const MISA_RV32IMAC = MISA_RV32IMC | (1 << 0);
 
 export class Rv32Core {
   /** x0..x31. x0 is hardwired to zero and writes to it are discarded. */
@@ -125,7 +128,20 @@ export class Rv32Core {
    */
   customPendingInterrupts?: () => number;
 
-  constructor(readonly bus: Bus) {
+  /**
+   * The A extension (atomics). Off for an RV32IMC part such as the ESP32-C3,
+   * where an AMO is an illegal instruction; on for the RV32IMAC ESP32-C6,
+   * whose IDF uses them for its locks.
+   */
+  readonly atomics: boolean;
+  /** The address an LR.W reserved, until an SC.W or another LR.W. */
+  private reservation: number | null = null;
+
+  constructor(
+    readonly bus: Bus,
+    options: { atomics?: boolean } = {},
+  ) {
+    this.atomics = options.atomics === true;
     this.reset(0);
   }
 
@@ -134,8 +150,9 @@ export class Rv32Core {
     this.pc = entryPoint >>> 0;
     this.instructionsRetired = 0;
     this.waiting = false;
+    this.reservation = null;
     this.csr = new Map<number, number>([
-      [CSR_MISA, MISA_RV32IMC],
+      [CSR_MISA, this.atomics ? MISA_RV32IMAC : MISA_RV32IMC],
       [CSR_MVENDORID, 0],
       [CSR_MARCHID, 0],
       [CSR_MIMPID, 0],
@@ -435,12 +452,60 @@ export class Rv32Core {
         // FENCE and FENCE.I. Nothing here reorders memory or caches
         // instructions, so both are correctly no-ops.
         return;
+      case 0x2f:
+        if (!this.atomics || funct3 !== 0x2) throw new RiscvFault(`unimplemented opcode 0x${opcode.toString(16)}`, pc, instruction);
+        this.executeAtomic(instruction, rd, rs1, rs2, pc);
+        return;
       case 0x73:
         this.executeSystem(instruction, rd, funct3, rs1, pc);
         return;
       default:
         throw new RiscvFault(`unimplemented opcode 0x${opcode.toString(16)}`, pc, instruction);
     }
+  }
+
+  /**
+   * The A extension, word forms. One hart, so an AMO's read-modify-write is
+   * atomic by construction, and LR/SC reduce to a reservation that the next
+   * SC consumes: it succeeds (rd = 0) only on the address LR reserved. The
+   * aq/rl ordering bits order nothing here, as with FENCE.
+   */
+  private executeAtomic(instruction: number, rd: number, rs1: number, rs2: number, pc: number): void {
+    const address = this.registers[rs1] >>> 0;
+    if (address & 3) throw new RiscvFault('misaligned atomic access', pc, instruction);
+    const operation = instruction >>> 27;
+    if (operation === 0b00010) {
+      // LR.W
+      this.setReg(rd, this.bus.readUint32(address) | 0);
+      this.reservation = address;
+      return;
+    }
+    if (operation === 0b00011) {
+      // SC.W
+      const held = this.reservation === address;
+      this.reservation = null;
+      if (held) this.bus.writeUint32(address, this.registers[rs2] >>> 0);
+      this.setReg(rd, held ? 0 : 1);
+      return;
+    }
+    const old = this.bus.readUint32(address) | 0;
+    const b = this.registers[rs2] | 0;
+    let value: number;
+    switch (operation) {
+      case 0b00001: value = b; break; // AMOSWAP.W
+      case 0b00000: value = (old + b) | 0; break; // AMOADD.W
+      case 0b00100: value = old ^ b; break; // AMOXOR.W
+      case 0b01100: value = old & b; break; // AMOAND.W
+      case 0b01000: value = old | b; break; // AMOOR.W
+      case 0b10000: value = Math.min(old, b); break; // AMOMIN.W
+      case 0b10100: value = Math.max(old, b); break; // AMOMAX.W
+      case 0b11000: value = (old >>> 0) < (b >>> 0) ? old : b; break; // AMOMINU.W
+      case 0b11100: value = (old >>> 0) > (b >>> 0) ? old : b; break; // AMOMAXU.W
+      default:
+        throw new RiscvFault('unknown atomic operation', pc, instruction);
+    }
+    this.bus.writeUint32(address, value >>> 0);
+    this.setReg(rd, old);
   }
 
   /** The M extension. Division by zero and overflow follow the spec exactly. */

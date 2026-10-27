@@ -285,8 +285,8 @@ const ESP32C3: ProcessorProfile = {
   flashBytes: 1_310_720,
   ramBytes: 327_680,
   pads: Array.from({ length: 22 }, (_, i) => `IO${i}`),
-  // The ADC is not modelled on this runtime, so no pad claims a channel.
-  adcChannels: {},
+  // ADC1 channels 0-4 on IO0-IO4, ADC2 channel 0 on IO5 (espRiscv/sarAdc.ts).
+  adcChannels: { IO0: 0, IO1: 1, IO2: 2, IO3: 3, IO4: 4, IO5: 5 },
   pwmPads: [],
   uarts: [],
   i2c: [],
@@ -294,8 +294,6 @@ const ESP32C3: ProcessorProfile = {
   interruptPads: [],
   logicVolts: 3.3,
   notModelled: [
-    'UART — the peripheral is not modelled, so Serial produces nothing',
-    'ADC',
     'LEDC/PWM',
     'I2C and SPI controllers',
     'Wi-Fi and Bluetooth',
@@ -312,7 +310,8 @@ const ESP32C6: ProcessorProfile = {
   flashBytes: 1_310_720,
   ramBytes: 327_680,
   pads: Array.from({ length: 31 }, (_, i) => `IO${i}`),
-  adcChannels: {},
+  // ADC1 channels 0-6 on IO0-IO6 (espRiscv/sarAdc.ts).
+  adcChannels: { IO0: 0, IO1: 1, IO2: 2, IO3: 3, IO4: 4, IO5: 5, IO6: 6 },
   pwmPads: [],
   uarts: [],
   i2c: [],
@@ -320,8 +319,6 @@ const ESP32C6: ProcessorProfile = {
   interruptPads: [],
   logicVolts: 3.3,
   notModelled: [
-    'UART — the peripheral is not modelled, so Serial produces nothing',
-    'ADC',
     'LEDC/PWM',
     'I2C and SPI controllers',
     'Wi-Fi, Bluetooth, 802.15.4',

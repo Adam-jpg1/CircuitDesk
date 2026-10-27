@@ -24,6 +24,7 @@
 import type { BoardDefinition } from '../types';
 import { arduinoPinNumber, avrProfileFor } from '../boards/pinMaps';
 import { processorProfile } from '../boards/processorProfiles';
+import { espAdcIndexForGpio } from './espRiscv/sarAdc';
 import type { I2cBus } from './devices/i2cBus';
 import type { SpiBus } from './devices/spiBus';
 
@@ -245,10 +246,12 @@ export function rp2040PinIndex(pinId: string): number | undefined {
 
 /** ADC channel reachable at a board pin, in that board's own numbering. */
 export function runnerAdcChannel(board: BoardDefinition, pinId: string): number | undefined {
-  // Neither Espressif RISC-V part has its ADC modelled, so no pin claims a
-  // channel. Reporting one and then returning an invented conversion would look
-  // like a working sensor while telling the student nothing true.
-  if (isEspRiscv(board)) return undefined;
+  // The SAR ADC's one-shot path is modelled on both Espressif RISC-V parts
+  // (espRiscv/sarAdc.ts); a GPIO without an ADC channel claims none.
+  if (isEspRiscv(board)) {
+    const gpio = runnerPinIndex(board, pinId);
+    return gpio === undefined ? undefined : espAdcIndexForGpio(espVariant(board), gpio);
+  }
   if (board.architecture === 'samd') {
     // AIN<n> behind the pad the label reaches, from the chip's mux table.
     const pad = board.padMap?.[pinId] ?? pinId;

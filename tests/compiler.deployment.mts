@@ -199,12 +199,21 @@ if (!capabilities) {
   check(unoServo !== undefined, 'the Uno target reports that it can build Servo.h');
   check(unoServo?.effect === 'works', 'and that the library actually drives a pin there, not merely compiles');
 
-  // And it has to be honest where it cannot. A Pico compiles Servo.h and moves
-  // nothing; a capability report that hid that would be the same bug this file
-  // was written for, one layer up.
+  // The Pico's Servo is a PIO program, which runs on the simulated clock, so it
+  // works there too (tests/rp2040.pio.mts).
   const pico = capabilities.targets?.find((t) => t.fqbn === 'rp2040:rp2040:rpipico');
   const picoServo = pico?.headers?.find((h) => h.header === 'Servo.h');
-  check(picoServo?.effect === 'compiles-only', 'the Pico target reports Servo.h as compiling without effect');
+  check(picoServo?.effect === 'works', 'the Pico target reports Servo.h as working');
+
+  // And it has to be honest where it cannot. A Feather M0 compiles Servo.h and
+  // moves nothing (its pulse is a TC interrupt the model does not run); a
+  // capability report that hid that would be the same bug this file was
+  // written for, one layer up. Only where the SAMD core is installed.
+  const feather = capabilities.targets?.find((t) => t.fqbn === 'adafruit:samd:adafruit_feather_m0');
+  if (feather?.headers?.length) {
+    const featherServo = feather.headers.find((h) => h.header === 'Servo.h');
+    check(featherServo?.effect === 'compiles-only', 'the Feather M0 target reports Servo.h as compiling without effect');
+  }
 }
 
 // ================================ 3. real builds through the real endpoint ==

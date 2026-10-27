@@ -229,18 +229,20 @@ const parsed = parseNotices(NOTICES);
   const c6 = getBoardDefinition('board.esp32-c6-devkitc-1')!;
   const c6Apis = (c6.simulation?.supportedApis ?? []).join(' ').toLowerCase();
   check(/serial \(uart0 /.test(c6Apis), 'the ESP32-C6 claims Serial as UART0, and only as UART0');
-  for (const unclaimed of ['analogread', 'adc', 'wire', 'i2c', 'spi', 'analogwrite', 'pwm', 'wifi', 'bluetooth', 'ble', 'zigbee', 'thread', 'usb']) {
+  check(c6Apis.includes('analogread'), 'the ESP32-C6 claims analogRead, which tests/esp.adc.mts reads');
+  for (const unclaimed of ['wire', 'i2c', 'spi', 'analogwrite', 'pwm', 'wifi', 'bluetooth', 'ble', 'zigbee', 'thread', 'usb']) {
     check(!c6Apis.includes(unclaimed), `the ESP32-C6 does not claim ${unclaimed}`);
   }
   const c6Limitation = (c6.metadata?.limitation ?? '').toLowerCase();
-  for (const named of ['wi-fi', 'bluetooth', 'zigbee', 'thread', 'usb', 'adc', 'pwm', 'i2c', 'spi']) {
+  for (const named of ['wi-fi', 'bluetooth', 'zigbee', 'thread', 'usb', 'pwm', 'i2c', 'spi']) {
     check(c6Limitation.includes(named), `and its limitation note names ${named} as unsupported`);
   }
 
   const c3 = getBoardDefinition('board.esp32-c3')!;
   const apis = (c3.simulation?.supportedApis ?? []).join(' ').toLowerCase();
   check(/serial \(uart0 /.test(apis), 'the ESP32-C3 claims Serial as UART0, and only as UART0');
-  for (const unclaimed of ['analogread', 'adc', 'wire', 'i2c', 'spi', 'analogwrite', 'pwm', 'wifi', 'bluetooth', 'ble']) {
+  check(apis.includes('analogread'), 'the ESP32-C3 claims analogRead, which tests/esp.adc.mts reads');
+  for (const unclaimed of ['wire', 'i2c', 'spi', 'analogwrite', 'pwm', 'wifi', 'bluetooth', 'ble']) {
     check(!apis.includes(unclaimed), `the ESP32-C3 still does not claim ${unclaimed}`);
   }
   check(apis.includes('digitalwrite') && apis.includes('digitalread'), 'while keeping the claims it earned');

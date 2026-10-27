@@ -19,6 +19,7 @@
 // an adapter's dynamic import. Nothing in the startup bundle may import it.
 
 import { EspUart } from './espRiscv/uart';
+import { EspSarAdc, espAdcIndexForGpio } from './espRiscv/sarAdc';
 import { Esp32C3Machine } from './esp32c3/esp32c3Machine';
 import { parseEspApplicationImage, type EspApplicationImage } from './esp32c3/espImage';
 import { createStartupPeripherals } from './esp32c3/peripherals';
@@ -40,7 +41,7 @@ export interface EspRunnerConfig {
   /** Every GPIO the chip has, whether or not a given board brings it out. */
   pinCount: number;
   /** Builds the machine and its peripherals, and returns its GPIO block. */
-  build(flash: SerialNorFlash): { machine: EspRiscvMachine; gpio: Esp32C3Gpio; uart?: EspUart };
+  build(flash: SerialNorFlash): { machine: EspRiscvMachine; gpio: Esp32C3Gpio; uart?: EspUart; adc?: EspSarAdc };
 }
 
 /**
@@ -77,6 +78,7 @@ export class EspRiscvRunner implements BoardRunner {
   private readonly gpio: Esp32C3Gpio;
   /** UART0, which is Serial. */
   private readonly uart: EspUart | undefined;
+  private readonly adc: EspSarAdc | undefined;
   private readonly pinCount: number;
   private readonly flash: SerialNorFlash;
   private readonly image: EspApplicationImage;
@@ -111,6 +113,7 @@ export class EspRiscvRunner implements BoardRunner {
     this.machine = built.machine;
     this.gpio = built.gpio;
     this.uart = built.uart;
+    this.adc = built.adc;
     if (this.uart) this.uart.onByte = (byte: number) => this.onSerialByte?.(byte);
 
     for (let i = 0; i < this.pinCount; i++) this.history.push(this.freshHistory());
@@ -275,12 +278,14 @@ export class EspRiscvRunner implements BoardRunner {
    * than saying plainly that it is unsupported: a sketch reading a sensor would
    * appear to work while telling the student nothing true.
    */
-  adcChannelForPin(): number | undefined {
-    return undefined;
+  adcChannelForPin(pin: number): number | undefined {
+    return this.adc ? espAdcIndexForGpio(this.engine, pin) : undefined;
   }
 
-  setAnalogVolts(): void {
-    // No ADC channel is ever handed out, so nothing can arrive here.
+  /** Volts on an ADC channel; a 3.3 V part reads nothing above its supply. */
+  setAnalogVolts(channel: number, volts: number): void {
+    if (!this.adc || channel < 0 || channel >= this.adc.volts.length) return;
+    this.adc.volts[channel] = Math.max(0, Math.min(3.3, volts));
   }
 
   /** The hardware UART is not modelled yet, so no byte can be queued into it. */
@@ -368,7 +373,8 @@ export const ESP32C3_RUNNER: EspRunnerConfig = {
     const gpio = peripherals.find((p): p is Esp32C3Gpio => p instanceof Esp32C3Gpio);
     if (!gpio) throw new Error('The ESP32-C3 machine was built without a GPIO block.');
     const uart = peripherals.find((p): p is EspUart => p instanceof EspUart && p.name === 'uart0');
-    return { machine, gpio, uart };
+    const adc = peripherals.find((p): p is EspSarAdc => p instanceof EspSarAdc);
+    return { machine, gpio, uart, adc };
   },
 };
 

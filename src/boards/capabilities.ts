@@ -133,6 +133,7 @@ const ESP32C3_SIM_APIS = [
   'delay/millis/micros',
   'setup() and repeated loop()',
   'Serial (UART0 through the ESP-IDF driver, both directions, at the baud rate set)',
+  'analogRead (12-bit, on IO0-IO5)',
 ];
 
 const ESP32C3_SIM_PERIPHERALS = [
@@ -141,6 +142,7 @@ const ESP32C3_SIM_PERIPHERALS = [
   'Interrupt matrix and CPU interrupt controller',
   'SPI flash and the flash MMU',
   'UART0 — FIFOs, the TX-empty, RX-full, RX-timeout and TX-done interrupts, baud from the programmed divider',
+  'SAR ADC one-shot conversions, at the attenuation the sketch sets',
 ];
 
 /**
@@ -149,7 +151,7 @@ const ESP32C3_SIM_PERIPHERALS = [
  */
 const ESP32C3_LIMITATION =
   'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO, ' +
-  'and Serial on UART0. Wi-Fi, Bluetooth LE, USB Serial/JTAG, ADC, PWM, I2C and SPI to devices are not simulated — ' +
+  'Serial on UART0 and analogRead(). Wi-Fi, Bluetooth LE, USB Serial/JTAG, PWM, I2C and SPI to devices are not simulated — ' +
   'sketches using them compile and run, but those peripherals do nothing.';
 
 /**
@@ -166,6 +168,7 @@ const ESP32C6_SIM_APIS = [
   'delay/millis/micros',
   'setup() and repeated loop()',
   'Serial (UART0 through the ESP-IDF driver, both directions, at the baud rate set)',
+  'analogRead (12-bit, on IO0-IO6)',
 ];
 
 const ESP32C6_SIM_PERIPHERALS = [
@@ -176,6 +179,7 @@ const ESP32C6_SIM_PERIPHERALS = [
   'SPI flash and the flash MMU',
   'ROM watchdog, heap, system-timer and flash drivers this part boots on',
   'UART0 — FIFOs, the TX-empty, RX-full, RX-timeout and TX-done interrupts, baud from the programmed divider',
+  'SAR ADC one-shot conversions, at the attenuation the sketch sets',
 ];
 
 /**
@@ -184,7 +188,7 @@ const ESP32C6_SIM_PERIPHERALS = [
  */
 const ESP32C6_LIMITATION =
   'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO ' +
-  'with its pulls, and Serial on UART0. Wi-Fi, Bluetooth LE, Zigbee/802.15.4, Thread, USB Serial/JTAG, ADC, PWM, ' +
+  'with its pulls, Serial on UART0 and analogRead(). Wi-Fi, Bluetooth LE, Zigbee/802.15.4, Thread, USB Serial/JTAG, PWM, ' +
   'I2C and SPI to devices are not simulated — sketches using them compile and run, but those peripherals do nothing.';
 
 const SAMD21_SIM_APIS = [

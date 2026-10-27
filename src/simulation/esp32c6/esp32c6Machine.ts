@@ -12,6 +12,7 @@
 // MMU's inverted valid bit is the clearest of them.
 
 import type { EspUart } from '../espRiscv/uart';
+import type { EspSarAdc } from '../espRiscv/sarAdc';
 import { EspRiscvMachine, type EspMachineOptions } from '../espRiscv/machine';
 import { ESP32C6_SOC } from '../espRiscv/soc';
 import { createEsp32C6Peripherals, type Esp32C6Peripherals } from './peripherals';
@@ -49,6 +50,7 @@ export interface Esp32C6MachineParts {
   machine: Esp32C6Machine;
   gpio: Esp32C3Gpio;
   uart0: EspUart;
+  adc: EspSarAdc;
   interrupts: Esp32C6InterruptController;
 }
 
@@ -70,5 +72,5 @@ export function createEsp32C6Machine(flash?: SerialNorFlash, options: EspMachine
   // software interrupts.
   machine.useInterruptRouter(parts.interrupts);
   installRomFlashDevice(machine.romState, machine.flashDevice);
-  return { machine, gpio: parts.gpio, uart0: parts.uart0, interrupts: parts.interrupts };
+  return { machine, gpio: parts.gpio, uart0: parts.uart0, adc: parts.adc, interrupts: parts.interrupts };
 }

@@ -104,15 +104,17 @@ section('2. a profile never names a board');
 section('3. a profile claims only what its runtime models');
 {
   const c6 = processorProfile('proc.esp32c6')!;
-  check(c6.uarts.length === 0, 'the C6 processor profile declares no UART, because the runtime models none');
-  check(Object.keys(c6.adcChannels).length === 0, 'and no ADC channels');
+  // UART0 is modelled but fixed to Serial, so it is no muxable UART to declare;
+  // the ADC is modelled on IO0-IO6 (tests/esp.adc.mts); PWM is not modelled.
+  check(c6.uarts.length === 0, 'the C6 processor profile declares no muxable UART');
+  check(Object.keys(c6.adcChannels).length === 7, `and its seven ADC1 channels (${Object.keys(c6.adcChannels).length})`);
   check(c6.pwmPads.length === 0, 'and no PWM pads');
   check(c6.notModelled.length > 0, `and says so in plain words (${c6.notModelled.length} entries)`);
 
   const c6runtime = runtimeProfile('runtime.esp32c6')!;
   check(
-    c6runtime.supportedApis.every((api) => !/serial|analogread|analogwrite/i.test(api)),
-    `the C6 runtime claims no Serial, analogRead or analogWrite (${c6runtime.supportedApis.join(', ')})`,
+    c6runtime.supportedApis.every((api) => !/analogwrite|wire|spi/i.test(api)),
+    `the C6 runtime claims no analogWrite, Wire or SPI (${c6runtime.supportedApis.join(', ')})`,
   );
 
   // The RP2040 is the opposite case and must not be trimmed by accident.
