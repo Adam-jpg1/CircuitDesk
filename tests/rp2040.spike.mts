@@ -13,7 +13,8 @@
 // Requires rp2040js (MIT, no bundled ROM). Sections needing it are skipped
 // with a clear message when it is unavailable.
 
-import { buildBootStub, ROM_FUNC_CODES, ROM_FUNC_NAMES, ROM_WITHHELD_CODES } from '../src/simulation/rp2040/bootStub';
+import { buildBootStub, ROM_FUNC_CODES, ROM_FUNC_NAMES, ROM_DATA_CODES } from '../src/simulation/rp2040/bootStub';
+import { ROM_FLOAT_SLOTS } from '../src/simulation/rp2040/romFloat';
 import { parseUf2 } from './harness/picoMachine.mts';
 
 const BASE = process.env.CIRCUITDESK_URL ?? 'http://localhost:3411';
@@ -71,13 +72,28 @@ async function loadRp2040js(): Promise<any | null> {
     `the memory, flash-housekeeping and bit-helper routines are advertised (${entries})`,
   );
 
-  // The float and double tables are the restricted mufplib routines and must
-  // not be advertised — firmware that needs them should fail, not get garbage.
   const advertised = new Set<number>();
   for (let a = stub.functionTableAddress; dv.getUint16(a, true) !== 0; a += 4) advertised.add(dv.getUint16(a, true));
-  for (const [name, value] of Object.entries(ROM_WITHHELD_CODES)) {
-    check(!advertised.has(value), `the restricted ${name} is not advertised`);
+  // The float and double tables are data, found through the data table: every
+  // slot a trap stub of our own (bkpt; bx lr), none of them mufplib, and the
+  // slot count in the byte two before each table, where the SDK checks it.
+  const dataTable = dv.getUint16(0x16, true);
+  const published = new Map<number, number>();
+  for (let a = dataTable; dv.getUint16(a, true) !== 0; a += 4) published.set(dv.getUint16(a, true), dv.getUint16(a + 2, true));
+  for (const [name, value] of Object.entries(ROM_DATA_CODES)) {
+    const table = published.get(value);
+    check(table !== undefined, `the ${name} is published in the data table`);
+    if (table === undefined) continue;
+    check(dv.getUint8(table - 2) === ROM_FLOAT_SLOTS, `${name} declares ${ROM_FLOAT_SLOTS} slots`);
+    let traps = 0;
+    for (let slot = 0; slot < ROM_FLOAT_SLOTS; slot++) {
+      const entry = dv.getUint32(table + slot * 4, true);
+      const at = entry & ~1;
+      if ((entry & 1) === 1 && (dv.getUint16(at, true) & 0xff00) === 0xbe00 && dv.getUint16(at + 2, true) === 0x4770) traps++;
+    }
+    check(traps === ROM_FLOAT_SLOTS, `every ${name} slot is a Thumb pointer to bkpt; bx lr (${traps})`);
   }
+  check(dv.getUint8(0x13) === 3, `the ROM reports version 3, so the SDK takes every slot from the tables (${dv.getUint8(0x13)})`);
   // Nor is anything advertised that has no implementation behind it.
   for (const name of ['flash_range_erase', 'flash_range_program', 'reset_usb_boot', 'wait_for_vector'] as const) {
     check(!advertised.has(ROM_FUNC_CODES[name]), `${name} is not advertised, because it is not implemented`);

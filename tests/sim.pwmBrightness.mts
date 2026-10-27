@@ -1,5 +1,5 @@
 // An LED dimmed with analogWrite() looks dimmed on the canvas, on every board
-// whose analogWrite() runs here.
+// with PWM.
 //
 // The world settles the nets at every slice, and each settle took a pin
 // snapshot, so the duty a frame saw covered a sliver of time: a 25 % pin read
@@ -24,10 +24,10 @@ function check(cond: boolean, msg: string) {
 
 const cases = [
   { board: 'board.arduino-uno', pin: 'D9', n: '9', gnd: 'GND_TOP' },
-  // Not the Pico: Arduino-Pico's analogWrite() computes its divisor through the
-  // boot ROM's floating-point routines, which CircuitDesk cannot ship, and the
-  // simulation stops with that explanation (tests/rp2040.integration.mts).
   { board: 'board.arduino-leonardo', pin: 'D9', n: '9', gnd: 'GND1' },
+  // Its analogWrite() computes the divisor in floating point, through the ROM
+  // float tables the simulator implements (src/simulation/rp2040/romFloat.ts).
+  { board: 'board.raspberry-pi-pico', pin: 'GP15', n: '15', gnd: 'GND7' },
   { board: 'board.adafruit-feather', pin: 'D10', n: '10', gnd: 'GND1' },
 ] as const;
 
@@ -41,7 +41,13 @@ void loop() {
   if (t < 1000) analogWrite(P, 64);
   else if (t < 2000) analogWrite(P, 128);
   else if (t < 3000) analogWrite(P, 230);
-  else { pinMode(P, OUTPUT); digitalWrite(P, (t / 100) % 2); }
+  else {
+    // Once: on Arduino-Pico pinMode() re-initialises the pad, which would
+    // glitch it low on every pass of loop().
+    static bool plain = false;
+    if (!plain) { pinMode(P, OUTPUT); plain = true; }
+    digitalWrite(P, (t / 100) % 2);
+  }
 }
 `;
   const p = emptyProject(`pwm ${c.board}`);

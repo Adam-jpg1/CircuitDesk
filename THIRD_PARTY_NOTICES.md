@@ -39,7 +39,8 @@ included, not translated, and not used as a reference.
 `src/simulation/rp2040/bootStub.ts` is an independent implementation written
 from the RP2040 datasheet's public description of the boot ROM *interface*
 (the lookup table layout and function signatures). It provides a function
-lookup table and twelve entries behind it:
+lookup table and twelve entries behind it, and the two float data tables
+described below:
 
 - `memcpy` / `memcpy44` / `memset` / `memset4` — naive byte loops.
 - `clz32` / `ctz32` / `popcount32` / `reverse32` — integer bit helpers written
@@ -51,19 +52,20 @@ lookup table and twelve entries behind it:
 It contains no Raspberry Pi code and is deliberately not derived from the
 optimised ROM implementations.
 
-The floating-point and double-precision tables are the mufplib code. They are
-not implemented and not advertised, so a lookup for `SF` or `SD` returns the
-documented `0`.
+The floating-point and double-precision tables (`SF` and `SD`) are where the
+mufplib routines live on silicon. None of mufplib is used here in any form.
+Instead, the stub publishes the two tables itself, and every slot points at a
+two-instruction trap (`bkpt #code; bx lr`). The runner answers each trap with
+`src/simulation/rp2040/romFloat.ts`, an independent JavaScript implementation
+of that slot's documented contract — which slot does what, with which
+arguments and results — written from the datasheet's description of the
+tables and the slot offsets in the Pico SDK's BSD-3-Clause header
+`pico/bootrom/sf_table.h`. The arithmetic is the host's IEEE arithmetic; no
+algorithm, constant or code from mufplib was consulted, copied or translated.
 
-This has a user-visible consequence, and CircuitDesk states it rather than
-hiding it. The Arduino-Pico core is built against the Pico SDK's ROM
-floating-point implementation (`LIB_PICO_FLOAT_PICO`), so every float operation
-in a sketch is dispatched through that table. A sketch that performs
-floating-point arithmetic is stopped with an explanation naming the cause,
-instead of running on fabricated values. `analogWrite()` is affected because it
-computes its PWM divisor in floating point, which is why PWM is not listed among
-the Pico's simulated capabilities. Integer arithmetic, digital I/O,
-`analogRead()` and `Serial1` do not touch these routines and are unaffected.
+So floating point, and `analogWrite()` (which computes its PWM divisor in
+floating point), run on the Pico in simulation. Each result is checked against
+the value the chip produces in `tests/rp2040.integration.mts`.
 
 ## RISC-V execution core — original work
 

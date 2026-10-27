@@ -53,6 +53,11 @@ const ROSC_HZ = 6.5e6;
 interface ClockHost {
   clkSys: number;
   clkPeri: number;
+  /**
+   * rp2040js gives each PWM slice a counter whose rate it fixes at the
+   * 125 MHz clk_sys it starts with; it does not follow clk_sys afterwards.
+   */
+  pwm?: { channels: { timer: { frequency: number } }[] };
   peripherals: Record<number, { readUint32(offset: number): number; writeUint32(offset: number, value: number): void; writeUint32Atomic(offset: number, value: number, type: number): void }>;
 }
 
@@ -283,7 +288,13 @@ export class Rp2040ClockTree {
    */
   resolve(): void {
     const sys = this.sysHz;
-    if (sys > 0 && Number.isFinite(sys)) this.rp.clkSys = sys;
+    if (sys > 0 && Number.isFinite(sys) && sys !== this.rp.clkSys) {
+      this.rp.clkSys = sys;
+      // PWM counts clk_sys. Without this, a core that runs the chip at
+      // 200 MHz (Arduino-Pico's default) got PWM 1.6 times too slow: the
+      // divisor analogWrite() computed for 1 kHz produced 625 Hz.
+      for (const channel of this.rp.pwm?.channels ?? []) channel.timer.frequency = sys;
+    }
     const peri = this.periHz;
     if (peri > 0 && Number.isFinite(peri)) this.rp.clkPeri = peri;
   }

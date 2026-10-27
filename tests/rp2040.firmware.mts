@@ -14,7 +14,7 @@
 // It needs the compiler backend with the rp2040 core installed. Without it,
 // every firmware section skips with a clear message rather than pretending.
 
-import { ROM_WITHHELD_CODES } from '../src/simulation/rp2040/bootStub';
+import { ROM_DATA_CODES } from '../src/simulation/rp2040/bootStub';
 import { isMappedAddress, loadRp2040js, PicoMachine, parseUf2, FLASH_BASE } from './harness/picoMachine.mts';
 import { traceRomLookups } from './harness/trace.mts';
 
@@ -334,30 +334,19 @@ function periods(times: number[]): number[] {
   console.log('      ROM codes requested:', rom.summary().map((r) => `${r.tag}x${r.count}`).join(' '));
 
   const ADVERTISED = ['MC', 'C4', 'MS', 'S4', 'IF', 'EX', 'FC', 'CX', 'L3', 'T3', 'P3', 'R3'];
-  // 'SF' and 'DP' are the soft-float and double-precision *data* tables. They
-  // are the mufplib routines, which cannot be redistributed here, so they are
-  // deliberately withheld and the lookup returns the documented 0. The SDK
-  // asks for the table pointer during startup and this firmware never calls
-  // through it — which is why it runs correctly — but a sketch that does
-  // floating-point work through the ROM would fail, and that is the honest
-  // and intended outcome rather than a silently wrong number.
-  const WITHHELD = Object.values(ROM_WITHHELD_CODES).map((c) => String.fromCharCode(c & 0xff, (c >> 8) & 0xff));
-  const unexpected = rom.summary().filter((r) => !ADVERTISED.includes(r.tag) && !WITHHELD.includes(r.tag));
+  // 'SF' and 'SD' are the soft-float and soft-double *data* tables, which the
+  // SDK looks up during startup. The stub publishes them with its own trap
+  // implementations behind every slot (romFloat.ts).
+  const DATA = Object.values(ROM_DATA_CODES).map((c) => String.fromCharCode(c & 0xff, (c >> 8) & 0xff));
+  const unexpected = rom.summary().filter((r) => !ADVERTISED.includes(r.tag) && !DATA.includes(r.tag));
   check(
     unexpected.length === 0,
-    `firmware requests nothing outside the advertised and deliberately withheld sets${unexpected.length ? ': ' + unexpected.map((u) => u.tag).join(' ') : ''}`,
+    `firmware requests nothing outside the advertised functions and data tables${unexpected.length ? ': ' + unexpected.map((u) => u.tag).join(' ') : ''}`,
   );
-  const withheldSeen = rom.summary().filter((r) => WITHHELD.includes(r.tag));
   check(
     rom.summary().filter((r) => ADVERTISED.includes(r.tag)).length >= 8,
     'the advertised routines are the ones actually being used',
   );
-  if (withheldSeen.length) {
-    console.log(
-      `      NOTE: the restricted soft-float table(s) ${withheldSeen.map((w) => w.tag).join(', ')} were requested and ` +
-        'correctly returned 0 — see THIRD_PARTY_NOTICES.md. This sketch does not call through them.',
-    );
-  }
 }
 
 report();

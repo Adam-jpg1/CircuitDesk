@@ -16,6 +16,7 @@
 
 import { RP2040, USBCDC } from 'rp2040js';
 import { buildBootStub } from './bootStub';
+import { romFloatCall, type RomFloatCore } from './romFloat';
 import { PadPullResolver } from './gpioPulls';
 import { Rp2040ClockTree } from './clockTree';
 import { installSioFifo } from './sioFifo';
@@ -180,6 +181,11 @@ export class Rp2040Runner {
     const rp = new RP2040();
     rp.logger = { debug() {}, info() {}, warn() {}, error() {} };
     rp.loadBootrom(buildBootStub().rom);
+    // The ROM's float and double tables trap here (bootStub.ts); any other
+    // breakpoint — the SDK's panic(), a sketch's own — is left as it was.
+    rp.onBreak = (code: number) => {
+      romFloatCall(code, rp.core as unknown as RomFloatCore);
+    };
     this.rp = rp;
     this.clocks = new Rp2040ClockTree(rp as never);
     installSioFifo(rp as never);
@@ -325,23 +331,18 @@ export class Rp2040Runner {
   /**
    * Explains a branch into the boot ROM header block.
    *
-   * The only way to get there is through a ROM table lookup that returned 0,
-   * and the only routines deliberately withheld are the soft-float tables —
-   * the mufplib code CircuitDesk cannot redistribute. The Arduino-Pico core is
-   * built against the SDK's ROM float implementation, so any sketch doing
-   * floating-point arithmetic lands here. That includes `analogWrite()`, which
-   * computes its PWM divisor in floating point.
-   *
-   * Saying so is the point: the alternative is a sketch that appears to run
-   * while producing silently wrong numbers.
+   * The only way to get there is through a ROM table lookup that returned 0:
+   * a routine this ROM does not provide. Floating point is provided (see
+   * romFloat.ts); what is not are the routines that write the physical flash
+   * chip or reboot into the USB bootloader, which have nothing to act on in a
+   * simulator. Saying so is the point: the alternative is a sketch that
+   * appears to run after jumping into nothing.
    */
   private reportUnresolvedRomCall(): never {
     throw new Error(
-      'This sketch uses floating-point arithmetic, which the Arduino-Pico core performs through routines built ' +
-        "into the Raspberry Pi boot ROM. Those routines are third-party code CircuitDesk is not licensed to " +
-        'redistribute, so they are not available in simulation and the sketch cannot run here. This also affects ' +
-        'analogWrite(), which computes its PWM divisor in floating point. Integer arithmetic, digital I/O, ' +
-        'analogRead() and Serial1 are unaffected.',
+      'This sketch called a Raspberry Pi boot ROM routine that the simulator does not provide, such as writing ' +
+        'the flash chip or rebooting into the USB bootloader, so it cannot continue here. Digital I/O, ' +
+        'analogRead(), analogWrite(), floating point and Serial are unaffected.',
     );
   }
 

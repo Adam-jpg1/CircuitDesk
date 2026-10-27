@@ -489,39 +489,75 @@ check(blink15.format === 'uf2', `the Pico target produces a UF2 artifact (${blin
   }
 }
 
-// ---------- 3e. floating point, and why analogWrite cannot run ----------
+// ---------- 3e. floating point, and analogWrite ----------
 //
-// The Arduino-Pico core dispatches every float operation through a table in
-// the Raspberry Pi boot ROM. That table is the third-party mufplib code
-// CircuitDesk is not licensed to redistribute, so the lookup returns the
-// documented 0 and the caller branches to address 0. A sketch that needs it
-// must be stopped with an explanation, never allowed to continue on whatever
-// values happen to be lying around.
+// The Arduino-Pico core does every float and double operation through tables
+// in the boot ROM. Raspberry Pi's routines behind them cannot be shipped, so
+// the simulator's ROM provides the tables itself: each slot traps into an
+// independent implementation of its documented contract (romFloat.ts). What
+// a sketch computes has to be right, not merely not crash, so each result is
+// compared with the value the chip produces.
 //
-// analogWrite() is the case users will actually hit: it computes its PWM
-// divisor in floating point.
+// analogWrite() is the case users hit first: it computes its PWM divisor in
+// floating point, and used to stop the sketch.
 {
-  const source = 'void setup() { pinMode(15, OUTPUT); }\nvoid loop() { analogWrite(15, 64); delay(200); }';
+  const source = `volatile float fa = 3.0f, fb = 7.0f;
+volatile double da = 2.0, db = 10.0;
+void setup() {
+  Serial1.begin(115200);
+  Serial1.print("F "); Serial1.println(fa / fb, 6);
+  Serial1.print("S "); Serial1.println(sqrtf(fb), 6);
+  Serial1.print("T "); Serial1.println(sinf(fa) + cosf(fa), 6);
+  Serial1.print("L "); Serial1.println(logf(fb), 6);
+  Serial1.print("I "); Serial1.println((int)(-fb / fa));
+  Serial1.print("D "); Serial1.println(da / db * 3.0, 10);
+  Serial1.print("DC "); Serial1.println(cos(db * 200.0), 10);
+  analogWrite(15, 64);
+  Serial1.println("done");
+}
+void loop() {}`;
   const firmware = await compile(source);
   if (!firmware) {
-    skip('the analogWrite sketch did not compile');
+    skip('the floating-point sketch did not compile');
   } else {
     const runner = await adapter.createRunner(firmware, pico);
+    let text = '';
+    runner.onSerialByte = (b) => {
+      text += String.fromCharCode(b);
+    };
     let message = '';
     try {
-      for (let i = 0; i < 20; i++) runner.runFor(25);
+      for (let i = 0; i < 24; i++) runner.runFor(25);
     } catch (err) {
       message = err instanceof Error ? err.message : String(err);
     }
-    check(message.length > 0, 'a sketch needing the restricted ROM float routines is stopped');
-    check(/floating-point/i.test(message), 'the message names floating point as the cause');
-    check(/analogWrite/.test(message), 'the message tells the user analogWrite is affected');
-    check(/licen[cs]/i.test(message), 'the message explains that this is a licensing boundary');
-    check(!/crash|internal error|undefined/i.test(message), 'the message is an explanation, not an internal error');
+    check(message === '', `a sketch doing float and double arithmetic runs (${message || 'no error'})`);
+    const value = (tag: string) => new RegExp(`^${tag} (\\S+)`, 'm').exec(text)?.[1];
+    check(value('F') === '0.428571', `3.0f / 7.0f is 0.428571 (${value('F')})`);
+    check(value('S') === '2.645751', `sqrtf(7) is 2.645751 (${value('S')})`);
+    check(value('T') === '-0.848872', `sinf(3) + cosf(3) is -0.848872 (${value('T')})`);
+    check(value('L') === '1.945910', `logf(7) is 1.945910 (${value('L')})`);
+    check(value('I') === '-2', `(int)(-7.0f / 3.0f) truncates to -2 (${value('I')})`);
+    check(value('D') === '0.6000000000', `2.0 / 10.0 * 3.0 in double is 0.6 (${value('D')})`);
+    check(value('DC') === '-0.3674595491', `cos(2000) in double, range-reduced by the SDK (${value('DC')})`);
+    check(/^done/m.test(text), 'and analogWrite() returns');
+    runner.snapshot();
+    for (let i = 0; i < 8; i++) runner.runFor(25);
+    const duty = runner.snapshot().duty[15];
+    check(Math.abs(duty - 0.25) < 0.01, `analogWrite(15, 64) drives GP15 at a quarter duty (${duty.toFixed(3)})`);
+    // At the core's default 1 kHz, which needs PWM to count the 200 MHz clk_sys
+    // the core sets rather than the 125 MHz the emulator starts with.
+    let rises = 0;
+    const stop = runner.addPinListener?.((pin, high) => {
+      if (pin === 15 && high) rises++;
+    });
+    for (let i = 0; i < 4; i++) runner.runFor(25);
+    stop?.();
+    check(rises >= 98 && rises <= 102, `at analogWrite's default 1 kHz (${rises} periods in 100 ms)`);
     runner.dispose?.();
   }
 
-  // A float-free sketch is unaffected by that guard.
+  // A float-free sketch is unaffected.
   const integerOnly = await compile(
     'void setup() { Serial1.begin(115200); }\nvoid loop() { static int n = 0; Serial1.println(n++ * 3); delay(10); }',
   );
@@ -537,7 +573,7 @@ check(blink15.format === 'uf2', `the Pico target produces a UF2 artifact (${blin
     } catch {
       threw = true;
     }
-    check(!threw, 'integer arithmetic runs without touching the withheld routines');
+    check(!threw, 'integer arithmetic runs');
     const numbers = text
       .split(/\r?\n/)
       .map((line) => line.trim())
@@ -548,18 +584,14 @@ check(blink15.format === 'uf2', `the Pico target produces a UF2 artifact (${blin
     runner.dispose?.();
   }
 
-  // And the capability text must not claim what has just been shown not to work.
+  // And the capability text claims what has just been shown to work.
   check(
-    !pico.simulation?.supportedApis.some((api) => /analogWrite/i.test(api)),
-    'the Pico does not claim analogWrite among its supported APIs',
+    pico.simulation?.supportedApis.some((api) => /analogWrite/i.test(api)) === true,
+    'the Pico claims analogWrite among its supported APIs',
   );
   check(
-    !pico.simulation?.supportedPeripherals.some((p) => /PWM/i.test(p)),
-    'the Pico does not claim the PWM peripheral',
-  );
-  check(
-    /floating-point/i.test(String(pico.metadata.limitation ?? '')),
-    'the Pico limitation text states the floating-point boundary',
+    !/floating-point arithmetic.*cannot|not available in simulation/i.test(String(pico.metadata.limitation ?? '')),
+    'the Pico limitation text no longer says floating point cannot run',
   );
 }
 

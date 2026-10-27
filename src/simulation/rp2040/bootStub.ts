@@ -24,14 +24,17 @@
 // naive shift and byte loops; they are not, and are not derived from,
 // Raspberry Pi's optimised versions.
 //
-// WHAT IS DELIBERATELY ABSENT
+// FLOATING POINT
 //
-// The floating-point and double-precision function tables are the mufplib
-// routines. They are NOT provided, so a lookup for them returns the
-// documented 0 and firmware that calls through the returned pointer fails
-// loudly rather than silently computing wrong numbers. tests/harness/trace.mts
-// records every code a firmware asks for, so an unresolved lookup can be
-// named rather than guessed at.
+// The ROM's floating-point and double-precision tables ('SF' and 'SD') are
+// where Raspberry Pi's mufplib routines live, and those are not used here in
+// any form. The tables themselves are published, though, so this ROM provides
+// them: each slot points at `bkpt #code; bx lr`, and the runner answers the
+// breakpoint with an independent implementation of that slot's documented
+// contract (romFloat.ts). The version byte says 3, so the SDK takes every slot
+// it needs from the tables rather than patching in shims for an older ROM.
+
+import { ROM_FLOAT_SLOTS, SD_TRAP_BASE, SF_TRAP_BASE } from './romFloat';
 
 /** The RP2040 boot ROM is 16 KB, which is what rp2040js allocates. */
 export const BOOTROM_WORDS = 4096;
@@ -66,11 +69,10 @@ export const ROM_FUNC_CODES: Record<string, number> = {
 };
 
 /**
- * Data-table codes that are deliberately withheld. These point at the mufplib
- * soft-float routines, which cannot be redistributed here — see the file
- * header and THIRD_PARTY_NOTICES.md.
+ * Data-table codes: the soft-float and soft-double function tables, whose
+ * slots trap into romFloat.ts — see the file header.
  */
-export const ROM_WITHHELD_CODES: Record<string, number> = {
+export const ROM_DATA_CODES: Record<string, number> = {
   soft_float_table: code('S', 'F'),
   soft_double_table: code('S', 'D'),
 };
@@ -187,6 +189,8 @@ const ADDS_R2_1 = 0x3201;
 const SUBS_R3_1 = 0x3b01;
 const CMP_R1_32 = 0x2920;
 const BX_LR = 0x4770;
+/** BKPT #imm8 (T1): rp2040js reports the immediate and carries on. */
+const BKPT = (imm8: number) => 0xbe00 | (imm8 & 0xff);
 
 /** memcpy(dest=r0, src=r1, n=r2) -> r0. A plain byte loop. */
 function emitMemcpy(base: number): number[] {
@@ -348,6 +352,8 @@ export interface BootStub {
   functions: Record<string, number>;
   /** Address of the function table, so unresolved lookups can be traced. */
   functionTableAddress: number;
+  /** Addresses of the 'SF' and 'SD' tables. */
+  dataTables: { soft_float_table: number; soft_double_table: number };
 }
 
 /**
@@ -431,18 +437,53 @@ export function buildBootStub(): BootStub {
   dv.setUint16(cursor, 0, true); // terminator
   cursor += 4;
 
-  // An empty (immediately terminated) data table: nothing here publishes data.
+  // The float and double tables: ROM_FLOAT_SLOTS words each, every one the
+  // address of a two-instruction trap. The SDK checks the slot count in the
+  // byte two before the table, so it is written there.
+  const floatTable = (trapBase: number): number => {
+    const traps: number[] = [];
+    for (let slot = 0; slot < ROM_FLOAT_SLOTS; slot++) {
+      traps.push(cursor);
+      dv.setUint16(cursor, BKPT(trapBase + slot), true);
+      dv.setUint16(cursor + 2, BX_LR, true);
+      cursor += 4;
+    }
+    // The halfword immediately before the table, so its low byte is table - 2.
+    dv.setUint16(cursor + 2, ROM_FLOAT_SLOTS, true);
+    cursor += 4;
+    const table = cursor;
+    for (const trap of traps) {
+      dv.setUint32(cursor, trap | 1, true);
+      cursor += 4;
+    }
+    return table;
+  };
+  const sfTable = floatTable(SF_TRAP_BASE);
+  const sdTable = floatTable(SD_TRAP_BASE);
+
+  // Data table: (code, address) halfword pairs, zero-terminated, as the
+  // function table but with plain data addresses.
   const dataTableAddr = cursor;
+  for (const [name, at] of [['soft_float_table', sfTable], ['soft_double_table', sdTable]] as const) {
+    dv.setUint16(cursor, ROM_DATA_CODES[name], true);
+    dv.setUint16(cursor + 2, at, true);
+    cursor += 4;
+  }
   dv.setUint16(cursor, 0, true);
 
-  // Header.
+  // Header: the magic 'M', 'u', 1 and then the ROM version.
   dv.setUint8(0x10, 'M'.charCodeAt(0));
   dv.setUint8(0x11, 'u'.charCodeAt(0));
-  dv.setUint8(0x12, 1); // ROM version
-  dv.setUint8(0x13, 0);
+  dv.setUint8(0x12, 1);
+  dv.setUint8(0x13, 3); // version 3: every float and double slot, sincos included
   dv.setUint16(0x14, tableAddr, true);
   dv.setUint16(0x16, dataTableAddr, true);
   dv.setUint16(0x18, lookupAddr | 1, true);
 
-  return { rom: new Uint32Array(bytes.buffer), functions, functionTableAddress: tableAddr };
+  return {
+    rom: new Uint32Array(bytes.buffer),
+    functions,
+    functionTableAddress: tableAddr,
+    dataTables: { soft_float_table: sfTable, soft_double_table: sdTable },
+  };
 }

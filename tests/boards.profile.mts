@@ -164,14 +164,16 @@ function projectWith(boardDefId: string): CircuitProject {
     pico.simulation?.supportedApis.filter((a) => /usb/i.test(a)).every((a) => /^Serial \(USB CDC/.test(a)) === true,
     'Pico claims USB only as the CDC Serial port',
   );
+  // analogWrite and PWM are claimed: tests/rp2040.integration.mts runs it on
+  // compiled firmware and measures the duty on the pad.
   check(
-    !pico.simulation?.supportedApis.some((a) => /analogWrite|wifi/i.test(a)),
-    'Pico claims no analogWrite or Wi-Fi APIs',
+    !pico.simulation?.supportedApis.some((a) => /wifi/i.test(a)),
+    'Pico claims no Wi-Fi APIs',
   );
   check(
     // Word-bounded, so "GPIO pads" is not mistaken for a PIO claim.
-    !pico.simulation?.supportedPeripherals.some((p) => /\bPIO\b|USB|Wi-?Fi|second core|PWM/i.test(p)),
-    'Pico claims no PIO, USB, Wi-Fi, second core or PWM peripheral',
+    !pico.simulation?.supportedPeripherals.some((p) => /\bPIO\b|USB|Wi-?Fi|second core/i.test(p)),
+    'Pico claims no PIO, USB, Wi-Fi or second core peripheral',
   );
   // Pico GP pins never resolve to Arduino pin numbers (no D0-D13 interpretation)
   check(arduinoPinNumber(pico, 'GP0') === undefined && arduinoPinNumber(pico, 'GP26') === undefined,
