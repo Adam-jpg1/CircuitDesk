@@ -335,9 +335,7 @@ const PICO_I2C_CODE = `// Showcase - RP2040: an I2C bus on pins you choose
 // how you say otherwise, and it is why CircuitDesk's wiring checks ask which
 // pins the firmware actually muxed rather than assuming.
 //
-// Output goes to Serial1 - the hardware UART on GP0/GP1. The USB CDC Serial
-// object is not simulated here, so printing to it would produce nothing, and
-// a showcase that printed into a void would be teaching the wrong lesson.
+// Output goes to Serial, which on a Pico is the USB port - the serial monitor.
 
 #include <Wire.h>
 
@@ -360,14 +358,17 @@ uint16_t read16LE(uint8_t reg) {
 uint16_t dig_T1; int16_t dig_T2, dig_T3;
 
 void setup() {
-  Serial1.begin(9600);
+  Serial.begin(115200);
+  // USB takes a moment to connect; wait for it, briefly, so the first lines
+  // are not printed before anyone is listening.
+  while (!Serial && millis() < 2000) delay(10);
   pinMode(LED, OUTPUT);
 
   Wire.setSDA(4);        // the pins this board brings the sensor out on
   Wire.setSCL(5);
   Wire.begin();
 
-  Serial1.print("chip id 0x"); Serial1.println(read8(0xD0), HEX);
+  Serial.print("chip id 0x"); Serial.println(read8(0xD0), HEX);
   dig_T1 = read16LE(0x88);
   dig_T2 = (int16_t)read16LE(0x8A);
   dig_T3 = (int16_t)read16LE(0x8C);
@@ -383,7 +384,7 @@ void loop() {
   int32_t v2 = (((((adc >> 4) - (int32_t)dig_T1) * ((adc >> 4) - (int32_t)dig_T1)) >> 12) * (int32_t)dig_T3) >> 14;
   int32_t centi = ((v1 + v2) * 5 + 128) >> 8;
 
-  Serial1.print("temperature "); Serial1.print(centi / 100); Serial1.println(" C");
+  Serial.print("temperature "); Serial.print(centi / 100); Serial.println(" C");
   digitalWrite(LED, centi >= 2000 ? HIGH : LOW);
   delay(300);
 }
@@ -475,8 +476,8 @@ const PICO_BLINK_CODE = `// Starter - Pico Blink
 //
 //   * pin numbers here are GP numbers - the pad's own name on the chip, not
 //     an Arduino board numbering. GP15 is pad 15.
-//   * Serial here is USB CDC, which is not simulated, so anything printed to
-//     it goes nowhere. Serial1 is the hardware UART on GP0/GP1 and does work.
+//   * Serial here is the USB port - what the serial monitor shows. Serial1 is
+//     the hardware UART on GP0/GP1, for wiring to another part.
 
 const int LED = 15;
 const int BUTTON = 14;
@@ -484,8 +485,9 @@ const int BUTTON = 14;
 void setup() {
   pinMode(LED, OUTPUT);
   pinMode(BUTTON, INPUT_PULLUP);
-  Serial1.begin(9600);
-  Serial1.println("pico ready");
+  Serial.begin(115200);
+  while (!Serial && millis() < 2000) delay(10);   // USB takes a moment to connect
+  Serial.println("pico ready");
 }
 
 void loop() {
@@ -1168,8 +1170,7 @@ void loop() {
     name: 'RP2040: an I2C bus on pins you choose',
     description:
       'A BMP280 on a Pico, with the sketch muxing I2C onto GP4/GP5 through Wire.setSDA/setSCL. Output goes to ' +
-      'Serial1, the hardware UART, because the USB CDC Serial object is not simulated and printing into a void ' +
-      'would teach the wrong lesson.',
+      'Serial — the Pico\'s USB port — and the serial monitor.',
     tags: ['simulated', 'i2c', 'rp2040'],
     kind: 'showcase',
     board: 'Raspberry Pi Pico',
@@ -1297,7 +1298,7 @@ void loop() {
     name: 'Pico Blink',
     description:
       'Raspberry Pi Pico: an LED on GP15 and a button on GP14. Pin numbers here are GP numbers — the pad\'s own ' +
-      'name — and output goes to Serial1, because the USB CDC Serial object is not simulated.',
+      'name — and output goes to Serial, the Pico\'s USB port.',
     tags: ['simulated', 'starter', 'rp2040'],
     kind: 'starter',
     board: 'Raspberry Pi Pico',

@@ -20,7 +20,7 @@
     {
       "id": "arduino:avr",
       "version": "1.8.8",
-      "targets": ["arduino:avr:uno", "arduino:avr:nano", "arduino:avr:mega", "arduino:avr:leonardo"],
+      "targets": ["arduino:avr:uno", "arduino:avr:nano", "arduino:avr:mega", "arduino:avr:leonardo", "arduino:avr:pro"],
       "required": true,
       "note": "AVR boards. Also reachable through the avr-g++ fallback, so a failed install degrades rather than breaks."
     },
@@ -28,7 +28,7 @@
       "id": "rp2040:rp2040",
       "version": "6.0.0",
       "additionalUrl": "https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json",
-      "targets": ["rp2040:rp2040:rpipico", "rp2040:rp2040:rpipicow"],
+      "targets": ["rp2040:rp2040:rpipico", "rp2040:rp2040:rpipicow", "rp2040:rp2040:seeed_xiao_rp2040"],
       "required": true,
       "note": "Arduino-Pico. Emits .uf2 without a .hex, so an RP2040 build can never be delivered as Intel HEX."
     },

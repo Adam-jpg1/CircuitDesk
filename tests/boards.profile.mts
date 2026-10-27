@@ -224,7 +224,13 @@ function projectWith(boardDefId: string): CircuitProject {
   // install should be refused outright, never quietly built as something else.
   check(findTarget('arduino:mbed_rp2040:pico') === undefined, 'server: the retired Mbed Pico fqbn is refused, not silently remapped');
   const avrTargets = SUPPORTED_TARGETS.filter((t) => t.arch === 'avr');
-  check(new Set(avrTargets.map((t) => `${t.mcu}/${t.variant}`)).size === avrTargets.length, 'server: every AVR target has its own mcu/variant (no shared Uno flags)');
+  // The Pro Mini and the Nano are the same chip on the same variant; what makes
+  // them different builds is the board define, so that is part of the identity.
+  check(
+    new Set(avrTargets.map((t) => `${t.mcu}/${t.variant}/${t.boardDefine}`)).size === avrTargets.length,
+    'server: every AVR target has its own mcu/variant/board define (no shared Uno flags)',
+  );
+  check(findTarget('arduino:avr:pro', 'board.arduino-pro-mini')?.boardDefine === 'ARDUINO_AVR_PRO', 'server: the Pro Mini builds as a Pro Mini, not as an Uno');
   // alias lookup
   check(findBoardByIdOrAlias('pico')?.id === 'board.raspberry-pi-pico', 'alias lookup: "pico" → canonical Pico id');
   check(findBoardByIdOrAlias('uno')?.id === 'board.arduino-uno', 'alias lookup: "uno" → canonical Uno id');
@@ -465,6 +471,30 @@ function projectWith(boardDefId: string): CircuitProject {
       `${name} is Simulated on the RP2040 engine (${def.supportLevel}/${def.simulation?.engine})`,
     );
   }
+}
+
+// Every pad is on its board. A header that grows by a pin re-centres the
+// whole column, and a pin drawn off the board cannot be seen or wired.
+{
+  const MM_UNITS = 4;
+  for (const b of BOARD_DEFINITIONS) {
+    const w = b.widthMm * MM_UNITS;
+    const h = b.heightMm * MM_UNITS;
+    const off = b.pins.filter((p) => p.x < 0 || p.x > w || p.y < 0 || p.y > h).map((p) => p.id);
+    const seen = new Map<string, string>();
+    const overlapping: string[] = [];
+    for (const p of b.pins) {
+      const key = `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+      if (seen.has(key)) overlapping.push(`${seen.get(key)}/${p.id}`);
+      seen.set(key, p.id);
+    }
+    check(off.length === 0 && overlapping.length === 0, `${b.id}: every pad is on the board and none overlap${off.length ? ` — off: ${off.join(', ')}` : ''}${overlapping.length ? ` — overlap: ${overlapping.join(', ')}` : ''}`);
+  }
+  const promini = getBoardDefinition('board.arduino-pro-mini')!;
+  const a6 = promini.pins.find((p) => p.id === 'A6');
+  check(a6 !== undefined && a6.capabilities.join() === 'analog-in', 'the Pro Mini has its A6 pad, analog only');
+  const nanoA7 = getBoardDefinition('board.arduino-nano')!.pins.find((p) => p.id === 'A7');
+  check(nanoA7 !== undefined && !nanoA7.capabilities.includes('digital-out'), 'and the Nano\'s A7 no longer claims a digital output it does not have');
 }
 
 console.log(failures === 0 ? '\nAll board-profile checks passed.' : `\n${failures} check(s) FAILED`);

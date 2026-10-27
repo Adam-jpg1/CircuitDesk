@@ -105,6 +105,12 @@ export async function runTest(project: CircuitProject, firmware: TestFirmware, t
   runner.onSerialByte = (b) => {
     serial += decoder.decode(new Uint8Array([b]), { stream: true });
   };
+  // A Pico's Serial is USB; what it prints is serial output too.
+  if ('onUsbSerialByte' in runner) {
+    runner.onUsbSerialByte = (b) => {
+      serial += decoder.decode(new Uint8Array([b]), { stream: true });
+    };
+  }
   const pinLog: PinEventLog[] = [];
   runner.onPinChange = (pin, high) => {
     if (pinLog.length < 20_000) pinLog.push({ atMs: runner.timeMs, pin, high });

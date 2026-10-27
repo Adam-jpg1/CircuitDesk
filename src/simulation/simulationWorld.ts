@@ -121,6 +121,7 @@ export class SimulationWorld {
    * caller had arranged is lost. Removing a board puts its handler back.
    */
   private readonly priorSerial = new Map<string, ((byte: number) => void) | null>();
+  private readonly priorUsbSerial = new Map<string, ((byte: number) => void) | null>();
 
   /**
    * Simulated time since the world started, in whole nanoseconds.
@@ -194,6 +195,15 @@ export class SimulationWorld {
       this.onSerial?.({ timestamp: this.timeMs, instanceId, byte });
       downstream?.(byte);
     };
+    // USB console output goes to the same monitor under the same board.
+    if ('onUsbSerialByte' in runner) {
+      const usbDownstream = runner.onUsbSerialByte ?? null;
+      this.priorUsbSerial.set(instanceId, usbDownstream);
+      runner.onUsbSerialByte = (byte: number) => {
+        this.onSerial?.({ timestamp: this.timeMs, instanceId, byte });
+        usbDownstream?.(byte);
+      };
+    }
   }
 
   /** Gives a runner its own serial handler back, for a board leaving the world. */
@@ -201,6 +211,10 @@ export class SimulationWorld {
     if (!this.priorSerial.has(instanceId)) return;
     runner.onSerialByte = this.priorSerial.get(instanceId) ?? null;
     this.priorSerial.delete(instanceId);
+    if (this.priorUsbSerial.has(instanceId)) {
+      runner.onUsbSerialByte = this.priorUsbSerial.get(instanceId) ?? null;
+      this.priorUsbSerial.delete(instanceId);
+    }
   }
 
   /**

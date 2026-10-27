@@ -62,6 +62,12 @@ export interface BoardRunner {
   setAnalogVolts(channel: number, volts: number): void;
 
   onSerialByte: ((byte: number) => void) | null;
+  /**
+   * Console output over the board's own USB, where it has one that is
+   * modelled (a Pico's `Serial`). Monitor only: unlike `onSerialByte`, no
+   * wire carries it, so nothing on the canvas may hear it.
+   */
+  onUsbSerialByte?: ((byte: number) => void) | null;
   queueSerialInput(text: string): void;
 
   /**

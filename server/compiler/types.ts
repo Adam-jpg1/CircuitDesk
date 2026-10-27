@@ -185,6 +185,23 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     flashMaxBytes: 28_672,
     ramMaxBytes: 2_560,
   },
+  // The Pro Mini is its own entry in arduino:avr ("Arduino Pro or Pro Mini"),
+  // and its default processor option is the 5 V 16 MHz ATmega328P, so the
+  // plain three-part FQBN is exactly that board. Its variant is the Nano's
+  // eight-analog-input one; the Uno's counts six.
+  {
+    id: 'board.arduino-pro-mini',
+    fqbn: 'arduino:avr:pro',
+    name: 'Arduino Pro Mini 5 V 16 MHz (ATmega328P)',
+    arch: 'avr',
+    core: 'arduino:avr',
+    mcu: 'atmega328p',
+    variant: 'eightanaloginputs',
+    boardDefine: 'ARDUINO_AVR_PRO',
+    fCpuHz: 16_000_000,
+    flashMaxBytes: 30_720,
+    ramMaxBytes: 2_048,
+  },
   // RP2040 targets use the Arduino-Pico core (rp2040:rp2040). It emits a .uf2
   // without also emitting a .hex, which is what an RP2040 image should be
   // delivered as — the Mbed core emits both, and a HEX-first artifact rule
@@ -207,6 +224,21 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     arch: 'rp2040',
     core: 'rp2040:rp2040',
     fCpuHz: 133_000_000,
+    flashMaxBytes: 2_093_056,
+    ramMaxBytes: 262_144,
+  },
+  // The XIAO's own variant: D0-D10 as printed (D0 is GP26), LED_BUILTIN on
+  // GP17, and Wire on the RP2040's i2c1 at GP6/GP7 — the pads printed SDA and
+  // SCL. Built as a Pico, D0 is GP0 (the pad printed D6), and Wire starts on
+  // GP4/GP5 — the pad printed D9 and a pin that is not brought out at all — so
+  // the sketch compiles and drives the wrong pins.
+  {
+    id: 'board.seeed-xiao-rp2040',
+    fqbn: 'rp2040:rp2040:seeed_xiao_rp2040',
+    name: 'Seeed XIAO RP2040',
+    arch: 'rp2040',
+    core: 'rp2040:rp2040',
+    fCpuHz: 125_000_000,
     flashMaxBytes: 2_093_056,
     ramMaxBytes: 262_144,
   },

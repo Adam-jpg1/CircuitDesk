@@ -107,9 +107,8 @@ const AVR_SIM_PERIPHERALS = ['GPIO ports', 'Timer0/1/2', 'USART0', 'ADC'];
  * The RP2040 lists are written from what the integration tests actually
  * exercise on real compiled firmware, not from what the chip can do.
  *
- * Deliberately absent, because nothing here tests them: Wi-Fi, USB (including
- * the USB-CDC `Serial` object, which is why only `Serial1` is claimed), PIO,
- * the second core, and hardware I2C/SPI device support.
+ * Deliberately absent, because nothing here tests them: Wi-Fi, USB other than
+ * the CDC serial port (tests/rp2040.usbSerial.mts), PIO and the second core.
  *
  * `analogWrite()` is absent for a licensing reason rather than an engineering
  * one. The Arduino-Pico core is built against the Pico SDK's ROM floating-point
@@ -191,6 +190,7 @@ const RP2040_SIM_APIS = [
   'digitalRead',
   'analogRead (GP26/GP27/GP28, 0-3.3 V, 12-bit)',
   'delay/millis/micros',
+  'Serial (USB CDC, to the serial monitor, both directions)',
   'Serial1 (hardware UART0 on GP0/GP1)',
   'Wire (hardware I2C, including repeated START and NACK)',
   'SPI (hardware SPI, all four modes, MSB first)',
@@ -322,19 +322,19 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     processorProfileId: 'proc.atmega328p',
     compileProfileId: 'compile.avr-arduino',
     runtimeProfileId: 'runtime.avr8js-328p',
-    serverTargetId: 'board.arduino-uno',
+    serverTargetId: 'board.arduino-pro-mini',
     manufacturer: 'Arduino',
     architecture: 'avr',
     analogPinBase: 14,
     aliases: ['pro-mini', 'arduino pro mini', 'promini'],
-    // The Uno's FQBN, deliberately. The Pro Mini has no entry of its own in
-    // arduino:avr; the 5 V 16 MHz variant IS an ATmega328P at 16 MHz with the
-    // Uno's fuses, so the Uno target is the honest build for it rather than a
-    // substitution. The artifact is still stamped with this board.
+    // Its own target: arduino:avr:pro, whose default processor option is the
+    // 5 V 16 MHz ATmega328P. It differs from the Uno's little — the board
+    // define, and a variant with eight analog inputs rather than six — but it
+    // is this board's, so it is the one used.
     compiler: {
-      ...avrCliCompiler('arduino:avr:uno'),
-      note: 'Built through the Arduino Uno target (arduino:avr:uno) — the same ATmega328P at the same clock. '
-        + 'The Pro Mini has no separate entry in the arduino:avr core.',
+      ...avrCliCompiler('arduino:avr:pro'),
+      note: 'Built as an Arduino Pro Mini (arduino:avr:pro, ATmega328P 5 V 16 MHz), with its own variant: '
+        + 'eight analog inputs, A6 and A7 included.',
     },
     simulation: {
       engine: 'avr8js',
@@ -343,21 +343,20 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       supportedPeripherals: AVR_SIM_PERIPHERALS,
     },
     limitation:
-      'The 5 V 16 MHz variant builds through the Uno target — same chip, same clock, same fuses. The 3.3 V '
-      + '8 MHz variant is a different build and is not offered here.',
+      'The 5 V 16 MHz board. The 3.3 V 8 MHz version runs at half the clock and is a different build, not '
+      + 'offered here.',
   },
   'board.seeed-xiao-rp2040': {
     processorProfileId: 'proc.rp2040',
     compileProfileId: 'compile.rp2040-arduino',
     runtimeProfileId: 'runtime.rp2040js',
-    serverTargetId: 'board.raspberry-pi-pico',
+    serverTargetId: 'board.seeed-xiao-rp2040',
     manufacturer: 'Seeed Studio',
     architecture: 'rp2040',
     aliases: ['xiao-rp2040', 'seeed xiao rp2040', 'xiao rp2040'],
     // The silkscreen and the silicon disagree, and both are right. D0 is the
-    // label beside the pad; GP26 is what digitalWrite() addresses. This is the
-    // same mechanism a board somebody brought in themselves uses, which is
-    // why it needed no new code.
+    // label beside the pad; GP26 is the pad. The XIAO's own variant defines
+    // D0 as 26, so a sketch's digitalWrite(D0) and this map agree.
     padMap: {
       D0: 'GP26', D1: 'GP27', D2: 'GP28', D3: 'GP29',
       D4: 'GP6', D5: 'GP7', D6: 'GP0', D7: 'GP1',
@@ -366,12 +365,11 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     extraPinCaps: [{ pattern: /^D\d+$/, add: ['pwm'] }],
     compiler: {
       provider: 'arduino-cli',
-      fqbn: 'rp2040:rp2040:rpipico',
+      fqbn: 'rp2040:rp2040:seeed_xiao_rp2040',
       requiredCore: 'rp2040:rp2040',
       supported: true,
-      note: 'Built through the Arduino-Pico core\'s Pico target (rp2040:rp2040:rpipico) — the same RP2040 and the '
-        + 'same 2 MB flash layout. The XIAO\'s own labels are translated to GP pads by this board\'s pad map, so a '
-        + 'sketch written for D0 drives the pad D0 is printed beside.',
+      note: 'Built as a Seeed XIAO RP2040 (rp2040:rp2040:seeed_xiao_rp2040), with its own variant: D0-D10 as '
+        + 'printed, LED_BUILTIN on GP17, and Wire on GP6/GP7 — the pads marked SDA and SCL.',
     },
     simulation: {
       engine: 'rp2040js',
@@ -380,8 +378,8 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       supportedPeripherals: RP2040_SIM_PERIPHERALS,
     },
     limitation:
-      'Builds through the core\'s generic RP2040 target. The on-board WS2812 and the user LED are not wired '
-      + 'to the canvas, and USB is not simulated — Serial1 on D6/D7 is the UART that works.',
+      'The on-board WS2812 and the user LED are not wired to the canvas. Serial is the USB port and reaches '
+      + 'the serial monitor; Serial1 is the UART on D6/D7.',
   },
   'board.esp32-c3-supermini': {
     processorProfileId: 'proc.esp32c3',

@@ -70,7 +70,8 @@
             "arduino:avr:uno",
             "arduino:avr:nano",
             "arduino:avr:mega",
-            "arduino:avr:leonardo"
+            "arduino:avr:leonardo",
+            "arduino:avr:pro"
           ],
           "effect": "works",
           "note": "Drives the pin from a Timer1 compare interrupt, which the AVR emulator runs, so the pulse is real and the modelled shaft follows write()."
@@ -79,7 +80,8 @@
           "source": "core:rp2040:rp2040",
           "targets": [
             "rp2040:rp2040:rpipico",
-            "rp2040:rp2040:rpipicow"
+            "rp2040:rp2040:rpipicow",
+            "rp2040:rp2040:seeed_xiao_rp2040"
           ],
           "effect": "compiles-only",
           "effectReason": "Arduino-Pico's Servo emits the pulse from a PIO program. rp2040js models PIO, but runs its state machines from a wall-clock setTimeout loop that is detached from CircuitDesk's simulated timeline, so the program never advances with simulated time and the pin never moves. Driving PIO from the simulated clock is an emulator change, not a library one.",
@@ -120,8 +122,10 @@
             "arduino:avr:nano",
             "arduino:avr:mega",
             "arduino:avr:leonardo",
+            "arduino:avr:pro",
             "rp2040:rp2040:rpipico",
-            "rp2040:rp2040:rpipicow"
+            "rp2040:rp2040:rpipicow",
+            "rp2040:rp2040:seeed_xiao_rp2040"
           ],
           "alternative": "Servo.h",
           "reason": "ESP32Servo is written against the ESP32 LEDC peripheral and does not apply to other architectures."
@@ -138,7 +142,8 @@
             "arduino:avr:uno",
             "arduino:avr:nano",
             "arduino:avr:mega",
-            "arduino:avr:leonardo"
+            "arduino:avr:leonardo",
+            "arduino:avr:pro"
           ],
           "effect": "works"
         },
@@ -146,7 +151,8 @@
           "source": "core:rp2040:rp2040",
           "targets": [
             "rp2040:rp2040:rpipico",
-            "rp2040:rp2040:rpipicow"
+            "rp2040:rp2040:rpipicow",
+            "rp2040:rp2040:seeed_xiao_rp2040"
           ],
           "effect": "works"
         },
@@ -172,7 +178,8 @@
             "arduino:avr:uno",
             "arduino:avr:nano",
             "arduino:avr:mega",
-            "arduino:avr:leonardo"
+            "arduino:avr:leonardo",
+            "arduino:avr:pro"
           ],
           "effect": "works"
         },
@@ -180,7 +187,8 @@
           "source": "core:rp2040:rp2040",
           "targets": [
             "rp2040:rp2040:rpipico",
-            "rp2040:rp2040:rpipicow"
+            "rp2040:rp2040:rpipicow",
+            "rp2040:rp2040:seeed_xiao_rp2040"
           ],
           "effect": "works"
         },

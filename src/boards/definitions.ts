@@ -4,7 +4,7 @@ import { deriveBoardSupportLevel } from '../project/support';
 import { ARDUINO_UNO } from './unoDefinition';
 import { ARDUINO_MEGA } from './megaDefinition';
 import { ARDUINO_LEONARDO } from './leonardoDefinition';
-import { pinRow, gpio, analog, gnd, p5v, p3v3, vin, reset, type PinSpec } from './pinHelpers';
+import { MM, pinRow, pinAt, gpio, analog, gnd, p5v, p3v3, vin, reset, type PinSpec } from './pinHelpers';
 
 interface HeaderBoardSpec {
   id: string;
@@ -21,6 +21,8 @@ interface HeaderBoardSpec {
   usb?: 'micro' | 'usb-c' | 'mini' | 'none';
   description?: string;
   metadata?: Record<string, unknown>;
+  /** Pads off the edge headers, each one pitch inboard of the header pin it sits beside. */
+  inner?: { spec: PinSpec; beside: string }[];
 }
 
 /** Generic dual-row module (DevKit style): pins run down the left and right edges. */
@@ -30,6 +32,12 @@ function headerBoard(spec: HeaderBoardSpec): BoardDefinition {
     ...pinRow(spec.left, 1.8, marginTop, false),
     ...pinRow(spec.right, spec.widthMm - 1.8, marginTop, false),
   ];
+  for (const { spec: pad, beside } of spec.inner ?? []) {
+    const anchor = pins.find((p) => p.id === beside);
+    if (!anchor) throw new Error(`${spec.id}: inner pad ${pad.id} is beside ${beside}, which is not a pin`);
+    const inward = anchor.x > (spec.widthMm * MM) / 2 ? -2.54 : 2.54;
+    pins.push(pinAt(pad, anchor.x / MM + inward, anchor.y / MM));
+  }
   return {
     id: spec.id,
     name: spec.name,
@@ -90,8 +98,9 @@ export const ARDUINO_NANO = headerBoard({
     gnd('GND2'),
     reset('RESET2', 'RESET'),
     p5v('5V'),
-    analog('A7', 'A7'),
-    analog('A6', 'A6'),
+    // ADC6 and ADC7 have no digital buffer on the ATmega328P: analogRead only.
+    analog('A7', 'A7', 5, { caps: ['analog-in'] }),
+    analog('A6', 'A6', 5, { caps: ['analog-in'] }),
     analog('A5', 'A5'),
     analog('A4', 'A4'),
     analog('A3', 'A3'),
@@ -271,9 +280,9 @@ export const PRO_MINI = headerBoard({
   logicVoltage: 5,
   color: '#1c3f5a',
   description:
-    'The same ATmega328P an Uno carries, with no USB and no regulator worth speaking of. Runs real AVR firmware '
-    + 'on the same emulator; the 5 V 16 MHz variant builds through the Uno target, which is the same fuses and '
-    + 'the same clock.',
+    'The same ATmega328P an Uno carries, with no USB and no regulator worth speaking of, and two more analog '
+    + 'inputs (A6, A7) the Uno does not bring out. Built as itself (arduino:avr:pro) and run on the same AVR '
+    + 'emulator.',
   left: [
     gpio('D1', 'TXO', ['digital-in', 'digital-out', 'uart-tx']),
     gpio('D0', 'RXI', ['digital-in', 'digital-out', 'uart-rx']),
@@ -300,6 +309,12 @@ export const PRO_MINI = headerBoard({
     // A4/A5 carry the TWI lines on this chip, as they do on an Uno.
     analog('A5', 'A5', 5, { caps: ['analog-in', 'digital-in', 'digital-out', 'i2c-scl'] }),
     analog('A4', 'A4', 5, { caps: ['analog-in', 'digital-in', 'digital-out', 'i2c-sda'] }),
+  ],
+  // A6 and A7 are the two inner pads beside A5 and A4, off the edge headers.
+  // Analog only, as on every ATmega328P.
+  inner: [
+    { spec: analog('A6', 'A6', 5, { caps: ['analog-in'] }), beside: 'A5' },
+    { spec: analog('A7', 'A7', 5, { caps: ['analog-in'] }), beside: 'A4' },
   ],
 });
 
@@ -471,7 +486,10 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   PICO,
   { ...PICO, id: 'board.raspberry-pi-pico-w', name: 'Raspberry Pi Pico W', description: 'Pico W (wireless). The RP2040 side runs real firmware exactly as the Pico does; the CYW43 Wi-Fi radio is not simulated.', metadata: { ...PICO.metadata } },
   simpleWiringBoard(
-    'board.rpi-zero-gpio', 'Raspberry Pi Zero GPIO Header', 'Raspberry Pi', 'BCM2835 (header only)', 65, 30, 3.3,
+    // Portrait: the 40-pin header runs along the Zero's 65 mm edge. Drawn
+    // landscape, thirteen pins a side did not fit in 30 mm and four of them
+    // sat off the board.
+    'board.rpi-zero-gpio', 'Raspberry Pi Zero GPIO Header', 'Raspberry Pi', 'BCM2835 (header only)', 30, 65, 3.3,
     [p3v3('3V3_1'), g3('GPIO2', 'GPIO2', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('GPIO3', 'GPIO3', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('GPIO4', 'GPIO4'), gnd('GND1'), g3('GPIO17', 'GPIO17'), g3('GPIO27', 'GPIO27'), g3('GPIO22', 'GPIO22'), p3v3('3V3_2'), g3('GPIO10', 'GPIO10', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }), g3('GPIO9', 'GPIO9', { caps: ['digital-in', 'digital-out', 'spi-miso'] }), g3('GPIO11', 'GPIO11', { caps: ['digital-in', 'digital-out', 'spi-sck'] }), gnd('GND2')],
     [p5v('5V_1'), p5v('5V_2'), gnd('GND3'), g3('GPIO14', 'GPIO14 TXD', { caps: ['digital-out', 'uart-tx'] }), g3('GPIO15', 'GPIO15 RXD', { caps: ['digital-in', 'uart-rx'] }), g3('GPIO18', 'GPIO18'), gnd('GND4'), g3('GPIO23', 'GPIO23'), g3('GPIO24', 'GPIO24'), gnd('GND5'), g3('GPIO25', 'GPIO25'), g3('GPIO8', 'GPIO8'), g3('GPIO7', 'GPIO7')],
     'wiring', { usb: 'none', color: '#0b3d2e', description: 'Raspberry Pi GPIO header (subset of the 40-pin J8). Wiring/validation only — Linux boards are not simulated.' },

@@ -1,4 +1,4 @@
-// Three boards that are not the boards they build through.
+// Three boards that share a chip with a board that came first.
 //
 // CircuitDesk executes four chips. Up to now it offered them only under the
 // names of the dev kits they first arrived on, which is a limitation of the
@@ -7,12 +7,17 @@
 // of board, processor, toolchain and runtime exists so that adding them costs
 // a capability entry rather than a new emulator.
 //
-// What that separation has to be held to is the part that is easy to get wrong:
-// these boards must build through a target the compiler service already knows
-// WITHOUT becoming that board anywhere a user can see, and the boards that were
-// already here must not shift targets because a new rule was added. So this
-// asserts both halves — the new boards compile and genuinely execute, and the
-// old boards' service ids and FQBNs are exactly what they were.
+// Sharing a chip is not sharing a variant. The Pro Mini and the XIAO each have
+// their own target in their core. Built as a Pico, a XIAO sketch's D0 is GP0 —
+// the pad printed D6 — and Wire starts on GP4/GP5 rather than the pads printed
+// SDA and SCL: it compiles, and drives the wrong pins. The Pro Mini's own
+// target differs from the Uno's far less (its board define, and eight analog
+// inputs rather than six), but it is the board's own, so it is the one used.
+// The SuperMini still builds through the generic C3 target, because its own
+// turns Serial over to USB, which the C3 runtime does not model yet.
+//
+// And the boards that were already here must not shift targets because a new
+// rule was added: their service ids and FQBNs are asserted exactly.
 //
 // Skips the execution section cleanly when the toolchain is unavailable.
 
@@ -22,6 +27,8 @@ import { getBoardDefinition } from '../src/boards/definitions';
 import { resolveWorkspaceTargets } from '../src/compiler/targets';
 import { getSimulatorAdapter } from '../src/simulation/adapters';
 import { runnerPinIndex } from '../src/simulation/boardRunner';
+import { compileProject } from '../server/compiler/compilerService';
+import { detectArduinoCli } from '../server/compiler/arduinoCli';
 import type { CircuitProject, ComponentInstance, FirmwareArtifact } from '../src/types';
 
 let failures = 0;
@@ -74,25 +81,25 @@ const avrBlink = (pin: number) =>
 const CASES: Case[] = [
   {
     boardId: 'board.arduino-pro-mini',
-    serviceId: 'board.arduino-uno',
-    fqbn: 'arduino:avr:uno',
+    serviceId: 'board.arduino-pro-mini',
+    fqbn: 'arduino:avr:pro',
     format: 'intel-hex',
     pinId: 'D13',
     pad: 13,
     source: avrBlink(13),
-    // "Uno" is legitimate in the compiler note and nowhere else.
-    forbidden: ['Uno R3'],
+    forbidden: ['Uno R3', 'arduino:avr:uno'],
   },
   {
     boardId: 'board.seeed-xiao-rp2040',
-    serviceId: 'board.raspberry-pi-pico',
-    fqbn: 'rp2040:rp2040:rpipico',
+    serviceId: 'board.seeed-xiao-rp2040',
+    fqbn: 'rp2040:rp2040:seeed_xiao_rp2040',
     format: 'uf2',
-    // The silkscreen says D0. The pad is GP26, and 26 is what the sketch names.
+    // The silkscreen says D0 and so does the sketch; the XIAO's variant makes
+    // that GP26, the pad behind it. The Pico's variant makes it GP0.
     pinId: 'D0',
     pad: 26,
-    source: avrBlink(26),
-    forbidden: ['Raspberry Pi Pico'],
+    source: avrBlink(26).replace(/\b26\b/g, 'D0'),
+    forbidden: ['Raspberry Pi Pico', 'rpipico'],
   },
   {
     boardId: 'board.esp32-c3-supermini',
@@ -119,12 +126,14 @@ function projectFor(c: Case): { project: CircuitProject; instance: ComponentInst
 }
 
 // ===================================== 1. each is its own product ===========
-section('1. its own product, not the kit it builds through');
+section('1. its own product, not the kit it shares a chip with');
 for (const c of CASES) {
   const def = getBoardDefinition(c.boardId);
   check(def !== undefined, `${c.boardId} is in the catalogue`);
   if (!def) continue;
-  check(def.id !== c.serviceId, `its id is not the build target's (${def.id})`);
+  // Either it is its own service target, or — the SuperMini, for now — it
+  // builds through another and keeps its own id regardless.
+  check(def.id === c.serviceId || def.serverTargetId === c.serviceId, `it asks the service for ${c.serviceId}, said in its own definition`);
   // Identity text a user reads: name, description, processor, maker. The
   // compiler note legitimately names the target, so it is excluded.
   const visible = [def.name, def.description ?? '', def.processor ?? '', def.manufacturer ?? ''].join(' | ');
@@ -137,7 +146,7 @@ for (const c of CASES) {
   check(def.compiler?.fqbn === c.fqbn, `with FQBN ${def.compiler?.fqbn}`);
   check(
     typeof def.compiler?.note === 'string' && def.compiler.note.length > 0,
-    'and a note saying which target it builds through, rather than leaving it implicit',
+    'and a note saying which target it builds as, rather than leaving it implicit',
   );
   check(
     typeof def.metadata?.limitation === 'string' && def.metadata.limitation.length > 0,
@@ -180,6 +189,9 @@ section('3. boards that were already here build exactly as they did');
     ['board.raspberry-pi-pico', 'board.raspberry-pi-pico', 'rp2040:rp2040:rpipico'],
     ['board.raspberry-pi-pico-w', 'board.raspberry-pi-pico-w', 'rp2040:rp2040:rpipicow'],
     ['board.esp32-c3', 'board.esp32-c3', 'esp32:esp32:esp32c3'],
+    // And the two that now build as themselves, rather than as an Uno or a Pico.
+    ['board.arduino-pro-mini', 'board.arduino-pro-mini', 'arduino:avr:pro'],
+    ['board.seeed-xiao-rp2040', 'board.seeed-xiao-rp2040', 'rp2040:rp2040:seeed_xiao_rp2040'],
   ];
   for (const [boardId, serviceId, fqbn] of expected) {
     const project = emptyProject(`unchanged ${boardId}`);
@@ -197,7 +209,7 @@ section('3. boards that were already here build exactly as they did');
 }
 
 // ======================== 4. and the new boards resolve a target ============
-section('4. the new boards name a target the service already knows');
+section('4. the new boards name a target the service knows');
 for (const c of CASES) {
   const { project } = projectFor(c);
   const { targets, unbuildable } = resolveWorkspaceTargets(project);
@@ -253,6 +265,27 @@ for (const c of CASES) {
     check(sawHigh && sawLow, `and pad ${c.pad} — the pin labelled ${c.pinId} — toggles (high=${sawHigh} low=${sawLow})`);
   }
   simulationController.stop();
+}
+
+// ================ 5b. and the target it used to borrow was wrong ===========
+section('5b. the variant is the board\'s, which the borrowed target was not');
+if ((await detectArduinoCli()).available) {
+  // Asserted at compile time, so the numbers are the variant header's own.
+  const probes: [string, string, string, string, string][] = [
+    ['board.seeed-xiao-rp2040', 'rp2040:rp2040:seeed_xiao_rp2040', 'board.raspberry-pi-pico', 'rp2040:rp2040:rpipico',
+      'static_assert(D0 == 26 && SDA == 6 && SCL == 7 && LED_BUILTIN == 17, "the XIAO\'s pads");'],
+    ['board.arduino-pro-mini', 'arduino:avr:pro', 'board.arduino-uno', 'arduino:avr:uno',
+      'static_assert(NUM_ANALOG_INPUTS == 8, "eight analog inputs");\n#ifndef ARDUINO_AVR_PRO\n#error "not built as a Pro Mini"\n#endif'],
+  ];
+  for (const [boardId, fqbn, borrowedId, borrowed, probe] of probes) {
+    const source = `${probe}\nvoid setup() {}\nvoid loop() {}\n`;
+    const own = await compileProject({ fqbn, boardId, files: [{ name: 'sketch.ino', content: source }] }, false);
+    const other = await compileProject({ fqbn: borrowed, boardId: borrowedId, files: [{ name: 'sketch.ino', content: source }] }, false);
+    check(own.success, `${boardId} builds with its own variant (${fqbn})`);
+    check(!other.success, `which ${borrowed}, the target it used to borrow, is not`);
+  }
+} else {
+  skip('arduino-cli is not available here');
 }
 
 // ======================= 6. the UART claim is earned, not assumed ==========

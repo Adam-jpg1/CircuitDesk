@@ -355,5 +355,21 @@ function lcdOn(boardId: string, boardDefId: string, sdaPin: string, sclPin: stri
   );
 }
 
+// The XIAO RP2040's own variant. Its Wire is the RP2040's i2c1, on the pads
+// printed SDA and SCL (D4 and D5, which are GP6 and GP7); built as a Pico it
+// would have been i2c0 on GP4/GP5. What the board says must be its variant's.
+{
+  const xiao = getBoardBusProfile(getBoardDefinition('board.seeed-xiao-rp2040'));
+  const wire = xiao?.channels.find((c) => c.name === 'Wire');
+  check(wire?.controllerId === 'i2c1', `on the XIAO, Wire is the RP2040's i2c1 (${wire?.controllerId})`);
+  check(wire?.defaults['i2c-sda'] === 'D4' && wire?.defaults['i2c-scl'] === 'D5', `and starts on D4/D5, the pads printed SDA and SCL (${wire?.defaults['i2c-sda']}/${wire?.defaults['i2c-scl']})`);
+  const spi = xiao?.channels.find((c) => c.name === 'SPI');
+  check(spi?.defaults['spi-sck'] === 'D8' && spi?.defaults['spi-mosi'] === 'D10' && spi?.defaults['spi-miso'] === 'D9', `SPI starts on D8/D10/D9 (${spi?.defaults['spi-sck']}/${spi?.defaults['spi-mosi']}/${spi?.defaults['spi-miso']})`);
+  const wire1 = xiao?.channels.find((c) => c.name === 'Wire1');
+  check(!wire1 || Object.keys(wire1.defaults).length === 0, 'and Wire1, which the XIAO does not pin out, claims no default pads');
+  const picoWire = getBoardBusProfile(getBoardDefinition(PICO))?.channels.find((c) => c.name === 'Wire');
+  check(picoWire?.controllerId === 'i2c0' && picoWire.defaults['i2c-sda'] === 'GP4', 'while the Pico\'s Wire is unchanged: i2c0 on GP4/GP5');
+}
+
 console.log(failures === 0 ? '\nBus-pin validation checks passed.' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

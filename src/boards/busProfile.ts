@@ -143,20 +143,51 @@ export type BusPinVerdict =
   | { kind: 'incapable' };
 
 /**
- * Defaults from the rpipico / rpipicow variant's pins_arduino.h.
+ * What one Arduino-Pico variant's pins_arduino.h decides.
  *
  * A variant fact rather than a chip fact — the RP2040 has no opinion about
- * which of its eight possible SDA pads Wire should start on, and the core's
- * variant header does. Keyed by the name a sketch uses, because that is what
- * the variant header is choosing for.
+ * which of its eight possible SDA pads Wire should start on, or even which of
+ * its two I2C controllers the name Wire refers to, and the core's variant
+ * header has both. Keyed by the name a sketch uses, because that is what the
+ * header is choosing for.
  */
-const RP2040_VARIANT_DEFAULTS: Record<string, Partial<Record<BusLine, string>>> = {
-  Wire: { 'i2c-sda': 'GP4', 'i2c-scl': 'GP5' },
-  Wire1: { 'i2c-sda': 'GP26', 'i2c-scl': 'GP27' },
-  SPI: { 'spi-miso': 'GP16', 'spi-ss': 'GP17', 'spi-sck': 'GP18', 'spi-mosi': 'GP19' },
-  SPI1: { 'spi-miso': 'GP12', 'spi-ss': 'GP13', 'spi-sck': 'GP14', 'spi-mosi': 'GP15' },
-  Serial1: { 'uart-tx': 'GP0', 'uart-rx': 'GP1' },
-  Serial2: { 'uart-tx': 'GP8', 'uart-rx': 'GP9' },
+interface Rp2040Variant {
+  /** Arduino names that differ from the processor profile's, by controller id. */
+  names?: Record<string, string>;
+  defaults: Record<string, Partial<Record<BusLine, string>>>;
+}
+
+const PICO_VARIANT: Rp2040Variant = {
+  defaults: {
+    Wire: { 'i2c-sda': 'GP4', 'i2c-scl': 'GP5' },
+    Wire1: { 'i2c-sda': 'GP26', 'i2c-scl': 'GP27' },
+    SPI: { 'spi-miso': 'GP16', 'spi-ss': 'GP17', 'spi-sck': 'GP18', 'spi-mosi': 'GP19' },
+    SPI1: { 'spi-miso': 'GP12', 'spi-ss': 'GP13', 'spi-sck': 'GP14', 'spi-mosi': 'GP15' },
+    Serial1: { 'uart-tx': 'GP0', 'uart-rx': 'GP1' },
+    Serial2: { 'uart-tx': 'GP8', 'uart-rx': 'GP9' },
+  },
+};
+
+/**
+ * By the FQBN the board builds with. The XIAO's header puts Wire on the
+ * RP2040's i2c1, at GP6/GP7 — the pads printed SDA and SCL — and leaves Wire1,
+ * SPI1 and Serial2 unconnected, so they have no defaults here at all.
+ */
+const RP2040_VARIANTS: Record<string, Rp2040Variant> = {
+  'rp2040:rp2040:rpipico': PICO_VARIANT,
+  'rp2040:rp2040:rpipicow': PICO_VARIANT,
+  'rp2040:rp2040:seeed_xiao_rp2040': {
+    names: { i2c0: 'Wire1', i2c1: 'Wire' },
+    defaults: {
+      Wire: { 'i2c-sda': 'GP6', 'i2c-scl': 'GP7' },
+      SPI: { 'spi-miso': 'GP4', 'spi-sck': 'GP2', 'spi-mosi': 'GP3' },
+      Serial1: { 'uart-tx': 'GP0', 'uart-rx': 'GP1' },
+      // Pinned to 31 in the header: not brought out, so no default at all.
+      Wire1: {},
+      SPI1: {},
+      Serial2: {},
+    },
+  },
 };
 
 /** Defaults from each Arduino-ESP32 variant's pins_arduino.h. */
@@ -261,9 +292,10 @@ function channelFrom(
   controller: PeripheralController,
   lines: readonly BusLine[],
   resolver: PadResolver,
-  variantDefaults?: Record<string, Partial<Record<BusLine, string>>>,
+  variant?: Rp2040Variant,
 ): BusChannel | undefined {
-  const name = controller.arduinoName ?? controller.id;
+  const name = variant?.names?.[controller.id] ?? controller.arduinoName ?? controller.id;
+  const variantDefaults = variant?.defaults;
   const pins: Partial<Record<BusLine, string[]>> = {};
   const defaults: Partial<Record<BusLine, string>> = {};
   let reachable = false;
@@ -278,7 +310,10 @@ function channelFrom(
     // The core's variant default first, the chip's own selection second. A
     // board that does not bring the default pad out simply has no default for
     // that line, which is the truth and not something to paper over.
-    const defaultPad = variantDefaults?.[name]?.[line] ?? controller.defaults?.[signal];
+    // A variant that names a channel has the last word on it, including
+    // "nothing": the chip's own default only stands in where it is silent.
+    const defaultPad =
+      variantDefaults && name in variantDefaults ? variantDefaults[name][line] : controller.defaults?.[signal];
     const resolved = defaultPad ? resolver.pinsFor(defaultPad) : [];
     if (resolved.length > 0 && ids.includes(resolved[0])) defaults[line] = resolved[0];
   }
@@ -300,12 +335,12 @@ function controllerProfile(
   processor: ProcessorProfile,
   resolver: PadResolver,
   routing: 'fixed' | 'muxable',
-  variantDefaults?: Record<string, Partial<Record<BusLine, string>>>,
+  variant?: Rp2040Variant,
 ): BoardBusProfile | undefined {
   const channels: BusChannel[] = [];
   const add = (group: PeripheralController[], lines: readonly BusLine[]) => {
     for (const controller of group) {
-      const channel = channelFrom(controller, lines, resolver, variantDefaults);
+      const channel = channelFrom(controller, lines, resolver, variant);
       if (channel) channels.push(channel);
     }
   };
@@ -460,7 +495,15 @@ export function getBoardBusProfile(board: BoardDefinition | undefined): BoardBus
     const resolver = padResolver(board);
     switch (processor.architecture) {
       case 'rp2040':
-        return controllerProfile(board, processor, resolver, 'muxable', RP2040_VARIANT_DEFAULTS);
+        // The board's own build target decides the variant; a board that names
+        // none builds as the core's generic Pico.
+        return controllerProfile(
+          board,
+          processor,
+          resolver,
+          'muxable',
+          RP2040_VARIANTS[board.compiler?.fqbn ?? ''] ?? PICO_VARIANT,
+        );
       case 'esp32c3':
       case 'esp32c6':
         return matrixProfile(board, processor, resolver, ESP_RISCV_DEFAULTS[processor.architecture] ?? {});

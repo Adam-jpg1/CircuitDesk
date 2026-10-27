@@ -14,7 +14,7 @@
 // lazily-fetched chunk. Only `adapters.ts` imports it, and only with a dynamic
 // import when a Pico simulation actually starts.
 
-import { RP2040 } from 'rp2040js';
+import { RP2040, USBCDC } from 'rp2040js';
 import { buildBootStub } from './bootStub';
 import { PadPullResolver } from './gpioPulls';
 import { Rp2040ClockTree } from './clockTree';
@@ -133,6 +133,13 @@ export class Rp2040Runner {
 
   /** Bytes the firmware transmits on UART0, which is Serial1 on a Pico. */
   onSerialByte: ((byte: number) => void) | null = null;
+  /**
+   * Bytes the firmware sends over USB — `Serial` on every Arduino-Pico board.
+   * They reach the serial monitor, as they would reach a computer's terminal,
+   * and no wire: nothing on the canvas is plugged into the USB socket.
+   */
+  onUsbSerialByte: ((byte: number) => void) | null = null;
+  private cdc: USBCDC | null = null;
   onPinChange: ((pin: number, high: boolean) => void) | null = null;
 
   /**
@@ -195,6 +202,15 @@ export class Rp2040Runner {
       rp.gpio[index].addListener(() => this.padChanged(index));
     }
     rp.uart[0].onByte = (byte: number) => this.onSerialByte?.(byte);
+    // A host on the USB port: it enumerates the device when the firmware turns
+    // the controller on, opens the CDC port (raising DTR, without which
+    // Arduino-Pico's Serial drops what it is given) and reads what arrives.
+    // rp2040js runs the transactions on the machine's own clock, so the bytes
+    // arrive in simulated time.
+    this.cdc = new USBCDC(rp.usbCtrl);
+    this.cdc.onSerialData = (buffer: Uint8Array) => {
+      for (const byte of buffer) this.onUsbSerialByte?.(byte);
+    };
     this.attachBuses(rp);
 
     for (const [pin, level] of this.externalDrive) this.pads.drive(pin, level);
@@ -243,6 +259,8 @@ export class Rp2040Runner {
     this.unsubscribers = [];
     this.pinListeners.clear();
     this.onSerialByte = null;
+    this.onUsbSerialByte = null;
+    this.cdc = null;
     this.onPinChange = null;
     this.disposed = true;
   }
@@ -496,7 +514,12 @@ export class Rp2040Runner {
   }
 
   queueSerialInput(text: string): void {
-    for (const byte of new TextEncoder().encode(text)) this.rp.uart[0].feedByte(byte);
+    // Typed into the monitor: to Serial over USB, and to Serial1 as it always
+    // went, so a sketch reading either one hears it.
+    for (const byte of new TextEncoder().encode(text)) {
+      this.rp.uart[0].feedByte(byte);
+      this.cdc?.sendSerialByte(byte);
+    }
   }
 
   // ----------------------------------------------------------------- timing
