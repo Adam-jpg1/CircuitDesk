@@ -97,7 +97,7 @@ export function Dashboard() {
               Build electronics projects with real boards, real wiring rules, a real compiler and a real AVR
               emulator. Start with the Blink starter — it compiles and runs out of the box.
             </p>
-            <div style={{ display: 'flex', gap: 10 }}>
+            <div className="empty-actions">
               <button className="btn primary" onClick={() => void createProject(() => buildBlinkProject('My First Project'))}>
                 Create First Project
               </button>

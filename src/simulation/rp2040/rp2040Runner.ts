@@ -15,7 +15,7 @@
 // import when a Pico simulation actually starts.
 
 import { RP2040, USBCDC } from 'rp2040js';
-import { buildBootStub } from './bootStub';
+import { buildBootStub, FLASH_ERASE_TRAP, FLASH_PROGRAM_TRAP } from './bootStub';
 import { romFloatCall, type RomFloatCore } from './romFloat';
 import { PioClock } from './pioClock';
 import { PadPullResolver } from './gpioPulls';
@@ -34,6 +34,9 @@ import { I2cBus } from '../devices/i2cBus';
 import { SpiBus, type SpiController } from '../devices/spiBus';
 import type { SpiMode } from '../devices/types';
 import type { PinSnapshot } from '../boardRunner';
+
+/** The flash chip's erase unit. */
+const FLASH_SECTOR = 4096;
 
 /** GP0..GP29 exist on the die; a Pico brings out GP0..GP28. */
 export const RP2040_PIN_COUNT = 30;
@@ -123,6 +126,12 @@ export class Rp2040Runner {
   private unsubscribers: (() => void)[] = [];
   private externalDrive = new Map<number, boolean>();
   private disposed = false;
+  /**
+   * Flash sectors the firmware has erased or programmed, by sector number,
+   * as they now read. Flash is non-volatile: build() lays them back over the
+   * image, so EEPROM.commit() survives the reset button.
+   */
+  private readonly flashWrites = new Map<number, Uint8Array>();
 
   /**
    * I2C and SPI devices on the canvas attach to these, exactly as they do on
@@ -189,7 +198,10 @@ export class Rp2040Runner {
     // The ROM's float and double tables trap here (bootStub.ts); any other
     // breakpoint — the SDK's panic(), a sketch's own — is left as it was.
     rp.onBreak = (code: number) => {
-      romFloatCall(code, rp.core as unknown as RomFloatCore);
+      if (code === FLASH_ERASE_TRAP) this.flashErase(rp.core.registers[0] >>> 0, rp.core.registers[1] >>> 0);
+      else if (code === FLASH_PROGRAM_TRAP)
+        this.flashProgram(rp.core.registers[0] >>> 0, rp.core.registers[1] >>> 0, rp.core.registers[2] >>> 0);
+      else romFloatCall(code, rp.core as unknown as RomFloatCore);
     };
     this.rp = rp;
     this.clocks = new Rp2040ClockTree(rp as never);
@@ -197,6 +209,8 @@ export class Rp2040Runner {
     this.pads = new PadPullResolver(rp.gpio);
 
     for (const [addr, data] of this.image.blocks) rp.flash.set(data, addr - FLASH_BASE);
+    // What the sketch wrote to flash outlives the reset, as on the chip.
+    for (const [sector, data] of this.flashWrites) rp.flash.set(data, sector * FLASH_SECTOR);
 
     this.trackers = Array.from({ length: RP2040_PIN_COUNT }, () => ({
       lastHigh: false,
@@ -361,18 +375,51 @@ export class Rp2040Runner {
    * Explains a branch into the boot ROM header block.
    *
    * The only way to get there is through a ROM table lookup that returned 0:
-   * a routine this ROM does not provide. Floating point is provided (see
-   * romFloat.ts); what is not are the routines that write the physical flash
-   * chip or reboot into the USB bootloader, which have nothing to act on in a
-   * simulator. Saying so is the point: the alternative is a sketch that
+   * a routine this ROM does not provide. Floating point and flash writes are
+   * provided (romFloat.ts, flashErase/flashProgram); what is not is rebooting
+   * into the USB bootloader, which has nothing to act on in a simulator. Saying so is the point: the alternative is a sketch that
    * appears to run after jumping into nothing.
    */
   private reportUnresolvedRomCall(): never {
     throw new Error(
-      'This sketch called a Raspberry Pi boot ROM routine that the simulator does not provide, such as writing ' +
-        'the flash chip or rebooting into the USB bootloader, so it cannot continue here. Digital I/O, ' +
-        'analogRead(), analogWrite(), floating point and Serial are unaffected.',
+      'This sketch called a Raspberry Pi boot ROM routine that the simulator does not provide, such as rebooting ' +
+        'into the USB bootloader, so it cannot continue here. Digital I/O, analogRead(), analogWrite(), floating ' +
+        'point, EEPROM and Serial are unaffected.',
     );
+  }
+
+  // ----------------------------------------------------------------- flash
+
+  /**
+   * flash_range_erase(offset, count, ...): sets every byte of the 4 KB sectors
+   * in the range to 0xFF. The ROM requires a sector-aligned range; an
+   * unaligned one is widened to whole sectors, as the chip's sector-erase
+   * command would do.
+   */
+  private flashErase(offset: number, count: number): void {
+    const flash = this.rp.flash;
+    const end = Math.min(flash.length, offset + count);
+    for (let at = offset - (offset % FLASH_SECTOR); at < end; at += FLASH_SECTOR) {
+      flash.fill(0xff, at, Math.min(flash.length, at + FLASH_SECTOR));
+      this.keepSector(at / FLASH_SECTOR);
+    }
+  }
+
+  /**
+   * flash_range_program(offset, data, count): NOR flash programming only
+   * clears bits, so each byte becomes old & new — writing over unerased flash
+   * gives what the chip would, not what was asked.
+   */
+  private flashProgram(offset: number, data: number, count: number): void {
+    const flash = this.rp.flash;
+    const end = Math.min(flash.length, offset + count);
+    for (let at = offset; at < end; at++) flash[at] &= this.rp.readUint8(data + (at - offset));
+    for (let sector = Math.floor(offset / FLASH_SECTOR); sector * FLASH_SECTOR < end; sector++) this.keepSector(sector);
+  }
+
+  private keepSector(sector: number): void {
+    const at = sector * FLASH_SECTOR;
+    this.flashWrites.set(sector, this.rp.flash.slice(at, at + FLASH_SECTOR));
   }
 
   // ------------------------------------------------------------------ GPIO

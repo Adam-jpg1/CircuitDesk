@@ -33,8 +33,20 @@
 // breakpoint with an independent implementation of that slot's documented
 // contract (romFloat.ts). The version byte says 3, so the SDK takes every slot
 // it needs from the tables rather than patching in shims for an older ROM.
+//
+// FLASH
+//
+// flash_range_erase and flash_range_program are traps the same way: the runner
+// erases or programs the simulated flash array itself (rp2040Runner.ts), which
+// is all the ROM routines do once the SSI and the flash chip's command set are
+// set aside. EEPROM.commit() and LittleFS on Arduino-Pico both write through
+// them.
 
 import { ROM_FLOAT_SLOTS, SD_TRAP_BASE, SF_TRAP_BASE } from './romFloat';
+
+/** Breakpoint codes of the flash traps; the float slots start at 0x80. */
+export const FLASH_ERASE_TRAP = 0x10;
+export const FLASH_PROGRAM_TRAP = 0x11;
 
 /** The RP2040 boot ROM is 16 KB, which is what rp2040js allocates. */
 export const BOOTROM_WORDS = 4096;
@@ -60,10 +72,10 @@ export const ROM_FUNC_CODES: Record<string, number> = {
   flash_exit_xip: code('E', 'X'),
   flash_flush_cache: code('F', 'C'),
   flash_enter_cmd_xip: code('C', 'X'),
-  // Documented but not implemented: these write to a real flash device, which
-  // this simulator does not model.
+  // Writing the flash: traps the runner answers on the simulated flash array.
   flash_range_erase: code('R', 'E'),
   flash_range_program: code('R', 'P'),
+  // Documented but not implemented: there is no USB bootloader to reboot into.
   reset_usb_boot: code('U', 'B'),
   wait_for_vector: code('W', 'V'),
 };
@@ -392,6 +404,8 @@ export function buildBootStub(): BootStub {
   const ctzAddr = put(emitCtz32(cursor));
   const popcountAddr = put(emitPopcount32(cursor));
   const reverseAddr = put(emitReverse32(cursor));
+  const eraseAddr = put([BKPT(FLASH_ERASE_TRAP), BX_LR]);
+  const programAddr = put([BKPT(FLASH_PROGRAM_TRAP), BX_LR]);
 
   // The word-aligned variants have the same contract as the byte versions for
   // any input the aligned callers produce, so they share an implementation.
@@ -405,6 +419,8 @@ export function buildBootStub(): BootStub {
     flash_exit_xip: noopAddr,
     flash_flush_cache: noopAddr,
     flash_enter_cmd_xip: noopAddr,
+    flash_range_erase: eraseAddr,
+    flash_range_program: programAddr,
     clz32: clzAddr,
     ctz32: ctzAddr,
     popcount32: popcountAddr,
@@ -423,6 +439,8 @@ export function buildBootStub(): BootStub {
     'flash_exit_xip',
     'flash_flush_cache',
     'flash_enter_cmd_xip',
+    'flash_range_erase',
+    'flash_range_program',
     'clz32',
     'ctz32',
     'popcount32',

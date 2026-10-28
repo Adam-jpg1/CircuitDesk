@@ -68,8 +68,8 @@ async function loadRp2040js(): Promise<any | null> {
     entries++;
   }
   check(
-    entries === 12,
-    `the memory, flash-housekeeping and bit-helper routines are advertised (${entries})`,
+    entries === 14,
+    `the memory, flash, and bit-helper routines are advertised (${entries})`,
   );
 
   const advertised = new Set<number>();
@@ -94,8 +94,13 @@ async function loadRp2040js(): Promise<any | null> {
     check(traps === ROM_FLOAT_SLOTS, `every ${name} slot is a Thumb pointer to bkpt; bx lr (${traps})`);
   }
   check(dv.getUint8(0x13) === 3, `the ROM reports version 3, so the SDK takes every slot from the tables (${dv.getUint8(0x13)})`);
+  // The flash writers are traps the runner answers (EEPROM.commit() needs them;
+  // tests/boards.eepromInterrupts.mts runs it across a reset).
+  for (const name of ['flash_range_erase', 'flash_range_program'] as const) {
+    check(advertised.has(ROM_FUNC_CODES[name]), `${name} is advertised`);
+  }
   // Nor is anything advertised that has no implementation behind it.
-  for (const name of ['flash_range_erase', 'flash_range_program', 'reset_usb_boot', 'wait_for_vector'] as const) {
+  for (const name of ['reset_usb_boot', 'wait_for_vector'] as const) {
     check(!advertised.has(ROM_FUNC_CODES[name]), `${name} is not advertised, because it is not implemented`);
   }
 }

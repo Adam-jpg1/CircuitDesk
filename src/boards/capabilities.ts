@@ -76,19 +76,26 @@ export interface BoardCapabilityEntry {
   identityNote?: string;
 }
 
+/** The APIs every AVR board runs, each measured on real compiled firmware. */
+const AVR_COMMON_APIS = [
+  'external interrupts',
+  'pin-change interrupts',
+  'Wire (I2C master)',
+  'SPI (master)',
+  'Servo and tone()',
+  'EEPROM (kept across the reset button; erased when the simulation starts)',
+];
+
 const AVR_SIM_APIS = [
   'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite (PWM)',
-  'delay/millis/micros', 'Serial (UART both directions)', 'timers', 'external interrupts',
+  'delay/millis/micros', 'Serial (UART both directions)', 'timers', ...AVR_COMMON_APIS,
 ];
 
 /**
- * The Mega's list deliberately omits external interrupts: the emulator's
- * INT/PCINT wiring is ATmega328P-specific (INT0/INT1 on PD2/PD3, PCINT0 at the
- * 328P vector), which does not match the ATmega2560's INT0-INT7 / PCINT0-2
- * layout. Until Mega-correct interrupt configs exist, attachInterrupt is
- * declared unsupported rather than silently emulated wrong.
+ * The Mega runs the same list on its own wiring: INT0-INT7 and PCINT0-2 at
+ * the ATmega2560's vectors (tests/boards.eepromInterrupts.mts), not the 328P's.
  */
-const MEGA_SIM_APIS = AVR_SIM_APIS.filter((api) => api !== 'external interrupts');
+const MEGA_SIM_APIS = AVR_SIM_APIS;
 
 /**
  * The Leonardo's list is written out rather than filtered, because two entries
@@ -101,7 +108,7 @@ const LEONARDO_SIM_APIS = [
   'pinMode', 'digitalWrite', 'digitalRead', 'analogRead (A0-A5)',
   'analogWrite (PWM on D3, D5, D9, D10, D11)', 'delay/millis/micros',
   'Serial (native USB CDC, to the serial monitor, both directions; while (!Serial) returns once connected)',
-  'Serial1 (hardware UART on D0/D1, both directions)', 'timers',
+  'Serial1 (hardware UART on D0/D1, both directions)', 'timers', ...AVR_COMMON_APIS,
 ];
 const AVR_SIM_PERIPHERALS = ['GPIO ports', 'Timer0/1/2', 'USART0', 'ADC'];
 
@@ -261,7 +268,8 @@ const RP2040_LIMITATION =
   'and GP18/GP19/GP16 for SPI. ' +
   'Floating point runs on CircuitDesk\'s own implementation of the boot ROM\'s float tables, not Raspberry Pi\'s. ' +
   'PIO runs on the simulated clock, so Servo and tone() work. ' +
-  'The second core, PIO-fed DMA and writing the flash chip are not simulated.';
+  'EEPROM writes go to the simulated flash and survive the reset button. ' +
+  'The second core and PIO-fed DMA are not simulated.';
 
 const avrCliCompiler = (fqbn: string): BoardCompilerInfo => ({
   provider: 'arduino-cli',
@@ -327,8 +335,8 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     analogPinBase: 54,
     limitation:
       'Runs its own ATmega2560 profile (8 KB SRAM at 0x200, Mega vector table, ports A-L) — never the Uno profile. ' +
-      'Serial1-Serial3 (USART1-3) are not emulated; only Serial (USART0) is. ' +
-      'attachInterrupt is not emulated on this board either: external interrupts (INT0-INT7) and pin-change interrupts (PCINT0-2) are not modeled for the ATmega2560, so those pins still wire and validate but produce no interrupt behavior.',
+      'attachInterrupt on pins 2, 3 and 18-21 and pin-change interrupts (PCINT0-2) use the ATmega2560\'s own vectors. ' +
+      'Serial1-Serial3 (USART1-3) are not emulated; only Serial (USART0) is.',
   },
   'board.arduino-leonardo': {
     processorProfileId: 'proc.atmega32u4',
@@ -355,7 +363,8 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       'Runs its own ATmega32U4 profile (2.5 KB SRAM, 32U4 vector table, ports B-F) — never the Uno profile. ' +
       'Serial is the native USB port and reaches the serial monitor; USB HID (Keyboard, Mouse) enumerates but nothing reads its reports. ' +
       'Timer4 is not modeled, so analogWrite on D6 and D13 produces no PWM (digitalWrite on those pins works normally). ' +
-      'The A6-A11 alternate ADC channels, attachInterrupt (INT0-INT3/INT6), pin-change interrupts, SPI, I2C and EEPROM persistence are not emulated.',
+      'attachInterrupt (INT0-INT3, INT6), pin-change interrupts, SPI, I2C and EEPROM run on the 32U4\'s own registers and vectors. ' +
+      'The A6-A11 alternate ADC channels are not emulated, and EEPROM starts erased each time the simulation starts.',
   },
 
   // ---------------- SAM / SAMD / Renesas ----------------

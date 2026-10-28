@@ -127,7 +127,7 @@ const ATMEGA328P: ProcessorProfile = {
   ],
   interruptPads: ['PD2', 'PD3'],
   logicVolts: 5,
-  notModelled: ['EEPROM persistence', 'watchdog reset', 'sleep modes', 'analog comparator'],
+  notModelled: ['EEPROM across simulation restarts', 'watchdog reset', 'sleep modes', 'analog comparator'],
 };
 
 const ATMEGA2560: ProcessorProfile = {
@@ -155,14 +155,12 @@ const ATMEGA2560: ProcessorProfile = {
       defaults: { sck: 'PB1', miso: 'PB3', mosi: 'PB2', ss: 'PB0' },
     },
   ],
-  // The emulator's interrupt wiring is 328P-specific, so this chip declares
-  // none rather than offering pads that would do nothing.
-  interruptPads: [],
+  // INT0-3 on PD0-3 and INT4-7 on PE4-7, with this chip's own vectors.
+  interruptPads: ['PD0', 'PD1', 'PD2', 'PD3', 'PE4', 'PE5', 'PE6', 'PE7'],
   logicVolts: 5,
   notModelled: [
     'USART1-3 (only USART0 is emulated)',
-    'external and pin-change interrupts',
-    'EEPROM persistence',
+    'EEPROM across simulation restarts',
   ],
 };
 
@@ -189,13 +187,13 @@ const ATMEGA32U4: ProcessorProfile = {
       defaults: { sck: 'PB1', miso: 'PB3', mosi: 'PB2', ss: 'PB0' },
     },
   ],
-  interruptPads: [],
+  // INT0-3 on PD0-3 and INT6 on PE6.
+  interruptPads: ['PD0', 'PD1', 'PD2', 'PD3', 'PE6'],
   logicVolts: 5,
   notModelled: [
     'native USB beyond the CDC serial port — Keyboard and Mouse enumerate, but nothing reads their reports',
     'Timer4, so no PWM on the two pads it drives',
-    'external and pin-change interrupts',
-    'SPI, I2C and EEPROM persistence',
+    'EEPROM across simulation restarts',
   ],
 };
 

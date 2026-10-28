@@ -36,8 +36,8 @@ export function SiteHeader({ active, actions }: { active: SiteTab; actions?: Rea
           </a>
         ))}
       </nav>
-      <div style={{ flex: 1 }} />
-      {actions}
+      <div className="site-header-spacer" />
+      {actions && <div className="site-actions">{actions}</div>}
     </header>
   );
 }

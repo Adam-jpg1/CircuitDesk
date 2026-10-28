@@ -9,11 +9,11 @@
 // timers, USART and ADC. Only boards with a registered profile can run here —
 // there is no implicit Uno fallback for any other board.
 
-import { CPU, avrInstruction, AVRIOPort, AVRTimer, AVRUSART, AVRADC, AVRTWI, AVRSPI, PinState } from 'avr8js';
+import { CPU, avrInstruction, AVRIOPort, AVRTimer, AVRUSART, AVRADC, AVRTWI, AVRSPI, AVREEPROM, EEPROMMemoryBackend, PinState } from 'avr8js';
 import { parseIntelHex, intelHexHighestAddress } from './intelHex';
 import { AVR_BOARD_PROFILES, type AvrBoardProfile, type AvrPortName } from '../boards/pinMaps';
 import { Atmega32u4Usb } from './avr/usb32u4';
-import { MCU_CONFIGS, PORT_CONFIGS } from './avr/mcuConfig';
+import { MCU_CONFIGS } from './avr/mcuConfig';
 import { I2cBus } from './devices/i2cBus';
 import { SpiBus, type SpiController } from './devices/spiBus';
 import type { SpiMode } from './devices/types';
@@ -82,6 +82,12 @@ export class AVRRunner {
   readonly profile: AvrBoardProfile;
   /** The flash image, kept so reset() can power the chip up again on it. */
   private readonly program: Uint8Array;
+  /**
+   * The data EEPROM. Non-volatile, so it belongs to the runner rather than the
+   * chip: what a sketch saved is still there after the reset button, as on a
+   * real board. Erased (0xFF) at power-up.
+   */
+  readonly eeprom: EEPROMMemoryBackend;
 
   private ports = new Map<AvrPortName, AVRIOPort>();
   /** Reverse index: port name → [arduinoPin, bitIndex][] (avoids per-change scans). */
@@ -138,6 +144,7 @@ export class AVRRunner {
       );
     }
     this.program = program;
+    this.eeprom = new EEPROMMemoryBackend(mcu.eeprom.bytes);
     this.build();
   }
 
@@ -173,6 +180,9 @@ export class AVRRunner {
     this.timers = mcu.timers.map((cfg) => new AVRTimer(this.cpu, cfg));
     this.usart = new AVRUSART(this.cpu, mcu.usart, F_CPU);
     this.adc = new AVRADC(this.cpu, mcu.adc);
+    // Without it EEPROM.write() left EEPE set and the next EEPROM access spun
+    // on it forever.
+    new AVREEPROM(this.cpu, this.eeprom, mcu.eeprom.config);
     // The TWI controller reports what the firmware's Wire calls actually do.
     // Until a device model attaches, avr8js's default handler NACKs everything,
     // which is the honest answer for a bus with nothing on it.
@@ -205,7 +215,7 @@ export class AVRRunner {
     };
 
     for (const name of profile.ports) {
-      const cfg = PORT_CONFIGS[name];
+      const cfg = mcu.ports[name];
       if (!cfg) continue;
       this.ports.set(name, new AVRIOPort(this.cpu, cfg));
       this.portPins.set(name, []);

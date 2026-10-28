@@ -335,18 +335,29 @@ function projectWith(boardDefId: string): CircuitProject {
   check(leo.success === true, `server compile: Leonardo builds with atmega32u4/leonardo variant (${leo.toolchain})`);
 }
 
-// ---------- 8. Interrupt support is claimed only where it is emulated ----------
+// ---------- 8. Interrupt support is claimed where it is emulated, on each chip's own wiring ----------
 {
   const mega = getBoardDefinition('board.arduino-mega2560')!;
   const uno = getBoardDefinition('board.arduino-uno')!;
   const nano = getBoardDefinition('board.arduino-nano')!;
 
-  // avr8js models INT0/INT1 on PD2/PD3 and the 328P PCINT vectors, which is
-  // correct for the Uno/Nano and wrong for the ATmega2560 — so the Mega must
-  // not advertise interrupt APIs it cannot honestly emulate.
+  // avr8js ships only the 328P's INT0/INT1 on PD2/PD3. The Mega's INT0-INT7
+  // and PCINT0-2 sit on other pins at other vectors; mcuConfig.ts gives the
+  // 2560 its own, and tests/boards.eepromInterrupts.mts drives every one of
+  // them on compiled firmware. Only then may the Mega claim them.
+  const { MCU_CONFIGS } = await import('../src/simulation/avr/mcuConfig');
+  const megaInts = MCU_CONFIGS.atmega2560.ports.E.externalInterrupts;
   check(
-    !mega.simulation!.supportedApis.includes('external interrupts'),
-    'Mega does not claim external interrupts among its simulated APIs',
+    megaInts[4]?.interrupt === 0x0a && megaInts[4]?.EICR === 0x6a && MCU_CONFIGS.atmega2560.ports.D.externalInterrupts[0]?.interrupt === 0x02,
+    'the Mega has its own INT wiring: INT4 (pin 2) on PE4 at vector 0x0A via EICRB, INT0 (pin 21) on PD0 at 0x02',
+  );
+  check(
+    MCU_CONFIGS.atmega2560.ports.K.pinChange?.pinChangeInterrupt === 0x16 && MCU_CONFIGS.atmega328p.ports.D.pinChange?.pinChangeInterrupt === 0x0a,
+    'and its own PCINT vectors (PCINT2 at 0x16), where the 328P keeps 0x0A',
+  );
+  check(
+    mega.simulation!.supportedApis.includes('external interrupts') && mega.simulation!.supportedApis.includes('pin-change interrupts'),
+    'so the Mega claims external and pin-change interrupts',
   );
   check(
     uno.simulation!.supportedApis.includes('external interrupts') &&
@@ -355,8 +366,8 @@ function projectWith(boardDefId: string): CircuitProject {
   );
   const megaLimitation = String(mega.metadata.limitation ?? '');
   check(
-    /external interrupts/i.test(megaLimitation) && /pin-change interrupts/i.test(megaLimitation),
-    'Mega limitation text names external and pin-change interrupts as unemulated',
+    /Serial1-Serial3/.test(megaLimitation) && !/attachInterrupt is not emulated/i.test(megaLimitation),
+    'Mega limitation text still names what is missing (USART1-3) and no longer calls interrupts unemulated',
   );
   check(
     describeSupport(mega).includes(megaLimitation),
@@ -364,11 +375,9 @@ function projectWith(boardDefId: string): CircuitProject {
   );
   const megaProfile = AVR_BOARD_PROFILES['board.arduino-mega2560'];
   check(
-    megaProfile.unsupported.some((u) => /INT0-INT7/.test(u)) && megaProfile.unsupported.some((u) => /PCINT/.test(u)),
-    'Mega profile lists INT0-INT7 and PCINT0-2 as unsupported',
+    !megaProfile.unsupported.some((u) => /INT0-INT7|PCINT/.test(u)),
+    'Mega profile no longer lists INT0-INT7 or PCINT0-2 as unsupported',
   );
-  // The physical board really does have interrupt pins; keeping that metadata
-  // is honest as long as the simulation claim above is not made.
   check(
     mega.pins.find((p) => p.id === 'D18')?.capabilities.includes('interrupt') === true,
     'D18-D21 keep their real hardware interrupt capability metadata',
@@ -377,7 +386,10 @@ function projectWith(boardDefId: string): CircuitProject {
   // ---- Leonardo: Serial is the modelled USB port; Timer4 is never claimed ----
   const leonardo = getBoardDefinition('board.arduino-leonardo')!;
   const leoApis = leonardo.simulation!.supportedApis;
-  check(!leoApis.includes('external interrupts'), 'Leonardo does not claim external interrupts');
+  check(
+    leoApis.includes('external interrupts') && MCU_CONFIGS.atmega32u4.ports.E.externalInterrupts[6]?.interrupt === 0x0e,
+    'Leonardo claims external interrupts, on the 32U4\'s own INT6 (pin 7) at vector 0x0E',
+  );
   // Serial is claimed as what it is — the USB CDC port, tests/leonardo.usbSerial.mts
   // — and never as a UART, which would be the old lie of routing it onto USART1.
   check(

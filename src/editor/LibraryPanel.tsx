@@ -11,6 +11,8 @@ import { useStudioStore } from '../board-studio/studioStore';
 import { libraryBoards } from '../board-studio/boardLibrary';
 import { embeddedBoards } from '../custom-boards/projectBoards';
 import type { PartDefinition } from '../types';
+import { partSize } from '../canvas/geometry';
+import { isPhone, usePhoneLayout } from './phoneLayout';
 
 /**
  * Shelf order.
@@ -160,9 +162,20 @@ export function LibraryPanel() {
                   e.dataTransfer.effectAllowed = 'copy';
                 }}
                 onDoubleClick={() => {
+                  if (isPhone()) return;
                   const s = useEditorStore.getState();
                   const v = s.view;
                   s.addInstance(def.id, v.x + 320 / v.zoom, v.y + 200 / v.zoom);
+                }}
+                onClick={() => {
+                  // No dragging between panes on a phone: a tap places the
+                  // part in the middle of the canvas and shows it there.
+                  if (!isPhone()) return;
+                  const s = useEditorStore.getState();
+                  const v = s.view;
+                  const { w, h } = partSize(def);
+                  s.addInstance(def.id, Math.round(v.x + window.innerWidth / 2 / v.zoom - w / 2), Math.round(v.y + window.innerHeight / 3 / v.zoom - h / 2));
+                  usePhoneLayout.getState().setPane('circuit');
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -200,7 +213,9 @@ export function LibraryPanel() {
         <div style={{ padding: '10px 12px', color: 'var(--text-2)', fontSize: 11 }}>
           {query.trim()
             ? `${totalShown} part${totalShown === 1 ? '' : 's'} match “${query.trim()}”. Search by what a part does — “accelerometer”, “shift register”, “distance” — as well as by part number.`
-            : 'Drag a part onto the canvas. Right-click a part to pin it to Favorites. Badges show honest support levels.'}
+            : isPhone()
+              ? 'Tap a part to place it on the canvas. Badges show honest support levels.'
+              : 'Drag a part onto the canvas. Right-click a part to pin it to Favorites. Badges show honest support levels.'}
         </div>
       </div>
     </>

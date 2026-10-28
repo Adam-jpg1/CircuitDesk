@@ -29,7 +29,11 @@ import {
   type CPU,
   type AVRTimerConfig,
   type ADCConfig,
+  eepromConfig,
   type AVRPortConfig,
+  type AVRExternalInterrupt,
+  type AVRPinChangeInterrupt,
+  type AVREEPROMConfig,
 } from 'avr8js';
 import * as gpio from 'avr8js';
 import type { AvrPortName } from '../../boards/pinMaps';
@@ -55,6 +59,14 @@ export interface AvrMcuConfig {
   usart: UsartConfig;
   adc: ADCConfig;
   /**
+   * The GPIO ports with this chip's external (INTn) and pin-change (PCINTn)
+   * interrupts. avr8js ships only the 328P's wiring, where INT0/INT1 are on
+   * PD2/PD3; on the Mega and the Leonardo attachInterrupt() never fired.
+   */
+  ports: Record<AvrPortName, AVRPortConfig>;
+  /** The data EEPROM: its size and ready vector. The registers sit at 0x3F-0x42 on every AVR we support. */
+  eeprom: { config: AVREEPROMConfig; bytes: number };
+  /**
    * Optional per-MCU hardware that avr8js has no peripheral class for but
    * whose absence would stop firmware from booting. Kept deliberately narrow.
    */
@@ -75,9 +87,26 @@ export const PORT_CONFIGS: Record<AvrPortName, AVRPortConfig> = {
   L: gpio.portLConfig,
 };
 
+// INTn: EICRA (0x69) holds the sense control of INT0-3, EICRB (0x6A) that of
+// INT4-7, two bits each; EIMSK (0x3D) and EIFR (0x3C) have a bit per INTn.
+function externalInterrupt(n: number, vector: number): AVRExternalInterrupt {
+  return { EICR: n < 4 ? 0x69 : 0x6a, EIMSK: 0x3d, EIFR: 0x3c, iscOffset: (n % 4) * 2, index: n, interrupt: vector };
+}
+
+// PCINTn: PCICR (0x68) and PCIFR (0x3B) have a bit per group, PCMSKn sits at
+// 0x6B + n. `mask` is the port bits in the group and `offset` where they start
+// in its PCMSK.
+function pinChange(group: number, vector: number, mask = 0xff, offset = 0): AVRPinChangeInterrupt {
+  return { PCIE: group, PCICR: 0x68, PCIFR: 0x3b, PCMSK: 0x6b + group, pinChangeInterrupt: vector, mask, offset };
+}
+
 // ---------------------------------------------------------------- ATmega328P
 
 const ATMEGA328P: AvrMcuConfig = {
+  // avr8js's own configs are the 328P's.
+  ports: PORT_CONFIGS,
+  // EE_READY is vector 23 -> word address 0x2C, as avr8js ships it.
+  eeprom: { config: eepromConfig, bytes: 1024 },
   timers: [timer0Config, timer1Config, timer2Config],
   usart: usart0Config,
   adc: adcConfig,
@@ -264,6 +293,29 @@ const ATMEGA2560: AvrMcuConfig = {
   adc: mega2560Adc,
   twi: mega2560Twi,
   spi: mega2560Spi,
+  // INT0-3 on PD0-3 (pins 21, 20, 19, 18), INT4-7 on PE4-7 (pins 2, 3 and two
+  // unbonded on the Arduino board); vectors 2-9. PCINT0-7 on port B (vector
+  // 10), PCINT8 on PE0 and PCINT9-15 on PJ0-6 (vector 11), PCINT16-23 on port
+  // K (vector 12) — SoftwareSerial's receive pins.
+  ports: {
+    ...PORT_CONFIGS,
+    B: { ...gpio.portBConfig, pinChange: pinChange(0, 0x12) },
+    C: { ...gpio.portCConfig, pinChange: undefined },
+    D: {
+      ...gpio.portDConfig,
+      pinChange: undefined,
+      externalInterrupts: [0, 1, 2, 3].map((n) => externalInterrupt(n, 0x02 + n * 2)),
+    },
+    E: {
+      ...gpio.portEConfig,
+      pinChange: pinChange(1, 0x14, 0x01, 0),
+      externalInterrupts: [null, null, null, null, ...[4, 5, 6, 7].map((n) => externalInterrupt(n, 0x02 + n * 2))],
+    },
+    J: { ...gpio.portJConfig, pinChange: pinChange(1, 0x14, 0x7f, 1) },
+    K: { ...gpio.portKConfig, pinChange: pinChange(2, 0x16) },
+  },
+  // 4 KB; EE_READY is vector 31 -> 0x3C.
+  eeprom: { config: { ...eepromConfig, eepromReadyInterrupt: 0x3c }, bytes: 4096 },
 };
 
 // --------------------------------------------------------------- ATmega32U4
@@ -413,6 +465,21 @@ const ATMEGA32U4: AvrMcuConfig = {
   adc: atmega32u4Adc,
   twi: atmega32u4Twi,
   spi: atmega32u4Spi,
+  // INT0-3 on PD0-3 (pins 3, 2, 0, 1), INT6 on PE6 (pin 7); vectors 2-5 and
+  // 8. PCINT0-7 on port B (vector 10), the only pin-change group.
+  ports: {
+    ...PORT_CONFIGS,
+    B: { ...gpio.portBConfig, pinChange: pinChange(0, 0x12) },
+    C: { ...gpio.portCConfig, pinChange: undefined },
+    D: {
+      ...gpio.portDConfig,
+      pinChange: undefined,
+      externalInterrupts: [0, 1, 2, 3].map((n) => externalInterrupt(n, 0x02 + n * 2)),
+    },
+    E: { ...gpio.portEConfig, externalInterrupts: [null, null, null, null, null, null, externalInterrupt(6, 0x0e)] },
+  },
+  // 1 KB; EE_READY is vector 31 -> 0x3C.
+  eeprom: { config: { ...eepromConfig, eepromReadyInterrupt: 0x3c }, bytes: 1024 },
   installExtras: installAtmega32u4Extras,
 };
 

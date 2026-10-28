@@ -16,7 +16,7 @@ import {
 import { downloadFile } from '../ui/primitives';
 import { testResultsCache } from './TestsPanel';
 
-export function Toolbar() {
+export function Toolbar({ phone = false }: { phone?: boolean }) {
   const project = useEditorStore((s) => s.project);
   const tool = useEditorStore((s) => s.tool);
   const saveState = useEditorStore((s) => s.saveState);
@@ -27,6 +27,7 @@ export function Toolbar() {
   const selection = useEditorStore((s) => s.selection);
   const simStatus = useSimulationStore((s) => s.status);
   const [exportOpen, setExportOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   if (!project) return null;
   const s = useEditorStore.getState();
@@ -36,6 +37,72 @@ export function Toolbar() {
     const v = s.view;
     s.setView({ ...v, zoom: Math.min(4, Math.max(0.12, v.zoom * f)) });
   };
+
+  if (phone) {
+    // One row: the way out, the project, and the run controls a phone user
+    // reaches for. The rest is one tap away in the menu; the canvas tools
+    // float over the canvas itself.
+    const menu: { label: string; disabled?: boolean; run: () => void }[] = [
+      { label: compiling ? stageLabel(compileStage) : 'Compile', disabled: compiling, run: () => void compileAction(false) },
+      { label: 'Validate circuit', run: validateAction },
+      { label: 'Step ~1 ms', disabled: simStatus === 'stopped' || simStatus === 'error', run: () => simulationController.step() },
+      { label: 'Undo', disabled: undoDepth === 0, run: () => s.undo() },
+      { label: 'Redo', disabled: redoDepth === 0, run: () => s.redo() },
+      { label: 'Zoom in', run: () => zoomBy(1.2) },
+      { label: 'Zoom out', run: () => zoomBy(1 / 1.2) },
+      { label: 'Export…', run: () => setExportOpen(true) },
+    ];
+    return (
+      <div className="toolbar phone">
+        <button className="icon-btn" title="Back to dashboard" aria-label="Back to dashboard" onClick={() => { s.closeProject(); navigate('#/'); }}>
+          <BackIcon />
+        </button>
+        <input
+          className="project-name"
+          defaultValue={project.name}
+          key={project.id + project.name}
+          aria-label="Project name"
+          onBlur={(e) => e.target.value !== project.name && s.renameProject(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+        />
+        <span className={`save-dot ${saveState}`} title={saveState === 'saved' ? 'Saved' : saveState === 'saving' ? 'Saving…' : 'Unsaved'} />
+        {simStatus === 'running' ? (
+          <button className="icon-btn active" title="Pause simulation" aria-label="Pause" onClick={() => simulationController.pause()}><PauseIcon /></button>
+        ) : (
+          <button className="icon-btn" title="Run" aria-label="Run" disabled={compiling} onClick={runAction}>
+            <PlayIcon style={{ color: '#3fb950' }} />
+          </button>
+        )}
+        <button className="icon-btn" title="Reset the MCU" aria-label="Reset" disabled={!simulationController.hasFirmware} onClick={() => simulationController.reset()}><ResetIcon /></button>
+        <button className="icon-btn" title="Stop simulation" aria-label="Stop" disabled={simStatus === 'stopped'} onClick={() => simulationController.stop()}><StopIcon /></button>
+        <button className={`icon-btn${menuOpen ? ' active' : ''}`} title="More" aria-label="More" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
+          <span className="more-dots">⋯</span>
+        </button>
+        {compiling && <span className="phone-compile-note">{stageLabel(compileStage)}</span>}
+        {menuOpen && (
+          <>
+            <div className="phone-menu-backdrop" onClick={() => setMenuOpen(false)} />
+            <div className="phone-menu" role="menu">
+              {menu.map((item) => (
+                <button
+                  key={item.label}
+                  role="menuitem"
+                  disabled={item.disabled}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    item.run();
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {exportOpen && <ExportModal onClose={() => setExportOpen(false)} />}
+      </div>
+    );
+  }
 
   return (
     <div className="toolbar">

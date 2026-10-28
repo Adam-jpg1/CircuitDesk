@@ -14,6 +14,8 @@
     "start": "NODE_ENV=production tsx server/index.ts",
     "test:pipeline": "tsx tests/pipeline.e2e.mts",
     "test:ui": "tsx tests/ui.smoke.mts",
+    "test:ui:phone": "tsx tests/phone.ui.mts",
+    "test:boards:eeprom": "tsx tests/boards.eepromInterrupts.mts",
     "test:sim": "tsx tests/sim.behaviors.mts",
     "test:qa": "tsx tests/qa.beta.mts",
     "start:backend": "node dist-server/index.js",

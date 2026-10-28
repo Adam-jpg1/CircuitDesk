@@ -26,7 +26,16 @@ interface DragState {
   startView?: { x: number; y: number; zoom: number };
   boxStart?: Pt;
   moved: boolean;
+  /** A touch pan that, if the finger never moved, was a tap: clear the selection. */
+  tapClears?: boolean;
+  /** A touch pan over a wire in progress that, if it was a tap, bends the wire there. */
+  tapWaypoint?: Pt;
 }
+
+/** How far from a pin, in screen pixels, a fingertip still counts as on it. */
+const TOUCH_PIN_SLOP_PX = 22;
+/** How far a finger may wander and still have tapped. */
+const TAP_SLOP_PX = 6;
 
 export function CanvasStage() {
   const project = useEditorStore((s) => s.project);
@@ -41,15 +50,21 @@ export function CanvasStage() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
+  /** Whether `size` is the canvas's real size yet, rather than the default. */
+  const [measured, setMeasured] = useState(false);
   const dragRef = useRef<DragState | null>(null);
   const [boxRect, setBoxRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
+  /** Fingers on the canvas, by pointer id, for pinch-zoom. */
+  const touchesRef = useRef(new Map<number, Pt>());
+  const pinchRef = useRef<{ startDist: number; anchor: Pt; startZoom: number } | null>(null);
 
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
     const obs = new ResizeObserver((entries) => {
       const r = entries[0].contentRect;
+      if (r.width > 0 && r.height > 0) setMeasured(true);
       setSize((prev) => (Math.abs(prev.w - r.width) > 1 || Math.abs(prev.h - r.height) > 1 ? { w: r.width, h: r.height } : prev));
     });
     obs.observe(el);
@@ -124,14 +139,15 @@ export function CanvasStage() {
     (window as unknown as { __cdFit?: () => void }).__cdFit = fitToView;
   }, [fitToView]);
 
-  // one-time fit after project load
+  // One-time fit after project load, once the canvas has its real size: on a
+  // phone the default 800x600 fitted a board three times too large.
   const fittedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (project && fittedFor.current !== project.id) {
+    if (project && measured && fittedFor.current !== project.id) {
       fittedFor.current = project.id;
       fitToView();
     }
-  }, [project, fitToView]);
+  }, [project, measured, fitToView]);
 
   const onWheel = useCallback(
     (e: React.WheelEvent) => {
@@ -172,23 +188,81 @@ export function CanvasStage() {
     [store],
   );
 
-  const onPinClick = useCallback(
-    (componentId: string, pin: PinDefinition, e: React.MouseEvent) => {
-      e.stopPropagation();
+  const wireFromOrTo = useCallback(
+    (componentId: string, pinId: string) => {
       const s = store.getState();
       if (s.wireDraft) {
-        finishWire(componentId, pin.id);
+        finishWire(componentId, pinId);
       } else {
-        s.setWireDraft({ fromComponentId: componentId, fromPinId: pin.id, points: [], cursor: null });
+        s.setWireDraft({ fromComponentId: componentId, fromPinId: pinId, points: [], cursor: null });
       }
     },
     [store, finishWire],
+  );
+
+  const onPinClick = useCallback(
+    (componentId: string, pin: PinDefinition, e: React.MouseEvent) => {
+      e.stopPropagation();
+      wireFromOrTo(componentId, pin.id);
+    },
+    [wireFromOrTo],
+  );
+
+  /**
+   * The pin nearest a touch, if one is close enough to have been meant. A
+   * header pin is a few pixels across at the zoom a phone shows a whole board
+   * at — far smaller than a fingertip — so a touch picks the nearest pin
+   * within reach rather than needing to land on one.
+   */
+  const pinNearTouch = useCallback(
+    (clientX: number, clientY: number): { componentId: string; pinId: string } | null => {
+      const world = toWorld(clientX, clientY);
+      const reach = TOUCH_PIN_SLOP_PX / view.zoom;
+      let best: { componentId: string; pinId: string } | null = null;
+      let bestDist = reach;
+      for (const inst of instances) {
+        const def = definitions.get(inst.id);
+        if (!def) continue;
+        for (const pin of def.pins) {
+          const at = pinAbsolute(inst, def, pin);
+          const d = Math.hypot(at.x - world.x, at.y - world.y);
+          if (d < bestDist) {
+            bestDist = d;
+            best = { componentId: inst.id, pinId: pin.id };
+          }
+        }
+      }
+      return best;
+    },
+    [toWorld, view.zoom, instances, definitions],
   );
 
   const onBackgroundPointerDown = useCallback(
     (e: React.PointerEvent) => {
       const world = toWorld(e.clientX, e.clientY);
       const s = store.getState();
+      if (e.pointerType === 'touch') {
+        // A finger: wiring snaps to the pin it meant; anything else is a pan,
+        // and a pan that never moved was a tap.
+        if (tool === 'wire' || s.wireDraft) {
+          const pin = pinNearTouch(e.clientX, e.clientY);
+          if (pin) {
+            wireFromOrTo(pin.componentId, pin.pinId);
+            return;
+          }
+        }
+        (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+        dragRef.current = {
+          kind: 'pan',
+          startClient: { x: e.clientX, y: e.clientY },
+          lastWorld: world,
+          startView: { ...view },
+          moved: false,
+          tapClears: tool === 'select' && !s.wireDraft,
+          tapWaypoint: s.wireDraft ? world : undefined,
+        };
+        return;
+      }
       if (s.wireDraft) {
         // add a waypoint
         s.setWireDraft({ ...s.wireDraft, points: [...s.wireDraft.points, snap(world.x), snap(world.y)] });
@@ -203,7 +277,7 @@ export function CanvasStage() {
         if (!e.shiftKey) s.setSelection({ componentIds: [], connectionIds: [] });
       }
     },
-    [toWorld, tool, spaceHeld, view, store],
+    [toWorld, tool, spaceHeld, view, store, pinNearTouch, wireFromOrTo],
   );
 
   /**
@@ -343,6 +417,10 @@ export function CanvasStage() {
         onBackgroundPointerDown(e);
         return;
       }
+      if (e.pointerType === 'touch' && (tool === 'wire' || s.wireDraft)) {
+        onBackgroundPointerDown(e);
+        return;
+      }
       if (s.wireDraft) return;
 
       const already = s.selection.componentIds.includes(inst.id);
@@ -380,6 +458,8 @@ export function CanvasStage() {
       if (drag.kind === 'pan' && drag.startView) {
         const dxClient = e.clientX - drag.startClient.x;
         const dyClient = e.clientY - drag.startClient.y;
+        if (!drag.moved && Math.hypot(dxClient, dyClient) < TAP_SLOP_PX) return;
+        drag.moved = true;
         s.setView({
           x: drag.startView.x - dxClient / drag.startView.zoom,
           y: drag.startView.y - dyClient / drag.startView.zoom,
@@ -413,6 +493,10 @@ export function CanvasStage() {
     if (!drag) return;
     if (drag.kind === 'move' && drag.moved) {
       s.moveInstances(s.selection.componentIds, 0, 0, true);
+    } else if (drag.kind === 'pan' && !drag.moved) {
+      if (drag.tapClears) s.setSelection({ componentIds: [], connectionIds: [] });
+      const at = drag.tapWaypoint;
+      if (at && s.wireDraft) s.setWireDraft({ ...s.wireDraft, points: [...s.wireDraft.points, snap(at.x), snap(at.y)] });
     } else if (drag.kind === 'box' && boxRect) {
       const hit = instances
         .filter((inst) => {
@@ -428,6 +512,61 @@ export function CanvasStage() {
     }
     setBoxRect(null);
   }, [store, boxRect, instances, definitions]);
+
+  // Two fingers pinch to zoom and drag to pan, about the point between them.
+  // Handled in the capture phase, above the parts, so a second finger landing
+  // on a board still zooms rather than grabbing the board.
+  const onTouchDownCapture = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      const touches = touchesRef.current;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size < 2) return;
+      e.stopPropagation();
+      if (pinchRef.current) return;
+      // Whatever the first finger began gives way to the pinch; a part it was
+      // already dragging stays where it got to.
+      const drag = dragRef.current;
+      dragRef.current = null;
+      setBoxRect(null);
+      const s = store.getState();
+      if (drag?.kind === 'move' && drag.moved) s.moveInstances(s.selection.componentIds, 0, 0, true);
+      const [a, b] = [...touches.values()];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      pinchRef.current = { startDist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), anchor: toWorld(mid.x, mid.y), startZoom: view.zoom };
+    },
+    [store, toWorld, view.zoom],
+  );
+
+  const onTouchMoveCapture = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      const touches = touchesRef.current;
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const pinch = pinchRef.current;
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!pinch || !rect || touches.size < 2) return;
+      e.stopPropagation();
+      const [a, b] = [...touches.values()];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const zoom = Math.min(4, Math.max(0.12, (pinch.startZoom * Math.hypot(a.x - b.x, a.y - b.y)) / pinch.startDist));
+      store.getState().setView({
+        x: pinch.anchor.x - (mid.x - rect.left) / zoom,
+        y: pinch.anchor.y - (mid.y - rect.top) / zoom,
+        zoom,
+      });
+    },
+    [store],
+  );
+
+  const onTouchEndCapture = useCallback((e: React.PointerEvent) => {
+    if (e.pointerType !== 'touch') return;
+    touchesRef.current.delete(e.pointerId);
+    if (pinchRef.current) {
+      e.stopPropagation();
+      if (touchesRef.current.size < 2) pinchRef.current = null;
+    }
+  }, []);
 
   // wire endpoints resolver
   const pinPos = useCallback(
@@ -474,6 +613,10 @@ export function CanvasStage() {
     <div
       ref={wrapRef}
       className="canvas-wrap"
+      onPointerDownCapture={onTouchDownCapture}
+      onPointerMoveCapture={onTouchMoveCapture}
+      onPointerUpCapture={onTouchEndCapture}
+      onPointerCancelCapture={onTouchEndCapture}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes('circuitdesk/part')) e.preventDefault();
       }}
@@ -620,11 +763,14 @@ const WiresLayer = memo(function WiresLayer({
         const active = activity.get(conn.id);
         const issueHl = highlighted.has(conn.id);
         return (
-          <g key={conn.id}>
+          <g key={conn.id} data-connection-id={conn.id}>
             <path d={d} stroke="transparent" strokeWidth="10" fill="none" style={{ cursor: 'pointer' }}
               onPointerDown={(e) => {
-                e.stopPropagation();
                 const s = store.getState();
+                // A finger wiring up a pin a wire already runs over is after
+                // the pin: let the touch through to the pin finder.
+                if (e.pointerType === 'touch' && (s.tool === 'wire' || s.wireDraft)) return;
+                e.stopPropagation();
                 if (e.shiftKey) {
                   s.setSelection({
                     componentIds: s.selection.componentIds,
@@ -846,6 +992,7 @@ const PartView = memo(function PartView({
               stroke="transparent"
               strokeWidth="1"
               style={{ cursor: 'crosshair' }}
+              data-pin-id={pin.id}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => onPinClick(inst.id, pin, e)}
               onPointerEnter={() => useEditorStore.getState().setHoveredPin({ componentId: inst.id, pinId: pin.id })}

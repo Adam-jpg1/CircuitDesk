@@ -117,7 +117,7 @@ const ATMEGA328P_UNO: AvrBoardProfile = {
   pinCount: 20,
   ports: ['B', 'C', 'D'],
   portMap: atmega328pMap(),
-  unsupported: ['SPI peripheral devices', 'I2C (TWI) peripheral devices', 'EEPROM contents are not persisted'],
+  unsupported: ['EEPROM starts erased each time the simulation starts (it keeps its contents across the reset button)'],
 };
 
 const ATMEGA328P_NANO: AvrBoardProfile = {
@@ -138,10 +138,7 @@ const ATMEGA2560_MEGA: AvrBoardProfile = {
   portMap: atmega2560Map(),
   unsupported: [
     'Serial1/Serial2/Serial3 (USART1-3) — only Serial (USART0) is emulated',
-    'External interrupts INT0-INT7 (attachInterrupt) — the engine only models the ATmega328P INT layout',
-    'Pin-change interrupts PCINT0-2 — the engine only models the ATmega328P PCINT vectors',
-    'SPI and I2C (TWI) peripheral devices',
-    'EEPROM contents are not persisted',
+    'EEPROM starts erased each time the simulation starts (it keeps its contents across the reset button)',
   ],
 };
 
@@ -159,9 +156,7 @@ const ATMEGA32U4_LEONARDO: AvrBoardProfile = {
     'USB HID: Keyboard, Mouse and other native-USB libraries enumerate, but nothing reads their reports',
     'Timer4 (high-speed 10-bit) — analogWrite on D6 and D13 produces no PWM',
     'ADC channels 8-13 (the A6-A11 alternate functions of D4/D6/D8/D9/D10/D12) — MUX5 sits at a different ADCSRB bit on this MCU than the engine assumes',
-    'External interrupts INT0-INT3/INT6 (attachInterrupt) and pin-change interrupts (PCINT0)',
-    'SPI and I2C (TWI) peripheral devices',
-    'EEPROM contents are not persisted',
+    'EEPROM starts erased each time the simulation starts (it keeps its contents across the reset button)',
     'Caterina bootloader, USB auto-reset and serial-port enumeration',
   ],
 };
