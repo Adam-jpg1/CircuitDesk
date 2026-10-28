@@ -209,22 +209,26 @@ const SAMD21_SIM_APIS = [
   'delay/millis/micros',
   'Serial (native USB CDC, to the serial monitor, both directions; while (!Serial) returns once connected)',
   'Serial1 (the hardware UART, both directions — a part wired to RX/TX reaches it)',
+  'Servo (544-2400 µs pulses every 20 ms) and tone(), on the timers\' interrupts',
+  'external interrupts (attachInterrupt)',
 ];
 
 const SAMD21_SIM_PERIPHERALS = [
   'PORT, with pulls and the single-cycle IOBUS',
   'SysTick, which millis() counts',
   'ADC, single conversions',
-  'TCC0-2 and TC3-7 in normal PWM, driving the pads muxed to them',
+  'TCC0-2 and TC3-7 counting on the simulated clock: normal PWM and match frequency, compare and overflow interrupts',
+  'EIC, the external interrupt controller, on every EXTINT line',
   'SERCOM I2C master and SPI master, on the shared device buses',
   'USB device controller — the CDC serial port, enumerated by a modelled host',
   'the SERCOM USART behind Serial1 (SERCOM0 on the Adafruit boards, SERCOM4 on the XIAO), with its receive interrupt',
 ];
 
 const SAMD21_LIMITATION =
-  'Real SAMD21 firmware on a Cortex-M0+ core: startup, setup() and loop(), GPIO, analogRead, analogWrite (PWM), Wire, SPI, Serial over native USB and Serial1 on the UART pins. ' +
-  'Servo, tone(), external interrupts, DMA, the DAC and sleep are not simulated — sketches using them ' +
-  'compile and run, but those peripherals do nothing.';
+  'Real SAMD21 firmware on a Cortex-M0+ core: startup, setup() and loop(), GPIO, analogRead, analogWrite (PWM), Wire, SPI, ' +
+  'Servo, tone(), attachInterrupt(), Serial over native USB and Serial1 on the UART pins. ' +
+  'DMA, the DAC and sleep are not simulated — sketches using them compile and run, but those peripherals do nothing. ' +
+  'The SAMD21 has no EEPROM, so the EEPROM library does not exist for these boards; FlashStorage is the usual stand-in.';
 
 const samd21Compiler = (fqbn: string): BoardCompilerInfo => ({
   provider: 'arduino-cli',

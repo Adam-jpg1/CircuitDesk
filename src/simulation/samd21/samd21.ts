@@ -35,6 +35,7 @@ export const SAMD21_CPU_HZ = 48_000_000;
 
 /** NVIC lines (datasheet table 11-3). */
 export const SAMD21_IRQ = {
+  EIC: 4,
   USB: 7,
   SERCOM0: 9,
   ADC: 23,
@@ -60,6 +61,25 @@ interface PortGroup {
   /** Levels driven from outside (the canvas), per pin; undefined = not driven. */
   external: (boolean | undefined)[];
 }
+
+/**
+ * The EXTINT line on each pad, from the datasheet's I/O multiplexing table:
+ * mostly the pad number modulo 16, with the exceptions listed. PA08 is the
+ * NMI instead, so it has none here.
+ */
+const EXTINT: Record<number, number> = (() => {
+  const map: Record<number, number> = {};
+  for (let bit = 0; bit < 24; bit++) if (bit !== 8) map[bit] = bit % 16;
+  Object.assign(map, { 24: 12, 25: 13, 27: 15, 28: 8, 30: 10, 31: 11 });
+  for (let bit = 0; bit < 24; bit++) map[32 + bit] = bit % 16;
+  Object.assign(map, { [32 + 30]: 14, [32 + 31]: 15 });
+  return map;
+})();
+const SENSE_RISE = 1;
+const SENSE_FALL = 2;
+const SENSE_BOTH = 3;
+const SENSE_HIGH = 4;
+const SENSE_LOW = 5;
 
 const PINCFG_PMUXEN = 1 << 0;
 const PINCFG_INEN = 1 << 1;
@@ -216,7 +236,7 @@ export class Samd21 extends RP2040 {
     gclk.on(0x01, { width: 1, read: () => 0 }); // STATUS: never SYNCBUSY
     this.add(new RegisterBlock('WDT', 0x40001000, 0x400));
     this.add(new RegisterBlock('RTC', 0x40001400, 0x400));
-    this.add(new RegisterBlock('EIC', 0x40001800, 0x400));
+    this.buildEic();
     // Bus B
     this.add(new RegisterBlock('PAC1', 0x41000000, 0x400));
     this.add(new RegisterBlock('DSU', 0x41002000, 0x2000));
@@ -232,11 +252,13 @@ export class Samd21 extends RP2040 {
     this.add(new RegisterBlock('PAC2', 0x42000000, 0x400));
     this.add(new RegisterBlock('EVSYS', 0x42000400, 0x400));
     for (let i = 0; i < 6; i++) this.buildSercom(i, 0x42000800 + i * 0x400);
-    const clock = (this as unknown as { clock: { createAlarm: TimerHost['createAlarm'] } }).clock;
+    const clock = (this as unknown as { clock: { createAlarm: TimerHost['createAlarm']; nanos: number } }).clock;
     const host: TimerHost = {
       clockHz: SAMD21_CPU_HZ,
       createAlarm: (callback) => clock.createAlarm(callback),
+      nowNs: () => clock.nanos,
       outputsChanged: () => this.portChanged(),
+      setInterrupt: (irq, pending) => this.setInterrupt(irq, pending),
     };
     for (let i = 0; i < 8; i++) {
       const timer = new Samd21Timer(i, i < 3 ? 0x42002000 + i * 0x400 : 0x42002c00 + (i - 3) * 0x400, host);
@@ -370,8 +392,93 @@ export class Samd21 extends RP2040 {
       this.lastLevels[g] = levels >>> 0;
       if (!changed) continue;
       for (let bit = 0; bit < 32; bit++) {
-        if (changed & (1 << bit)) this.onPinChange?.(g * 32 + bit, (levels & (1 << bit)) !== 0);
+        if (!(changed & (1 << bit))) continue;
+        const high = (levels & (1 << bit)) !== 0;
+        this.eicEdge(g, bit, high);
+        this.onPinChange?.(g * 32 + bit, high);
       }
+    }
+    this.eicLevels();
+  }
+
+  // ------------------------------------------------------------------- EIC
+
+  private eic!: RegisterBlock;
+  private eicFlags = 0;
+  private eicInten = 0;
+
+  /**
+   * The External Interrupt Controller, which attachInterrupt() uses.
+   *
+   * A pad muxed to function A (the EIC) feeds its EXTINT line; CONFIG0/1 give
+   * each line a sense — rising, falling, both, high or low — and a matching
+   * edge or level sets the line's INTFLAG bit, which with INTENSET raises the
+   * EIC's NVIC line. Level senses keep the flag set for as long as the level
+   * holds, so clearing it in the handler does not lose a held button. The
+   * filter and the event outputs are not modelled; the NMI line (PA08) is not
+   * either.
+   */
+  private buildEic(): void {
+    const eic = (this.eic = this.add(new RegisterBlock('EIC', 0x40001800, 0x400)));
+    const update = () => this.setInterrupt(SAMD21_IRQ.EIC, (this.eicFlags & this.eicInten) !== 0);
+    eic.on(0x00, {
+      width: 1,
+      read: () => eic.peek(0x00, 1) & ~1,
+      write: (v) => {
+        if (v & 1) {
+          eic.bytes.fill(0);
+          this.eicFlags = 0;
+          this.eicInten = 0;
+          update();
+        }
+      },
+    });
+    eic.on(0x01, { width: 1, read: () => 0 }); // STATUS: never SYNCBUSY
+    eic.on(0x08, { width: 4, read: () => this.eicInten, write: (v) => { this.eicInten &= ~v; update(); } });
+    eic.on(0x0c, { width: 4, read: () => this.eicInten, write: (v) => { this.eicInten |= v; update(); this.eicLevels(); } });
+    eic.on(0x10, { width: 4, read: () => this.eicFlags, write: (v) => { this.eicFlags &= ~v; this.eicLevels(); update(); } });
+    for (const at of [0x18, 0x1c]) eic.on(at, { width: 4, write: () => this.eicLevels() }); // CONFIG0/1
+  }
+
+  /** The EXTINT line a pad is wired to on function A, if it is muxed there. */
+  private extintOf(g: number, bit: number): number | undefined {
+    const group = this.groups[g];
+    if (!(group.pincfg[bit] & PINCFG_PMUXEN)) return undefined;
+    const fn = (group.pmux[bit >> 1] >>> (bit & 1 ? 4 : 0)) & 0xf;
+    if (fn !== 0) return undefined;
+    return EXTINT[g * 32 + bit];
+  }
+
+  private eicSense(line: number): number {
+    if (!this.eic || !(this.eic.peek(0x00, 1) & 0x2)) return 0; // CTRL.ENABLE
+    return (this.eic.peek(line < 8 ? 0x18 : 0x1c, 4) >>> ((line % 8) * 4)) & 0x7;
+  }
+
+  private eicEdge(g: number, bit: number, high: boolean): void {
+    const line = this.extintOf(g, bit);
+    if (line === undefined) return;
+    const sense = this.eicSense(line);
+    if ((sense === SENSE_RISE && high) || (sense === SENSE_FALL && !high) || sense === SENSE_BOTH) {
+      this.eicFlags |= 1 << line;
+      this.setInterrupt(SAMD21_IRQ.EIC, (this.eicFlags & this.eicInten) !== 0);
+    }
+  }
+
+  /** Level senses: the flag is set while the level holds. */
+  private eicLevels(): void {
+    if (!this.eic) return;
+    let set = 0;
+    for (const [pad, line] of Object.entries(EXTINT)) {
+      const sense = this.eicSense(line);
+      if (sense !== SENSE_HIGH && sense !== SENSE_LOW) continue;
+      const g = Number(pad) >> 5;
+      const bit = Number(pad) & 31;
+      if (this.extintOf(g, bit) !== line) continue;
+      if (this.pinHigh(g, bit) === (sense === SENSE_HIGH)) set |= 1 << line;
+    }
+    if (set & ~this.eicFlags) {
+      this.eicFlags |= set;
+      this.setInterrupt(SAMD21_IRQ.EIC, (this.eicFlags & this.eicInten) !== 0);
     }
   }
 

@@ -36,7 +36,7 @@
     "test:esp:adc": "tsx tests/esp.adc.mts",
     "test:sim:reset": "tsx tests/sim.reset.mts",
     "test:community:persistence": "tsx tests/community.persistence.mts",
-    "test:samd21": "tsx tests/samd21.runtime.mts && tsx tests/samd21.starter.mts && tsx tests/samd21.pwm.mts && tsx tests/samd21.buses.mts",
+    "test:samd21": "tsx tests/samd21.runtime.mts && tsx tests/samd21.starter.mts && tsx tests/samd21.pwm.mts && tsx tests/samd21.buses.mts && tsx tests/samd21.timers.mts",
     "test:pwm:brightness": "tsx tests/sim.pwmBrightness.mts",
     "test:uart:boards": "tsx tests/uart.boards.mts",
     "test:riscv": "tsx tests/riscv.core.mts",

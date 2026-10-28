@@ -134,16 +134,20 @@ section('2. resolving a header against a board');
   const pico = resolveHeader('Servo.h', 'rp2040:rp2040:rpipico');
   check(pico.available === true && pico.effect === 'works', 'Servo.h is available for a Pico, and works there');
 
-  // A Feather M0's Servo drives the pin from a TC interrupt the SAMD21 model
-  // does not run: it compiles, and is recorded as doing nothing.
+  // A Feather M0's Servo drives the pin from a TC compare interrupt, which the
+  // SAMD21 model runs (tests/samd21.timers.mts measures the pulse).
   const feather = resolveHeader('Servo.h', 'adafruit:samd:adafruit_feather_m0');
-  check(feather.available === true, 'Servo.h is available for a Feather M0 — it does compile');
+  check(feather.available === true && feather.effect === 'works', 'Servo.h is available for a Feather M0, and works there');
+
+  // ESP32Servo on a C3 builds and drives LEDC, which is not modelled: it
+  // compiles, and is recorded as doing nothing.
+  const espServo = resolveHeader('ESP32Servo.h', 'esp32:esp32:esp32c3');
   check(
-    feather.available === true && feather.effect === 'compiles-only',
-    'but it is recorded as having no effect, which is the whole point of the distinction',
+    espServo.available === true && espServo.effect === 'compiles-only',
+    'ESP32Servo.h on a C3 is recorded as compiling with no effect, which is the whole point of the distinction',
   );
   check(
-    feather.available === true && Boolean(feather.workaround),
+    espServo.available === true && Boolean(espServo.workaround),
     'and it offers something the user can do instead',
   );
 
@@ -192,9 +196,13 @@ section('2b. finding the includes in a sketch');
   check(warnPico.length === 0, 'nor does it on a Pico, where Servo runs on PIO');
 
   const warnFeather = includeWarnings(src, 'adafruit:samd:adafruit_feather_m0');
-  check(warnFeather.length === 1 && warnFeather[0].kind === 'no-effect', 'the same sketch on a Feather M0 is warned that Servo.h does nothing');
+  check(warnFeather.length === 0, 'nor on a Feather M0, where Servo runs on a TC interrupt');
+
+  // A library that builds and does nothing is warned about, with the reason.
+  const quiet = includeWarnings('#include <ESP32Servo.h>\nvoid setup() {}', 'esp32:esp32:esp32c3');
+  check(quiet.length === 1 && quiet[0].kind === 'no-effect', 'ESP32Servo on a C3 is warned that it does nothing');
   check(
-    /\bTC\b/.test(warnFeather[0]?.reason ?? ''),
+    /\bLEDC\b/.test(quiet[0]?.reason ?? ''),
     'and the reason names the peripheral rather than shrugging',
   );
 
@@ -330,10 +338,10 @@ const AVR_SWEEP = [
 //
 // The Pico used to be the example here: its Servo is a PIO program, and PIO
 // ran on the wall clock. It now runs on the simulated clock, so the Pico's
-// shaft follows the sweep like the Uno's. The Feather M0's Servo drives the pin
-// from a TC interrupt the SAMD21 model does not run — that is the case a user
-// must be told about.
-section('5. the Pico now moves the shaft; the Feather M0 says it cannot');
+// shaft follows the sweep like the Uno's. The Feather M0 was the example after
+// it, until its TC interrupts were modelled: it now follows the sweep too. The
+// case a user must be told about is section 6's.
+section('5. the Pico and the Feather M0 move the shaft');
 {
   const SWEEP = (pin: string) => [
     '#include <Servo.h>',
@@ -363,14 +371,12 @@ section('5. the Pico now moves the shaft; the Feather M0 says it cannot');
     skip('the SAMD toolchain is unavailable');
   } else {
     console.log(`   Feather M0: ${feather.angles.map((a) => a?.toFixed(1) ?? '—').join(', ')}`);
+    const [f0, f90, f180] = feather.angles;
     check(
-      feather.angles.every((a) => a !== undefined && Math.abs(a - 90) < 1),
-      'on a Feather M0 the shaft never moves, because the TC interrupt that makes the pulse is not modelled',
+      f0 !== undefined && f90 !== undefined && f180 !== undefined && f0 < 15 && Math.abs(f90 - 90) < 15 && f180 > 165,
+      'on a Feather M0 the shaft follows write(0), write(90) and write(180)',
     );
-    check(
-      feather.notes.includes('no-effect:Servo.h'),
-      'and the build report says so rather than reporting an unqualified success',
-    );
+    check(!feather.notes.includes('no-effect:Servo.h'), 'and the build report has no caveat to give');
   }
 }
 

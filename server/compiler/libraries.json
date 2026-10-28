@@ -6,8 +6,8 @@
     "",
     "Why this file exists: until now the service installed no libraries at all, so a",
     "sketch with `#include <Servo.h>` did not compile. That is why the servo model is",
-    "tested by hand-writing a pulse loop. Every part that follows \u2014 steppers, matrix",
-    "displays, radios \u2014 is normally driven through a library, and a component library",
+    "tested by hand-writing a pulse loop. Every part that follows — steppers, matrix",
+    "displays, radios — is normally driven through a library, and a component library",
     "whose parts can only be driven by hand-written register banging is not usable.",
     "",
     "Versions are PINNED for the same reason the cores are: a library upgrade nobody",
@@ -16,7 +16,7 @@
     "AVAILABILITY IS MEASURED, NOT DECLARED. 'headers' below does not say what the",
     "library index claims; it says what was observed to compile. The Servo library's",
     "own metadata claims no esp32 support, yet it ships an esp32 backend and",
-    "arduino-cli will happily resolve it for an ESP32 board \u2014 and then the build fails",
+    "arduino-cli will happily resolve it for an ESP32 board — and then the build fails",
     "inside the library on a SoC macro that Arduino-ESP32 renamed. So Servo.h is",
     "recorded as unavailable for the ESP targets, with the reason and the alternative,",
     "and `installLibraries.mjs --probe` compiles every claim in this file to keep it",
@@ -43,7 +43,7 @@
       "maintainer": "Arduino",
       "license": "LGPL-2.1",
       "required": true,
-      "note": "The official Arduino servo library. Drives the pin from a timer interrupt, so the emulator has to run the timer for the shaft to move \u2014 nothing about installing it makes a servo work on its own."
+      "note": "The official Arduino servo library. Drives the pin from a timer interrupt, so the emulator has to run the timer for the shaft to move — nothing about installing it makes a servo work on its own."
     },
     {
       "id": "ESP32Servo",
@@ -92,19 +92,16 @@
             "adafruit:samd:adafruit_feather_m0",
             "adafruit:samd:adafruit_qtpy_m0"
           ],
-          "effect": "compiles-only",
-          "effectReason": "The SAMD21 Servo backend generates the pulse from a TC compare interrupt. The SAMD21 model runs its timers in normal PWM (analogWrite), not in the match-frequency mode with interrupts that Servo uses, so the pin never moves.",
-          "workaround": "analogWrite() works on these boards; for a servo, write the pulse directly (digitalWrite / delayMicroseconds), or use an AVR board.",
-          "note": "Adafruit's SAMD core bundles its own Servo, which shadows the Arduino library."
+          "effect": "works",
+          "note": "Drives the pin from a TC compare interrupt, which the SAMD21 model runs on the simulated clock, so the pulse is real (544-2400 µs every 20 ms) and the modelled shaft follows write() (tests/samd21.timers.mts). Adafruit's SAMD core bundles its own Servo, which shadows the Arduino library."
         },
         {
           "source": "library:Servo",
           "targets": [
             "Seeeduino:samd:seeed_XIAO_m0"
           ],
-          "effect": "compiles-only",
-          "effectReason": "The SAMD21 Servo backend generates the pulse from a TC compare interrupt. The SAMD21 model runs its timers in normal PWM (analogWrite), not in the match-frequency mode with interrupts that Servo uses, so the pin never moves.",
-          "workaround": "analogWrite() works on these boards; for a servo, write the pulse directly (digitalWrite / delayMicroseconds), or use an AVR board."
+          "effect": "works",
+          "note": "Drives the pin from a TC compare interrupt, which the SAMD21 model runs on the simulated clock, so the pulse is real (544-2400 µs every 20 ms) and the modelled shaft follows write() (tests/samd21.timers.mts)."
         }
       ],
       "unavailable": [
