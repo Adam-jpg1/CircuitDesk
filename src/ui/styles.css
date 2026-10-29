@@ -1095,3 +1095,31 @@ input[type='checkbox'] { accent-color: var(--accent); }
 /* The serial input shrinks to fit beside its controls rather than pushing Clear off the screen. */
 .phone-pane .serial-input-row input { min-width: 0; }
 .phone-pane .serial-input-row { flex-wrap: nowrap; }
+
+@media (max-width: 760px) {
+  /* The secondary pages' headers (custom parts, import, about): brand and
+     page name on one line, the page's buttons wrapping onto the next. */
+  .dash-header:not(.site-header) { flex-wrap: wrap; padding: 10px 14px; gap: 8px; }
+  .dash-header:not(.site-header) .btn { flex: 1 1 auto; justify-content: center; }
+  .dash-brand { font-size: 16px; min-width: 0; flex-wrap: wrap; }
+  /* Back and brand fill the first row, so the page's buttons wrap below them. */
+  .dash-header:not(.site-header) .dash-brand { flex: 1 1 calc(100% - 60px); }
+  .dash-brand svg { flex-shrink: 0; }
+  .dash-brand .tagline { flex-basis: 100%; margin-left: 36px; }
+
+  /* Wide tables scroll inside themselves instead of running off the page. */
+  .dash-body .kv-table { display: block; overflow-x: auto; white-space: normal; }
+  .dash-body .kv-table td, .dash-body .kv-table th { min-width: 110px; }
+
+  /* Board Studio: the whole screen, one column, its checks below the step. */
+  .studio-backdrop { padding: 0; }
+  .studio { width: 100%; height: 100%; border-radius: 0; border: none; }
+  .studio-head { flex-wrap: wrap; padding: 12px 14px 8px; }
+  .studio-modes { margin-left: 0; width: 100%; }
+  .studio-body { flex-direction: column; overflow-y: auto; }
+  .studio-main { overflow: visible; padding: 12px 14px 16px; }
+  .studio-side { width: auto; border-left: none; border-top: 1px solid var(--border); overflow: visible; }
+  .studio-foot { flex-wrap: wrap; padding: 8px 14px calc(8px + env(safe-area-inset-bottom)); }
+  .studio-save { width: 100%; justify-content: stretch; }
+  .studio-save .btn { flex: 1 1 auto; }
+}
