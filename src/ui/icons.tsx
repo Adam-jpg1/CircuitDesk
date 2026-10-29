@@ -64,3 +64,5 @@ export const LayersIcon = (props: P) => <S {...props}><path d="M8 1.8l6.2 3.2L8 
 export const StarIcon = (props: P) => <S {...props}><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" fill="currentColor" stroke="none" /></S>;
 export const CopyIcon = (props: P) => <S {...props}><rect x="5" y="5" width="8.5" height="8.5" rx="1.5" /><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" /></S>;
 export const ShareIcon = (props: P) => <S {...props}><circle cx="12" cy="3.5" r="1.8" /><circle cx="4" cy="8" r="1.8" /><circle cx="12" cy="12.5" r="1.8" /><path d="M5.6 7.1l4.8-2.7M5.6 8.9l4.8 2.7" /></S>;
+export const SoundIcon = (props: P) => <S {...props}><path d="M2.5 6v4h2.5l3.5 3V3L5 6z" fill="currentColor" stroke="none" /><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12.3 3.6a6 6 0 0 1 0 8.8" /></S>;
+export const MutedIcon = (props: P) => <S {...props}><path d="M2.5 6v4h2.5l3.5 3V3L5 6z" fill="currentColor" stroke="none" /><path d="M10.5 6l3.5 4M14 6l-3.5 4" /></S>;

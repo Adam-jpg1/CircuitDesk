@@ -1,18 +1,22 @@
-// The ESP-01 AT modem, and the connection it refuses to fake.
+// The ESP-01 AT modem, the network it is really on, and the one it is not.
 //
-// Two things are being proved here, and the second is the important one.
+// Three things are proved here.
 //
 // The first: the AT modem is real. It parses commands, echoes them back the
 // way real firmware does, gates everything on CH_PD and RST as actual wires,
 // and joins a simulated access point only when the credentials match.
 //
-// The second: AT+CIPSTART FAILS. There is no network in this simulator — no
-// TCP, no DNS, no host — and a modem that answered CONNECT and OK would make a
-// sketch believe it had reached a server. The test asserts the failure, and
-// asserts the part says why, because the day someone "fixes" this by returning
-// success is the day the model starts lying to every sketch that uses it.
+// The second: ESP-01s on one canvas share a LAN, and TCP between them works —
+// a server listens, a client connects, bytes sent on one side arrive as +IPD
+// on the other, and closing either end closes both.
+//
+// The third: the internet does NOT exist. AT+CIPSTART to a host name or to an
+// address no module holds fails, and the part says why — a modem that
+// answered CONNECT to example.com would make a sketch believe it had reached a
+// server, and the day someone "fixes" that by returning success is the day
+// the model starts lying to every sketch that uses it.
 
-import { Esp01Device, DEFAULT_ACCESS_POINT } from '../src/simulation/devices/esp01';
+import { Esp01Device, Esp01Network, DEFAULT_ACCESS_POINT } from '../src/simulation/devices/esp01';
 import { simulationController } from '../src/simulation/simulationController';
 import { emptyProject } from '../src/project/templates';
 import { COMPONENT_DEFINITIONS } from '../src/components-library/definitions';
@@ -137,7 +141,7 @@ section('3. the association depends on the credentials');
 }
 
 // ================================ 4. the connection that must not be faked ===
-section('4. AT+CIPSTART fails, because there is nothing to connect to');
+section('4. AT+CIPSTART to the internet fails, because there is no internet');
 {
   const d = running();
   talk(d, 'ATE0');
@@ -156,7 +160,60 @@ section('4. AT+CIPSTART fails, because there is nothing to connect to');
 
   // The status line has to say this out loud, not bury it.
   const status = d.snapshot().status;
-  check(/refused/.test(status) && /no network/.test(status), `the inspector says why ("${status}")`);
+  check(/refused/.test(status) && /only modules on this canvas/.test(status), `the inspector says why ("${status}")`);
+  check(d.snapshot().log.some((l) => /no DNS and no route to the internet/.test(l)), 'and the log names the missing DNS and route');
+  const raw = talk(d, 'AT+CIPSTART="TCP","93.184.216.34",80');
+  check(raw.includes('ERROR') && !/CONNECT/.test(raw), 'an internet address fails too: nothing on the canvas holds it');
+}
+
+section('4b. two modules on one canvas talk TCP');
+{
+  const net = new Esp01Network();
+  const join = (index: number) => {
+    const d = running();
+    d.setNetwork(net, index);
+    talk(d, 'ATE0');
+    talk(d, `AT+CWJAP="${DEFAULT_ACCESS_POINT.ssid}","${DEFAULT_ACCESS_POINT.password}"`);
+    return d;
+  };
+  const server = join(0);
+  const client = join(1);
+  check(server.address === '192.168.4.2' && client.address === '192.168.4.3', `each has its own address (${server.address}, ${client.address})`);
+
+  check(talk(server, 'AT+CIPSERVER=1,80').includes('ERROR'), 'a server needs AT+CIPMUX=1 first, as on the real firmware');
+  talk(server, 'AT+CIPMUX=1');
+  check(talk(server, 'AT+CIPSERVER=1,80').trim() === 'OK', 'with it, the server listens on port 80');
+
+  const wrongPort = talk(client, 'AT+CIPSTART="TCP","192.168.4.2",81');
+  check(wrongPort.includes('ERROR') && !/CONNECT/.test(wrongPort), 'a port nobody listens on is refused');
+
+  const opened = talk(client, 'AT+CIPSTART="TCP","192.168.4.2",80');
+  check(/CONNECT[\s\S]*OK/.test(opened), `the client connects (${JSON.stringify(opened)})`);
+  check(String.fromCharCode(...server.takeBytesForBoard(0)).includes('0,CONNECT'), 'and the server sees link 0 connect');
+  check(talk(client, 'AT+CIPSTATUS').includes('STATUS:3'), 'the client reports a live connection');
+
+  const prompt = talk(client, 'AT+CIPSEND=5');
+  check(prompt.includes('OK') && prompt.endsWith('> '), 'AT+CIPSEND prompts for the payload');
+  for (const ch of 'hello') client.onByteFromBoard(ch.charCodeAt(0), 0);
+  const sent = String.fromCharCode(...client.takeBytesForBoard(0));
+  check(/Recv 5 bytes[\s\S]*SEND OK/.test(sent), 'the client is told the bytes went');
+  const got = String.fromCharCode(...server.takeBytesForBoard(0));
+  check(got.includes('+IPD,0,5:hello'), `the server receives them as +IPD on link 0 (${JSON.stringify(got)})`);
+
+  talk(server, 'AT+CIPSEND=0,2');
+  for (const ch of 'hi') server.onByteFromBoard(ch.charCodeAt(0), 0);
+  server.takeBytesForBoard(0);
+  check(String.fromCharCode(...client.takeBytesForBoard(0)).includes('+IPD,2:hi'), 'and the reply arrives at the client');
+
+  check(talk(server, 'AT+CIPCLOSE=0').includes('0,CLOSED'), 'the server hangs up');
+  check(String.fromCharCode(...client.takeBytesForBoard(0)).includes('CLOSED'), 'and the client sees the connection close');
+  check(client.openConnections === 0 && server.openConnections === 0, 'nothing is left open on either side');
+
+  const other = running();
+  other.setNetwork(net, 2);
+  talk(other, 'ATE0');
+  talk(other, 'AT+CWJAP="SomewhereElse","x"');
+  check(talk(client, 'AT+CIPSTART="TCP","192.168.4.4",80').includes('ERROR'), 'a module that never joined this AP cannot be reached');
 }
 
 // ========================== 5. through a real board, over a real wire ========
@@ -227,18 +284,18 @@ section('6. the ESP-01 in the library');
   const def = defOf('comp.esp01');
   check(def !== undefined, 'the ESP-01 is in the library');
   if (def) {
-    // Deliberately NOT badged Simulated: the thing the part exists to do —
-    // reach a network — does not work, and a Simulated badge would promise it.
-    check(def.supportLevel !== 'simulated', `not badged Simulated (${def.supportLevel})`);
-    check(/NO network/i.test(def.description ?? ''), 'the description says there is no network');
-    check(/AT\+CIPSTART/.test(def.description ?? ''), 'and names the command that fails');
+    // Simulated, with the limit stated: the LAN between canvas modules is
+    // real, and the description says plainly that the internet is not there.
+    check(def.supportLevel === 'simulated', `badged Simulated (${def.supportLevel})`);
+    check(/no internet/i.test(def.description ?? ''), 'the description says there is no internet behind it');
+    check(/AT\+CIPSTART/.test(def.description ?? ''), 'and names the socket commands');
     for (const key of ['ssid', 'password', 'baud']) {
       check(def.properties.some((pp) => pp.key === key), `it exposes ${key}`);
     }
   }
   const cov = COMPONENT_COVERAGE.find((c) => c.id === 'comp.esp01');
   check(cov?.status === 'behavioral', 'recorded as behavioural');
-  check((cov?.dependencies ?? []).includes('network-stack'), 'with network-stack as its blocker');
+  check(!(cov?.dependencies ?? []).includes('network-stack'), 'with the network no longer listed as a blocker');
   check((cov?.tests ?? []).includes('tests/uart.esp01.mts'), 'and names this file as its proof');
 }
 

@@ -58,7 +58,7 @@ import { Ws2812Device } from './devices/ws2812';
 import { UartLink, type UartPeripheral } from './devices/uartEndpoint';
 import { GpsNeo6mDevice } from './devices/gpsNeo6m';
 import { Hc05Device } from './devices/hc05';
-import { Esp01Device, DEFAULT_ACCESS_POINT } from './devices/esp01';
+import { Esp01Device, Esp01Network, DEFAULT_ACCESS_POINT } from './devices/esp01';
 import { IrMedium } from './devices/irMedium';
 import { RfMedium, RF_BAND } from './devices/rfMedium';
 import { Nrf24Device } from './devices/nrf24';
@@ -135,6 +135,12 @@ export interface NetLevel {
   sourcePin: number | null;
   seriesOhms: number;
   conflict: boolean;
+  /**
+   * The board pin whose high level is holding this net low through a
+   * switching transistor, when one is. A load on the far side of a transistor
+   * dims with that pin's PWM duty, not with its own pin's.
+   */
+  switchedBy?: number | null;
 }
 
 export interface DisplayVisual {
@@ -543,6 +549,24 @@ export const UART_DEVICE_PARTS: Record<
   'comp.esp01': { tx: 'tx', rx: 'rx', create: (id, baud) => new Esp01Device(id, baud) },
 };
 
+
+/**
+ * Transistors used as switches, by part.
+ *
+ * `onVolts` is what the control pin needs above the common one: a junction
+ * drop for a BJT, a little over the gate threshold for a logic-level MOSFET
+ * (the IRLZ44N's is 1-2 V, so 3.3 V and 5 V boards both drive it fully).
+ * `saturationVolts` is what is left across it when on — a 2N2222's VCE(sat),
+ * a MOSFET's milliohms of RDS(on) rounding to nothing.
+ */
+const SWITCHING_TRANSISTORS: Record<
+  string,
+  { control: string; output: string; common: string; onVolts: number; saturationVolts: number; onOhms: number }
+> = {
+  'comp.transistor-npn': { control: 'base', output: 'collector', common: 'emitter', onVolts: 0.6, saturationVolts: 0.2, onOhms: 1 },
+  'comp.mosfet': { control: 'gate', output: 'drain', common: 'source', onVolts: 2.0, saturationVolts: 0, onOhms: 0.5 },
+};
+
 const RELAY_PARTS: Record<string, { coil: string; coilReturn: string; pullInVolts: number }> = {
   'comp.relay': { coil: 'in', coilReturn: 'gnd', pullInVolts: 2.5 },
   'comp.relay-dpdt': { coil: 'in', coilReturn: 'gnd', pullInVolts: 2.5 },
@@ -720,7 +744,22 @@ interface ConductiveEdge {
   ohms: number;
   kind: 'resistor' | 'switch' | 'pot' | 'diode' | 'channel';
   enabled: (controls: SimControls) => boolean;
+  /**
+   * What reaches the other end, for an element that is not a plain conductor.
+   *
+   * Given the level on the side it comes from and whatever the far side
+   * already holds, returns the level it imposes there — or null when it
+   * imposes nothing (a reverse-biased diode, an unpowered level shifter).
+   * `toB` is the direction: a to b, or b to a. Absent, the level is copied
+   * through with the edge's resistance added.
+   */
+  transfer?: (from: NetLevel, existing: NetLevel | undefined, toB: boolean, levels: Map<string, NetLevel>) => { volts: number; ohms: number } | null;
 }
+
+/** A silicon diode's forward drop. */
+const DIODE_DROP_VOLTS = 0.7;
+/** The pull-ups on a BSS138 level-shifter board, which are what make its highs. */
+const LEVEL_SHIFTER_PULLUP_OHMS = 10_000;
 
 interface UltrasonicState {
   trigPin: number | null;
@@ -1659,14 +1698,60 @@ export class CircuitBinding {
           break;
         }
         case 'comp.diode': {
+          // One way only. Forward, the anode lifts the cathode to a drop below
+          // itself; it can never pull it down. Backward, a low cathode pulls
+          // the anode down to a drop above it — which is how a diode-isolated
+          // keypad or a diode-OR reads — and a high cathode does nothing,
+          // because that is reverse bias.
           const [a, b] = [net('anode'), net('cathode')];
-          if (a && b) this.edges.push({ a, b, ohms: 1, kind: 'diode', enabled: () => true });
+          if (a && b)
+            this.edges.push({
+              a,
+              b,
+              ohms: 1,
+              kind: 'diode',
+              enabled: () => true,
+              transfer: (from, existing, toB) => {
+                if (from.volts == null) return null;
+                const volts = toB ? from.volts - DIODE_DROP_VOLTS : from.volts + DIODE_DROP_VOLTS;
+                if (toB && volts <= 0) return null;
+                // Backward onto a wire nothing else holds, only a clear low
+                // pulls it: a high cathode is reverse bias and lifts nothing.
+                if (!toB && existing?.volts == null && from.volts >= 1) return null;
+                if (existing?.volts != null && (toB ? existing.volts >= volts : existing.volts <= volts)) return null;
+                return { volts, ohms: from.seriesOhms + 1 };
+              },
+            });
           break;
         }
         case 'comp.level-converter': {
+          // A BSS138 channel per pair. A low on either side is passed through
+          // the FET; a high is the far side's own pull-up to its own rail. So
+          // 5 V logic arrives as 3.3 V and 3.3 V logic as 5 V, and a channel
+          // whose rails are not both powered passes nothing at all.
+          const hvRail = net('hv');
+          const lvRail = net('lv');
+          const rail = (levels: Map<string, NetLevel>, id: string | undefined) => (id ? levels.get(id)?.volts ?? null : null);
           for (const [h, l] of [['hv1', 'lv1'], ['hv2', 'lv2']] as const) {
             const [a, b] = [net(h), net(l)];
-            if (a && b) this.edges.push({ a, b, ohms: 0, kind: 'channel', enabled: () => true });
+            if (!a || !b) continue;
+            this.edges.push({
+              a,
+              b,
+              ohms: 0,
+              kind: 'channel',
+              enabled: () => true,
+              transfer: (from, _existing, toLv, levels) => {
+                const hv = rail(levels, hvRail);
+                const lv = rail(levels, lvRail);
+                if (from.volts == null || hv == null || lv == null || hv < 1 || lv < 1) return null;
+                const fromRail = toLv ? hv : lv;
+                const high = from.volts >= fromRail / 2;
+                return high
+                  ? { volts: toLv ? lv : hv, ohms: LEVEL_SHIFTER_PULLUP_OHMS }
+                  : { volts: 0, ohms: from.seriesOhms + 5 };
+              },
+            });
           }
           break;
         }
@@ -2400,6 +2485,12 @@ export class CircuitBinding {
     this.pwmLastMs = now;
   }
 
+  /** The frequency a pin is toggling at, from its averaged edge rate. */
+  private pinFrequency(pin: number): number {
+    const avg = this.pwmAverage[pin];
+    return avg ? avg.edgesPerS / 2 : 0;
+  }
+
   /** A pin's averaged duty while it is switching like PWM; undefined otherwise. */
   private pwmDuty(pin: number): number | undefined {
     const avg = this.pwmAverage[pin];
@@ -2409,6 +2500,14 @@ export class CircuitBinding {
   /** Serial-out taps, keyed by runner, so a re-bind cannot stack them. */
   private serialTaps = new Map<BoardRunner, () => void>();
   private portTaps = new Map<UartPort, () => void>();
+
+  /** The network every ESP-01 on this canvas shares. */
+  private readonly esp01Network = new Esp01Network();
+  private esp01Index(instanceId: string): number {
+    return this.graph.instances
+      .filter((i) => this.graph.definitions.get(i.id)?.id === 'comp.esp01')
+      .findIndex((i) => i.id === instanceId);
+  }
 
   /** The baud last pushed from a part's property, so AT+UART= is not undone. */
   private appliedUartBaud = new Map<string, number>();
@@ -2569,6 +2668,8 @@ export class CircuitBinding {
    * genuinely does.
    */
   private energisedRelays = new Set<string>();
+  /** Switching transistors conducting on the last update, for the artwork and inspector. */
+  private transistorsOn = new Set<string>();
 
   /**
    * Motors, steppers and drivers, kept across re-binds.
@@ -2671,7 +2772,15 @@ export class CircuitBinding {
             this.encoders.set(inst.id, new QuadratureEncoder(motorSpec.encoderPpr));
           }
         }
-        motor.update(voltsOn(inst.id, motorSpec.plus), voltsOn(inst.id, motorSpec.minus), nowMs);
+        // A motor switched on its low side by a transistor under PWM sees the
+        // supply for the duty's share of every period: it runs at the average.
+        let plus = voltsOn(inst.id, motorSpec.plus);
+        const minus = voltsOn(inst.id, motorSpec.minus);
+        const minusNet = this.netOfInstancePin(inst.id, motorSpec.minus);
+        const switchPin = minusNet ? levels.get(minusNet)?.switchedBy : null;
+        const d = switchPin != null ? this.pwmDuty(switchPin) : undefined;
+        if (d !== undefined && plus != null && minus != null) plus = minus + (plus - minus) * d;
+        motor.update(plus, minus, nowMs);
         continue;
       }
 
@@ -2704,6 +2813,67 @@ export class CircuitBinding {
         driver.setStep(isHigh(inst.id, 'step'));
       }
     }
+  }
+
+  /** Volts across each capacitor, by instance, carried from one update to the next. */
+  private capacitorVolts = new Map<string, number>();
+  private capacitorLastMs: number | null = null;
+
+  /**
+   * Capacitors, charged and discharged through whatever drives them.
+   *
+   * A first-order model, which is the one that matters on a breadboard: each
+   * capacitor sees the level the rest of the circuit would put on its +
+   * terminal, and the resistance behind that level, and moves toward it with
+   * the time constant R·C. Fed from a pin through 10 kΩ, a 100 µF part takes a
+   * second to charge; fed from PWM through a resistor, it settles at the
+   * duty's average — the RC filter that turns analogWrite into a voltage. With
+   * nothing driving it, it holds its charge. While charged, its + terminal is
+   * a source like any other, so an analog pin on it reads the curve.
+   *
+   * Not modelled: discharge into a load that is not resistive (an LED or a
+   * motor run off a capacitor alone), leakage, ESR and polarity damage.
+   * Returns the nets it drove.
+   */
+  private settleCapacitors(levels: Map<string, NetLevel>, propagateOn: (levels: Map<string, NetLevel>) => void): string[] {
+    const caps = this.graph.instances.filter((i) => this.graph.definitions.get(i.id)?.id === 'comp.capacitor');
+    if (caps.length === 0) return [];
+    const nowMs = this.runner?.timeMs ?? 0;
+    const dtMs = this.capacitorLastMs === null || nowMs < this.capacitorLastMs ? 0 : nowMs - this.capacitorLastMs;
+    this.capacitorLastMs = nowMs;
+
+    // What the circuit would do with every capacitor taken out.
+    const probe = new Map<string, NetLevel>();
+    for (const [k, v] of levels) probe.set(k, { ...v });
+    propagateOn(probe);
+
+    const pinHigh = Number(this.boardDef?.metadata.logicVoltage ?? 5);
+    const driven: string[] = [];
+    for (const inst of caps) {
+      const plusNet = this.netOfInstancePin(inst.id, 'plus');
+      const minusNet = this.netOfInstancePin(inst.id, 'minus');
+      if (!plusNet || !minusNet) continue;
+      const minus = probe.get(minusNet)?.volts;
+      if (minus == null) continue; // a floating terminal: no circuit to charge through
+      const farads = Math.max(1e-12, Number(inst.properties.capacitance ?? 100) * 1e-6);
+      let vc = this.capacitorVolts.get(inst.id) ?? 0;
+      const source = probe.get(plusNet);
+      if (source?.volts != null && dtMs > 0) {
+        // PWM is averaged: the capacitor is what does the averaging.
+        const duty = source.sourcePin != null && this.runner?.isOutput(source.sourcePin) ? this.pwmDuty(source.sourcePin) : undefined;
+        const target = (duty !== undefined ? duty * pinHigh : source.volts) - minus;
+        // A pin's own output resistance is the floor: nothing charges instantly.
+        const tauMs = Math.max(25, source.seriesOhms) * farads * 1000;
+        vc += (target - vc) * (1 - Math.exp(-dtMs / tauMs));
+      }
+      this.capacitorVolts.set(inst.id, vc);
+      const existing = levels.get(plusNet);
+      // A stiff driver right on the terminal wins; the capacitor follows it.
+      if (existing?.volts != null && existing.seriesOhms === 0) continue;
+      levels.set(plusNet, { volts: minus + vc, sourcePin: null, seriesOhms: 0.1, conflict: false });
+      driven.push(plusNet);
+    }
+    return driven;
   }
 
   /** Creates a device per logic-part instance on the canvas. */
@@ -3065,13 +3235,30 @@ export class CircuitBinding {
     }
 
     // Propagate through conductive elements to a fixpoint (bounded iterations).
-    const propagate = () => {
+    const propagateOn = (levels: Map<string, NetLevel>) => {
       for (let iter = 0; iter < 12; iter++) {
         let changed = false;
         for (const edge of this.edges) {
           if (!edge.enabled(controls)) continue;
           const la = levels.get(edge.a);
           const lb = levels.get(edge.b);
+          if (edge.transfer) {
+            // Both directions are offered; an element that only conducts one
+            // way says so by returning null. What it imposes replaces a
+            // weaker level already there, the way a stiff driver beats a
+            // pull-up on a real wire.
+            for (const [from, to, toB] of [[la, edge.b, true], [lb, edge.a, false]] as const) {
+              if (from?.volts == null) continue;
+              const existing = levels.get(to);
+              const got = edge.transfer(from, existing, toB, levels);
+              if (!got) continue;
+              const weaker = existing?.volts == null || got.ohms < existing.seriesOhms;
+              if (!weaker || (existing?.volts === got.volts && existing.seriesOhms === got.ohms)) continue;
+              levels.set(to, { volts: got.volts, sourcePin: from.sourcePin, seriesOhms: got.ohms, conflict: false });
+              changed = true;
+            }
+            continue;
+          }
           if (la?.volts != null && (lb?.volts == null)) {
             levels.set(edge.b, { volts: la.volts, sourcePin: la.sourcePin, seriesOhms: la.seriesOhms + edge.ohms, conflict: false });
             changed = true;
@@ -3083,6 +3270,8 @@ export class CircuitBinding {
         if (!changed) break;
       }
     };
+    const propagate = () => propagateOn(levels);
+    const capacitorNets = this.settleCapacitors(levels, propagateOn);
     propagate();
 
     // Devices that drive their own output pins (a 74HC595's Q0-Q7) act as
@@ -3120,7 +3309,8 @@ export class CircuitBinding {
     // Devices that drive their own output pins (a 74HC595's Q0-Q7, an MCP4725's
     // VOUT) act as sources on top of the MCU's pins, so their nets are seeded
     // and the graph is settled a second time.
-    const drivenNets = new Set<string>();
+    // A capacitor's voltage is a source an analog pin can read.
+    const drivenNets = new Set<string>(capacitorNets);
     const driveOutputs = (device: { instanceId: string; analogOut(pinId: string): number | null }, pinIds: readonly string[]) => {
       for (const pinId of pinIds) {
         const volts = device.analogOut(pinId);
@@ -3250,6 +3440,37 @@ export class CircuitBinding {
       }
     }
 
+    // Discrete transistors as low-side switches: an NPN with its base a
+    // junction drop above its emitter, or a logic-level MOSFET with its gate
+    // past threshold, pulls its collector or drain down to its emitter or
+    // source. That is what lets a 20 mA pin run a motor, a relay coil or a
+    // 12 V strip. The emitter or source has to be tied to something — a
+    // transistor with a floating emitter switches nothing — and a base or
+    // gate driven with PWM switches at that duty, which is what a load on
+    // the far side is then fed at.
+    this.transistorsOn.clear();
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      const spec = def ? SWITCHING_TRANSISTORS[def.id] : undefined;
+      if (!spec) continue;
+      const outNet = this.netOfInstancePin(inst.id, spec.output);
+      const commonNet = this.netOfInstancePin(inst.id, spec.common);
+      const common = commonNet ? levels.get(commonNet)?.volts : undefined;
+      if (!outNet || common == null) continue;
+      const controlNet = this.netOfInstancePin(inst.id, spec.control);
+      const control = controlNet ? levels.get(controlNet) : undefined;
+      const pwmPin = control?.sourcePin != null && runner?.isOutput(control.sourcePin) && this.pwmDuty(control.sourcePin) !== undefined
+        ? control.sourcePin
+        : null;
+      const on = pwmPin !== null || (control?.volts != null && control.volts - common >= spec.onVolts);
+      if (!on) continue;
+      this.transistorsOn.add(inst.id);
+      setLevel(outNet, common + spec.saturationVolts, null, spec.onOhms);
+      const level = levels.get(outNet);
+      if (level && level.volts === common + spec.saturationVolts) level.switchedBy = pwmPin;
+      drivenNets.add(outNet);
+    }
+
     // Digital sensors drive their one output line here, with the other line
     // drivers, so the level is on the net before board inputs are resolved.
     // It used to be driven in the per-part pass further down, which runs after
@@ -3359,6 +3580,8 @@ export class CircuitBinding {
       } else if (device instanceof DfPlayerDevice) {
         device.setTrackCount(Number(inst.properties.trackCount ?? 10));
       } else if (device instanceof Esp01Device) {
+        // On the canvas's LAN, at an address fixed by canvas order.
+        device.setNetwork(this.esp01Network, this.esp01Index(inst.id));
         // CH_PD high and RST released, both read from the solved circuit. A
         // floating CH_PD is the classic ESP-01 fault and it behaves like one.
         const chpdNet = this.netOfInstancePin(inst.id, 'ch_pd');
@@ -3575,8 +3798,12 @@ export class CircuitBinding {
             onNow ||
             (pwmDutyHere !== undefined && cathode?.volts != null && pinHighVolts - cathode.volts >= fV - 0.4);
           let brightness = on ? 1 : 0;
+          const sinkDuty = pwm(cathode?.switchedBy);
           if (on && pwmDutyHere !== undefined) {
             brightness = pwmDutyHere;
+          } else if (on && sinkDuty !== undefined) {
+            // Switched on its low side by a transistor whose base is PWM.
+            brightness = sinkDuty;
           } else if (on && duty && anode?.sourcePin != null && runner?.isOutput(anode.sourcePin)) {
             brightness = duty.duty[anode.sourcePin];
           }
@@ -3694,6 +3921,23 @@ export class CircuitBinding {
             level = duty.duty[plus.sourcePin];
           }
           visuals.set(inst.id, { buzzerOn: on && level > 0.02 });
+          break;
+        }
+        case 'sim.speaker': {
+          // A speaker is driven by tone(): a square wave whose frequency is
+          // the note. The frequency comes from the pin's measured edge rate,
+          // directly or through a transistor switching it.
+          const plus = levelOf(net('plus'));
+          const minus = levelOf(net('minus'));
+          const drivePin = plus?.sourcePin ?? minus?.switchedBy ?? minus?.sourcePin ?? null;
+          const hz = drivePin != null && runner?.isOutput(drivePin) ? this.pinFrequency(drivePin) : 0;
+          const across = plus?.volts != null && minus?.volts != null;
+          const sounding = across && hz >= 20 && hz <= 20_000;
+          visuals.set(inst.id, {
+            buzzerOn: sounding,
+            value: sounding ? hz : 0,
+            readout: [sounding ? `${Math.round(hz)} Hz` : 'silent'],
+          });
           break;
         }
         case 'sim.servo': {
@@ -3853,7 +4097,8 @@ export class CircuitBinding {
             const outNet = net(spec.outputPin);
             const channel = outNet ? this.netAdcChannels.get(outNet)?.[0] : undefined;
             if (channel !== undefined) {
-              runner.setAnalogVolts(channel, Math.min(supply, Math.max(0, spec.volts(value, supply))));
+              const volts = spec.voltsAt ? spec.voltsAt(value, supply, runner.timeMs) : spec.volts(value, supply);
+              runner.setAnalogVolts(channel, Math.min(supply, Math.max(0, volts)));
             }
           }
           break;
@@ -4232,6 +4477,12 @@ export class CircuitBinding {
           break;
         }
         default: {
+          if (SWITCHING_TRANSISTORS[def.id]) {
+            visuals.set(inst.id, { on: this.transistorsOn.has(inst.id), readout: [this.transistorsOn.has(inst.id) ? 'conducting' : 'off'] });
+          } else if (def.id === 'comp.capacitor') {
+            const vc = this.capacitorVolts.get(inst.id);
+            visuals.set(inst.id, { readout: vc === undefined ? [] : [`${vc.toFixed(2)} V`], value: vc ?? 0 });
+          }
           if (def.id === 'comp.relay') {
             const inLevel = levelOf(net('in'));
             visuals.set(inst.id, { coilOn: inLevel?.volts != null && inLevel.volts >= 2.5 });

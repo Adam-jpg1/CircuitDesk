@@ -43,6 +43,11 @@ export interface AnalogSensorSpec {
    * that ignored that would read a third high on every ESP32 project.
    */
   volts(value: number, supply: number): number;
+  /**
+   * Volts at a moment, for a sensor whose output is a waveform rather than a
+   * level. Takes precedence over `volts` when present.
+   */
+  voltsAt?(value: number, supply: number, timeMs: number): number;
   /** One line for the inspector, describing what is and is not modelled. */
   note: string;
 }
@@ -66,7 +71,34 @@ export function ntcResistance(celsius: number, r25 = 10_000, beta = 3950): numbe
   return r25 * Math.exp(beta * (1 / kelvin - 1 / 298.15));
 }
 
+/**
+ * One heartbeat as an optical pulse sensor sees it, as a fraction of supply.
+ *
+ * The shape of a photoplethysmogram: a sharp systolic upstroke, a slower
+ * fall, the small dicrotic bump as the aortic valve closes, and a slight
+ * undershoot before the next beat — riding on a baseline at half supply,
+ * which is where the PulseSensor's amplifier centres its output. `phase` runs
+ * 0..1 over one beat.
+ */
+export function pulseWaveform(phase: number): number {
+  const bump = (centre: number, width: number) => Math.exp(-(((phase - centre) / width) ** 2));
+  return 0.5 + 0.26 * bump(0.12, 0.045) + 0.07 * bump(0.34, 0.05) - 0.04 * bump(0.6, 0.12);
+}
+
 export const ANALOG_SENSORS: Record<string, AnalogSensorSpec> = {
+  'comp.pulse-sensor': {
+    id: 'comp.pulse-sensor',
+    outputPin: 'sig',
+    quantity: { key: 'bpm', label: 'Heart rate', unit: 'BPM', min: 30, max: 200, default: 72, precision: 0 },
+    volts: (_bpm, supply) => supply * 0.5,
+    voltsAt: (bpm, supply, timeMs) => {
+      const periodMs = 60_000 / Math.max(1, bpm);
+      return supply * pulseWaveform((timeMs % periodMs) / periodMs);
+    },
+    note:
+      'A heartbeat waveform at the rate set here: baseline at half supply, a systolic peak about a quarter of supply above it, and the dicrotic notch. ' +
+      'The PulseSensor library finds the beats in it and reports the BPM back. No finger, motion or ambient-light artefacts.',
+  },
   'comp.lm35': {
     id: 'comp.lm35',
     outputPin: 'vout',

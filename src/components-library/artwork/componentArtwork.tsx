@@ -2080,10 +2080,10 @@ function MosfetArt({ def }: ArtProps) {
 // ----------------------------------------------------------------- speaker
 //
 // A cone driver seen face on: outer rim, surround, cone, dust cap, and two
-// terminals at the pins. No state — the speaker is a validation-level part and
-// nothing in the simulation reports whether it is sounding, so nothing here
-// pretends it does.
-function SpeakerArt({ def }: ArtProps) {
+// terminals at the pins. While the pin driving it is really toggling at an
+// audible rate, sound waves and the note's frequency are drawn beside it.
+function SpeakerArt({ def, visual }: ArtProps) {
+  const on = Boolean(visual?.buzzerOn);
   const W = def.widthMm * MM;
   const H = def.heightMm * MM;
   const cx = W / 2;
@@ -2105,6 +2105,15 @@ function SpeakerArt({ def }: ArtProps) {
       <circle cx={cx} cy={cy} r={r * 0.26} fill="#39414a" stroke="#191d22" />
       <circle cx={cx - r * 0.1} cy={cy - r * 0.11} r={r * 0.11} fill="rgba(255,255,255,0.16)" />
       <Marking x={7 * MM} y={cy + r * 0.98} text="+" size={5} fill="rgba(255,255,255,0.6)" />
+      {on && (
+        <g stroke="#e8c35a" strokeWidth="1.4" fill="none" opacity="0.9">
+          <path d={`M ${cx + r + 3} ${cy - r * 0.45} a ${r} ${r} 0 0 1 0 ${r * 0.9}`} />
+          <path d={`M ${cx + r + 8} ${cy - r * 0.7} a ${r * 1.4} ${r * 1.4} 0 0 1 0 ${r * 1.4}`} />
+          <text x={cx} y={cy - r - 3} fontSize="6" fill="#e8c35a" stroke="none" textAnchor="middle">
+            {Math.round(visual?.value ?? 0)} Hz
+          </text>
+        </g>
+      )}
     </g>
   );
 }

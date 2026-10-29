@@ -345,6 +345,22 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
           State: <b>{visuals?.buzzerOn ? 'sounding' : 'silent'}</b>
         </div>
       )}
+      {adapter === 'sim.speaker' && (
+        <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
+          Playing: <b>{visuals?.buzzerOn ? `${Math.round(visuals.value ?? 0)} Hz` : 'silent'}</b> — measured from the pin
+          driving it.
+        </div>
+      )}
+      {adapter === 'sim.capacitor' && visuals?.readout?.length ? (
+        <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
+          Charged to: <b>{visuals.readout[0]}</b>
+        </div>
+      ) : null}
+      {adapter === 'sim.transistor' && visuals?.readout?.length ? (
+        <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
+          State: <b>{visuals.readout[0]}</b>
+        </div>
+      ) : null}
       {(adapter === 'sim.hc595' || adapter === 'sim.sd-card' || adapter === 'sim.spi-flash') && (
         <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
           {visuals?.readout?.length ? (

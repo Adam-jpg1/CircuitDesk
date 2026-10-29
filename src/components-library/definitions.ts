@@ -150,32 +150,33 @@ export const RESISTOR = def(
 export const CAPACITOR = def(
   'comp.capacitor', 'Capacitor (electrolytic)', 'Basic', 6, 10, 'capacitor',
   [pin('plus', '+', 1.5, 9.6, { type: 'anode' }), pin('minus', '−', 4.5, 9.6, { type: 'cathode' })],
-  'validation',
+  'simulated',
   {
-    properties: [prop('capacitance', 'Capacitance', 'number', 100, { unit: 'µF' })],
-    description: 'Electrolytic capacitor. Validation-level: polarity and rail rules are checked, but transient charge/discharge is not simulated (no analog engine yet).',
+    properties: [prop('capacitance', 'Capacitance', 'number', 100, { unit: 'µF', min: 0.000001, max: 100_000 })],
+    simulationAdapterId: 'sim.capacitor',
+    description: 'Electrolytic capacitor. Charges and discharges through whatever drives it with the time constant R·C, holds its charge when nothing does, and averages PWM into a steady voltage an analog pin can read. Polarity and rail rules are checked.',
   },
 );
 
 export const DIODE = def(
   'comp.diode', 'Diode (1N4007)', 'Basic', 10, 3.6, 'diode',
   [pin('anode', 'Anode', 0.4, 1.8, { type: 'anode' }), pin('cathode', 'Cathode', 9.6, 1.8, { type: 'cathode' })],
-  'validation',
-  { description: 'Rectifier diode. Validation-level: used for polarity and flyback checks; conduction is modeled directionally in the digital circuit graph.' },
+  'simulated',
+  { simulationAdapterId: 'sim.diode', description: 'Rectifier diode. Conducts one way with a 0.7 V drop: forward it lifts the cathode, backward a low cathode pulls the anode down, and reverse bias passes nothing. Used for polarity and flyback checks too.' },
 );
 
 export const TRANSISTOR_NPN = def(
   'comp.transistor-npn', 'NPN Transistor (2N2222)', 'Basic', 6, 6, 'transistor',
   [pin('emitter', 'Emitter', 0.8, 5.6), pin('base', 'Base', 3.0, 5.6), pin('collector', 'Collector', 5.2, 5.6)],
-  'validation',
-  { description: 'NPN BJT. Validation-level: wiring rules only. Switching behavior needs the future analog engine and is not claimed as simulated.' },
+  'simulated',
+  { simulationAdapterId: 'sim.transistor', description: 'NPN BJT as a switch. With its base 0.6 V above its emitter (through a base resistor from a pin) it pulls its collector down to the emitter, so a pin can switch an LED, relay, buzzer or motor. PWM on the base switches the load at that duty.' },
 );
 
 export const MOSFET = def(
   'comp.mosfet', 'N-MOSFET (IRLZ44N)', 'Basic', 10, 9, 'mosfet',
   [pin('gate', 'Gate', 1.7, 8.6), pin('drain', 'Drain', 5.0, 8.6), pin('source', 'Source', 8.3, 8.6)],
-  'validation',
-  { description: 'Logic-level N-channel MOSFET. Validation-level only until the analog engine exists.' },
+  'simulated',
+  { simulationAdapterId: 'sim.transistor', description: 'Logic-level N-channel MOSFET as a switch. With its gate 2 V or more above its source it connects drain to source, so 3.3 V and 5 V pins both switch it fully. PWM on the gate dims or slows the load at that duty.' },
 );
 
 // ---------- Inputs ----------
@@ -233,8 +234,8 @@ export const BUZZER = def(
 export const SPEAKER = def(
   'comp.speaker', 'Speaker (8 Ω)', 'Output', 20, 20, 'speaker',
   [pin('plus', '+', 7.0, 19.6), pin('minus', '−', 13.0, 19.6)],
-  'validation',
-  { description: 'Small speaker. Validation-level: audio waveform synthesis from PWM is not simulated.' },
+  'simulated',
+  { simulationAdapterId: 'sim.speaker', description: 'Small speaker, driven by tone(). Shows and plays the note at the frequency the pin is really toggling, directly or through a transistor; silent when noTone() stops it.' },
 );
 
 export const RELAY = def(
@@ -1248,8 +1249,8 @@ export const PULSE_SENSOR = def(
     pin('vcc', 'VCC', 8.0, 15.6, { type: 'power-3v3', caps: ['power'], voltage: 3.3 }),
     pin('gnd', 'GND', 12.0, 15.6, { type: 'ground', caps: ['ground'] }),
   ],
-  'validation',
-  { description: 'Optical pulse sensor. Validation-level: waveform generation is not simulated yet.' },
+  'simulated',
+  { properties: [prop('bpm', 'Heart rate', 'number', 72, { unit: 'BPM', min: 30, max: 200 })], simulationAdapterId: 'sim.analog-sensor', description: 'Optical pulse sensor. Puts a heartbeat waveform at the heart rate you set on its signal pin, which the board reads with analogRead() and the PulseSensor library turns back into BPM.' },
 );
 
 export const MPU6050 = def(
@@ -1343,7 +1344,7 @@ export const WIFI_ESP01 = def(
     pin('rst', 'RST', 8.5, 21.2, { type: 'reset', voltage: 3.3 }),
     pin('vcc', 'VCC', 11.0, 21.2, { type: 'power-3v3', caps: ['power'], voltage: 3.3 }),
   ],
-  'validation',
+  'simulated',
   {
     simulationAdapterId: 'sim.esp01',
     validationRules: ['voltage-level', 'uart-pins'],
@@ -1358,11 +1359,11 @@ export const WIFI_ESP01 = def(
       'AT+GMR, AT+CWMODE, AT+CWLAP, AT+CWJAP with the simulated SSID and password set on this part, ' +
       'AT+CWQAP, AT+CIFSR, AT+CIPMUX, AT+CIPSTATUS and ERROR for anything else. CH_PD must be high and RST ' +
       'released or the module answers nothing at all, which is the fault most ESP-01 wiring actually has. ' +
-      'There is NO network: no TCP, no UDP, no DNS, no HTTP, no packets and no host to reach, so AT+CIPSTART ' +
-      'FAILS with ERROR and CLOSED instead of reporting a connection that does not exist — a canned success ' +
-      'would make a sketch look like it had posted to a server when it had done nothing. AT+CWLAP lists only ' +
-      'the one simulated access point; nothing scans a real radio or a host network. Needs a board with a ' +
-      'modelled UART: the ESP32-C3 and C6 have none yet.',
+      'Every ESP-01 on the canvas joined to the same access point is on one simulated LAN (192.168.4.2, .3, …, ' +
+      'in canvas order) and they talk TCP to each other: AT+CIPSERVER, AT+CIPSTART, AT+CIPSEND, +IPD and ' +
+      'AT+CIPCLOSE, single or multiplexed. There is no internet behind it: a host name or an address no module ' +
+      'holds fails with DNS Fail or ERROR and CLOSED rather than pretending to connect. UDP and SSL are not ' +
+      'simulated. Nothing scans a real radio or touches a host network.',
   },
 );
 
@@ -1656,8 +1657,8 @@ export const LEVEL_CONVERTER = def(
     pin('lv1', 'LV1', 6.0, 15.4, { voltage: 3.3 }), pin('lv2', 'LV2', 10.0, 15.4, { voltage: 3.3 }),
     pin('gnd_l', 'GND', 14.0, 15.4, { type: 'ground', caps: ['ground'] }),
   ],
-  'validation',
-  { internalGroups: { gnd_h: 'gnd', gnd_l: 'gnd' }, description: 'Bidirectional level shifter. Validation-level: legitimizes 5 V↔3.3 V connections through its channels.' },
+  'simulated',
+  { internalGroups: { gnd_h: 'gnd', gnd_l: 'gnd' }, simulationAdapterId: 'sim.level-converter', description: 'Bidirectional BSS138 level shifter. Each channel passes a low straight through and makes a high from the far side\'s own rail, so 5 V logic arrives as 3.3 V and back. Both HV and LV must be powered.' },
 );
 
 export const GENERIC_IC = def(

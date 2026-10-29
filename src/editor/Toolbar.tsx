@@ -7,8 +7,9 @@ import { navigate, Modal, toast } from '../ui/primitives';
 import {
   BackIcon, CheckShieldIcon, CursorIcon, ExportIcon, FitIcon, HammerIcon, LogoIcon, PanIcon,
   PauseIcon, PlayIcon, RedoIcon, ResetIcon, RotateIcon, StepIcon, StopIcon, TrashIcon,
-  UndoIcon, WireIcon, ZoomInIcon, ZoomOutIcon,
+  UndoIcon, WireIcon, ZoomInIcon, ZoomOutIcon, SoundIcon, MutedIcon,
 } from '../ui/icons';
+import { useSoundSetting } from '../simulation/simAudio';
 import {
   exportProjectJson, exportProjectZip, buildBomCsv, buildPinMapCsv, buildWiringReport,
   buildValidationReport, exportBoardDefinition, exportProjectImage,
@@ -28,6 +29,8 @@ export function Toolbar({ phone = false }: { phone?: boolean }) {
   const simStatus = useSimulationStore((s) => s.status);
   const [exportOpen, setExportOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const soundOn = useSoundSetting((x) => x.on);
+  const toggleSound = useSoundSetting((x) => x.toggle);
 
   if (!project) return null;
   const s = useEditorStore.getState();
@@ -50,6 +53,7 @@ export function Toolbar({ phone = false }: { phone?: boolean }) {
       { label: 'Redo', disabled: redoDepth === 0, run: () => s.redo() },
       { label: 'Zoom in', run: () => zoomBy(1.2) },
       { label: 'Zoom out', run: () => zoomBy(1 / 1.2) },
+      { label: soundOn ? 'Sound off' : 'Sound on', run: toggleSound },
       { label: 'Export…', run: () => setExportOpen(true) },
     ];
     return (
@@ -158,6 +162,9 @@ export function Toolbar({ phone = false }: { phone?: boolean }) {
       <button className="icon-btn" title="Step ~1 ms of CPU time" disabled={simStatus === 'stopped' || simStatus === 'error'} onClick={() => simulationController.step()}><StepIcon /></button>
       <button className="icon-btn" title="Reset — every board and part goes back to how it was before Run, and the sketch starts again" disabled={!simulationController.hasFirmware} onClick={() => void simulationController.reset()}><ResetIcon /></button>
       <button className="icon-btn" title="Stop simulation" disabled={simStatus === 'stopped'} onClick={() => simulationController.stop()}><StopIcon /></button>
+      <button className="icon-btn" title={soundOn ? 'Sound on — speakers and buzzers play. Click to mute' : 'Sound off. Click to hear speakers and buzzers'} aria-label={soundOn ? 'Mute' : 'Unmute'} onClick={toggleSound}>
+        {soundOn ? <SoundIcon /> : <MutedIcon />}
+      </button>
 
       <div style={{ flex: 1 }} />
       <button className="btn sm" onClick={() => setExportOpen(true)}>

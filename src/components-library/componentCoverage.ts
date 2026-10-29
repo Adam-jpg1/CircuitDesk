@@ -166,11 +166,11 @@ const PROTOTYPING: CoverageEntry[] = [
 // --------------------------------------------------------------------- Basic
 const BASIC: CoverageEntry[] = [
   entry('comp.resistor', 'Resistor', 'Basic', 'wt', 'passive', 'simulated', NONE, NONE, 'hardware', ['tests/sim.behaviors.mts']),
-  entry('comp.capacitor', 'Capacitor', 'Basic', 'wt', 'passive', 'wiring', NONE, ['analog-solver'], 'hardware', NONE, 'Drawn and wired. Charge/discharge needs the analog solver; no transient is modelled.'),
+  entry('comp.capacitor', 'Capacitor', 'Basic', 'wt', 'passive', 'behavioral', NONE, ['rc-transient'], 'hardware', ['tests/parts.discrete.mts'], 'First-order RC: charges and discharges toward what drives it with tau = R·C, holds its charge when undriven, and averages PWM into a steady voltage the ADC reads. No discharge into non-resistive loads (an LED or motor run from the capacitor alone), no ESR, no leakage.'),
   entry('comp.capacitor-electrolytic', 'Electrolytic capacitor', 'Basic', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE, 'Polarity warning is useful even before transients are modelled.'),
   entry('comp.capacitor-ceramic', 'Ceramic capacitor', 'Basic', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE),
   entry('comp.inductor', 'Inductor', 'Basic', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE),
-  entry('comp.diode', 'Diode (1N4148)', 'Basic', 'wt', 'passive', 'behavioral', NONE, ['analog-solver'], 'hardware', ['tests/sim.behaviors.mts'], 'Conducts one way with a fixed series resistance. No I/V curve, no reverse recovery.'),
+  entry('comp.diode', 'Diode (1N4148)', 'Basic', 'wt', 'passive', 'behavioral', NONE, ['directional-edge'], 'hardware', ['tests/sim.behaviors.mts', 'tests/parts.discrete.mts'], 'Conducts one way with a 0.7 V drop: lifts the cathode forward, lets a low cathode pull the anode down, and blocks reverse bias. No I/V curve, no reverse recovery.'),
   entry('comp.diode-schottky', 'Schottky diode', 'Basic', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE),
   entry('comp.diode-zener', 'Zener diode', 'Basic', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE, 'Reverse breakdown clamping needs the analog solver to be meaningful.'),
   entry('comp.fuse', 'Fuse', 'Basic', 't', 'passive', 'missing', NONE, ['current-sensing'], 'none', NONE, 'Needs modelled branch current before blowing means anything.'),
@@ -236,7 +236,7 @@ const SENSORS: CoverageEntry[] = [
   entry('comp.flex-sensor', 'Flex sensor', 'Sensors', 't', 'analog-source', 'simulated', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
   entry('comp.fsr', 'Force-sensitive resistor', 'Sensors', 't', 'analog-source', 'simulated', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
   entry('comp.hx711', 'HX711 + load cell', 'Sensors', 'w', 'gpio-device', 'missing', ['gpio'], ['strain-gauge-model'], 'none', NONE),
-  entry('comp.pulse-sensor', 'Pulse sensor', 'Sensors', '-', 'analog-source', 'wiring', ['analog'], ['analog-waveform-source'], 'hardware', NONE, 'Drawn and wired; no waveform is generated yet.'),
+  entry('comp.pulse-sensor', 'Pulse sensor', 'Sensors', '-', 'analog-source', 'behavioral', ['analog'], ['analog-waveform-source'], 'hardware', ['tests/parts.discrete.mts'], 'A heartbeat waveform (systolic peak, dicrotic notch) at the BPM set in the inspector, on its signal pin. No motion or ambient-light artefacts.'),
   entry('comp.mq2', 'MQ-2 gas sensor', 'Sensors', 'wt', 'analog-source', 'behavioral', ['analog'], ['gas-response-model'], 'hardware', ['tests/sensors.batch3.mts'], 'Logarithmic response curve only. No heater warm-up, no gas selectivity, no per-gas calibration.'),
   entry('comp.soil-moisture', 'Soil moisture sensor', 'Sensors', 't', 'analog-source', 'simulated', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
   entry('comp.rain-sensor', 'Rain sensor', 'Sensors', '-', 'analog-source', 'behavioral', ['analog'], ['analog-solver'], 'hardware', ['tests/sensors.batch3.mts'], 'Surface resistance falls when wet. Behavioural only — no droplet detection or hysteresis.'),
@@ -366,7 +366,7 @@ const COMMUNICATION: CoverageEntry[] = [
   entry('comp.ir-remote', 'Virtual IR remote', 'Communication', 'w', 'gpio-device', 'simulated', ['ir'], ['ir-channel'], 'hardware', ['tests/ir.channel.mts'], 'Puts real NEC frames and repeat codes into the shared medium on a key press. It cannot address a receiver, so two remotes at once collide rather than being arbitrated.'),
   entry('comp.hc05', 'HC-05 Bluetooth module', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['uart-endpoint', 'bluetooth-channel'], 'hardware', ['tests/uart.modules.mts'], 'The UART and AT-command side is real; there is no Bluetooth radio, pairing, inquiry, RFCOMM or profile handling. Data-mode bytes are recorded where a channel would attach.'),
   entry('comp.gps', 'GPS NEO-6M', 'Communication', '-', 'uart-device', 'simulated', ['uart'], ['uart-endpoint'], 'hardware', ['tests/uart.link.mts']),
-  entry('comp.esp01', 'ESP-01 AT modem', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['uart-endpoint', 'network-stack'], 'hardware', ['tests/uart.esp01.mts'], 'The AT modem is real — parser, echo, CH_PD/RST gating, mode and association against a simulated access point. There is no network behind it, so AT+CIPSTART fails rather than reporting a connection that cannot exist.'),
+  entry('comp.esp01', 'ESP-01 AT modem', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['uart-endpoint', 'canvas-lan'], 'hardware', ['tests/uart.esp01.mts'], 'The AT modem is real — parser, echo, CH_PD/RST gating, mode and association against a simulated access point — and ESP-01s on one canvas share a LAN with TCP between them (CIPSERVER, CIPSTART, CIPSEND, +IPD, CIPCLOSE). No internet, DNS, UDP or SSL: CIPSTART to an outside host fails rather than pretending.'),
   entry('comp.dfplayer', 'DFPlayer Mini', 'Communication', 'w', 'uart-device', 'behavioral', ['uart'], ['uart-endpoint', 'audio-decoder'], 'hardware', ['tests/uart.modules.mts'], 'The serial protocol, checksums and playback state are real; nothing decodes audio or models a file system, so a track number is a number.'),
   entry('comp.sim800l', 'SIM800L GSM modem', 'Communication', '-', 'uart-device', 'missing', ['uart'], ['cellular-network'], 'none', NONE),
   entry('comp.nrf24l01', 'nRF24L01 radio', 'Communication', '-', 'spi-register', 'simulated', ['spi', 'rf'], ['rf-channel', 'spi-register-device'], 'hardware', ['tests/rf.nrf24.mts'], 'Register file, both FIFOs, CE/CSN as separate signals, real airtime through the shared RF medium, and genuine auto-acknowledgement with retries and MAX_RT. RPD/RSSI read zero because the medium has no signal strength; ack payloads, payload reuse and per-bit CRC are not modelled.'),
@@ -411,10 +411,10 @@ const POWER: CoverageEntry[] = [
   entry('comp.regulator-5', '5V regulator', 'Power', 't', 'power', 'behavioral', NONE, ['current-sensing'], 'hardware', ['tests/power.rails.mts'], 'Imposes 5 V when the input clears 2 V of headroom and its ground is fed. Ripple, efficiency, thermal shutdown, transient response and current limit are not modelled.'),
   entry('comp.buck-converter', 'Buck converter', 'Power', '-', 'power', 'behavioral', NONE, ['current-sensing'], 'hardware', ['tests/power.rails.mts'], 'Holds its set output from any input above it with headroom. Switching frequency, efficiency, ripple, inductor behaviour and current limit are not modelled and no efficiency is claimed.'),
   entry('comp.boost-converter', 'Boost converter', 'Power', '-', 'power', 'behavioral', NONE, ['current-sensing'], 'hardware', ['tests/power.rails.mts'], 'Holds its set output from an input below it. Switching frequency, efficiency, ripple and current limit are not modelled.'),
-  entry('comp.level-converter', 'Logic level converter', 'Power', '-', 'passive', 'behavioral', NONE, ['analog-switch-model'], 'hardware', ['tests/sim.behaviors.mts'], 'Channels conduct; the level shift itself is not voltage-translated.'),
-  entry('comp.transistor-npn', 'NPN transistor', 'Power', 'wt', 'passive', 'wiring', NONE, ['analog-solver'], 'hardware', NONE, 'Drawn and wired. Switching behaviour needs the analog solver.'),
+  entry('comp.level-converter', 'Logic level converter', 'Power', '-', 'passive', 'behavioral', NONE, ['directional-edge'], 'hardware', ['tests/sim.behaviors.mts', 'tests/parts.discrete.mts'], 'Each channel passes a low through and makes a high from the far side\'s own rail through its 10 kΩ pull-up, so 5 V logic arrives as 3.3 V and back. Needs both rails powered. No edge-rate limits.'),
+  entry('comp.transistor-npn', 'NPN transistor', 'Power', 'wt', 'passive', 'behavioral', NONE, ['transistor-switch'], 'hardware', ['tests/parts.discrete.mts'], 'A saturated switch: base 0.6 V over the emitter pulls the collector to VCE(sat). PWM on the base switches the load at that duty. No linear region, no gain, no thermal limits.'),
   entry('comp.transistor-pnp', 'PNP transistor', 'Power', 'wt', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE),
-  entry('comp.mosfet', 'N-channel MOSFET', 'Power', 'wt', 'passive', 'wiring', NONE, ['analog-solver'], 'hardware', NONE, 'Drawn and wired. Switching behaviour needs the analog solver.'),
+  entry('comp.mosfet', 'N-channel MOSFET', 'Power', 'wt', 'passive', 'behavioral', NONE, ['transistor-switch'], 'hardware', ['tests/parts.discrete.mts'], 'A logic-level switch: gate 2 V over the source connects drain to source. PWM on the gate switches the load at that duty. No linear region, gate charge or body diode.'),
   entry('comp.mosfet-p', 'P-channel MOSFET', 'Power', 't', 'passive', 'missing', NONE, ['analog-solver'], 'none', NONE),
   entry('comp.mosfet-driver', 'MOSFET driver', 'Power', '-', 'logic-ic', 'missing', ['gpio'], ['gate-charge-model'], 'none', NONE),
 ];
@@ -432,7 +432,7 @@ const INSTRUMENTS: CoverageEntry[] = [
 // -------------------------------------------------------------------- Output
 const OUTPUT: CoverageEntry[] = [
   entry('comp.buzzer', 'Piezo buzzer', 'Motors & Actuators', 'wt', 'actuator', 'simulated', ['gpio', 'pwm'], NONE, 'hardware', ['tests/sim.behaviors.mts']),
-  entry('comp.speaker', 'Speaker', 'Motors & Actuators', 't', 'actuator', 'wiring', ['gpio'], ['audio-synthesis'], 'hardware', NONE, 'Drawn and wired; no audio is synthesised.'),
+  entry('comp.speaker', 'Speaker', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio'], ['tone-measure'], 'hardware', ['tests/parts.discrete.mts'], 'Plays and shows the frequency its pin is measured toggling at (tone()), directly or through a transistor. A square wave at fixed volume: no cone response, no volume from PWM, no audio from DAC samples.'),
 ];
 
 export const COMPONENT_COVERAGE: CoverageEntry[] = [

@@ -15,6 +15,7 @@ import { ErrorBoundary, ResizeHandle, navigate } from '../ui/primitives';
 import { PANEL_LIMITS } from '../persistence/settings';
 import { CollapseLeftIcon, CollapseRightIcon } from '../ui/icons';
 import { useIsPhone, usePhoneLayout, type PhonePane } from './phoneLayout';
+import { startSimAudio } from '../simulation/simAudio';
 
 export function EditorShell({ projectId }: { projectId: string }) {
   const project = useEditorStore((s) => s.project);
@@ -56,6 +57,8 @@ export function EditorShell({ projectId }: { projectId: string }) {
 
   useKeyboardShortcuts();
   usePageZoomGuard();
+  // Speakers and buzzers, heard while the simulation runs.
+  useEffect(() => startSimAudio(), []);
 
   useEffect(() => {
     layoutCodeEditor();

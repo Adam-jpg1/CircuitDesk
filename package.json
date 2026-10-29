@@ -65,7 +65,8 @@
     "test:sensors": "tsx tests/sensors.batch3.mts",
     "test:displays": "tsx tests/displays.batch4.mts",
     "test:expanders": "tsx tests/expanders.batch6.mts",
-    "test:motors": "tsx tests/motors.batch5.mts"
+    "test:motors": "tsx tests/motors.batch5.mts",
+    "test:parts": "tsx tests/parts.discrete.mts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
