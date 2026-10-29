@@ -61,7 +61,8 @@ async function startServer(dataDir: string, extraEnv: Record<string, string> = {
   child.stderr?.on('data', (d) => (log += d));
   const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)));
   const base = `http://127.0.0.1:${port}`;
-  for (let i = 0; i < 300; i++) {
+  // Up to a minute: a cold tsx start on a busy machine has taken longer than 30 s.
+  for (let i = 0; i < 600; i++) {
     try {
       const res = await fetch(`${base}/health`);
       if (res.ok) return { child, base, exited };
