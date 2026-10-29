@@ -15,6 +15,7 @@ const BASE = process.env.CIRCUITDESK_URL ?? 'http://localhost:3411';
 const MEGA = AVR_BOARD_PROFILES['board.arduino-mega2560'];
 const UNO = AVR_BOARD_PROFILES['board.arduino-uno'];
 
+const { MCU_CONFIGS: MCU_CONFIGS_FOR_TEST } = await import('../src/simulation/avr/mcuConfig');
 let failures = 0;
 function check(cond: boolean, msg: string) {
   console.log(cond ? 'PASS:' : 'FAIL:', msg);
@@ -65,7 +66,11 @@ function run(runner: AVRRunner, binding: CircuitBinding, controls: ReturnType<ty
   check(MEGA.portMap[22].port === 'A' && MEGA.portMap[22].index === 0, 'pin 22 → PA0 (Mega-only port)');
   check(MEGA.portMap[46].port === 'L' && MEGA.portMap[46].index === 3, 'pin 46 → PL3 (Mega-only port)');
   check(MEGA.portMap[54].adcChannel === 0 && MEGA.portMap[69].adcChannel === 15, 'A0 → ADC0 (PF0), A15 → ADC15 (PK7)');
-  check(MEGA.unsupported.some((u) => /Serial1/.test(u)), 'Serial1-3 declared unsupported in the profile');
+  // Serial1-3 are modelled now (tests/uart.boards.mts wires a GPS to each), so
+  // the profile must no longer call them unsupported.
+  check(!MEGA.unsupported.some((u) => /Serial1/.test(u)), 'Serial1-3 are no longer declared unsupported in the profile');
+  check(MCU_CONFIGS_FOR_TEST.atmega2560.extraUsarts?.map((u) => `${u.name}@${u.config.UDR.toString(16)}`).join(',') === 'Serial1@ce,Serial2@d6,Serial3@136',
+    'and the 2560 has USART1-3 at UDR1 0xCE, UDR2 0xD6 and UDR3 0x136');
 }
 
 // ---------- 2. GPIO output + timing + serial (the core execution proof) ----------

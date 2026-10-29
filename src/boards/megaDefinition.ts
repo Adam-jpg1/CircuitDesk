@@ -123,7 +123,7 @@ export const ARDUINO_MEGA: BoardDefinition = {
   supportLevel: 'simulated',
   isBoard: true,
   description:
-    'Mega 2560-compatible board with an ATmega2560 at 16 MHz. Fully simulated on its own profile: 54 digital pins (D0-D53), 16 analog inputs (A0-A15), six timers with PWM on 2-13 and 44-46, and Serial (USART0). Serial1-Serial3 are not emulated.',
+    'Mega 2560-compatible board with an ATmega2560 at 16 MHz. Fully simulated on its own profile: 54 digital pins (D0-D53), 16 analog inputs (A0-A15), six timers with PWM on 2-13 and 44-46, and Serial plus Serial1-Serial3 (USART0-3).',
   metadata: {
     logicVoltage: 5,
     maxPinCurrentMa: 20,

@@ -57,6 +57,8 @@ export interface AvrMcuConfig {
   spi: SpiConfig;
   /** The hardware UART this board's emulated serial stream comes from. */
   usart: UsartConfig;
+  /** Further USARTs and their Arduino names and pins (RX, TX), where the chip has them. */
+  extraUsarts?: { name: string; config: UsartConfig; rxPin: number; txPin: number }[];
   adc: ADCConfig;
   /**
    * The GPIO ports with this chip's external (INTn) and pin-change (PCINTn)
@@ -248,6 +250,22 @@ const mega2560Usart0: UsartConfig = {
 };
 
 /**
+ * USART1-3: the same register block shape as USART0 at their own addresses
+ * (UCSRnA/B/C, UBRRnL/H, UDRn), with vectors 37-39, 52-54 and 55-57 — and
+ * Arduino's Serial1 on pins 19/18, Serial2 on 17/16, Serial3 on 15/14.
+ */
+const usartAt = (base: number, rx: number): UsartConfig => ({
+  ...usart0Config,
+  UCSRA: base, UCSRB: base + 1, UCSRC: base + 2, UBRRL: base + 4, UBRRH: base + 5, UDR: base + 6,
+  rxCompleteInterrupt: rx, dataRegisterEmptyInterrupt: rx + 2, txCompleteInterrupt: rx + 4,
+});
+const mega2560ExtraUsarts = [
+  { name: 'Serial1', config: usartAt(0xc8, 0x48), rxPin: 19, txPin: 18 },
+  { name: 'Serial2', config: usartAt(0xd0, 0x66), rxPin: 17, txPin: 16 },
+  { name: 'Serial3', config: usartAt(0x130, 0x6c), rxPin: 15, txPin: 14 },
+];
+
+/**
  * ATmega2560 ADC: 16 single-ended channels. Channels 8-15 are selected with
  * the MUX5 bit in ADCSRB, which avr8js applies as bit 0x20 of the mux index.
  */
@@ -290,6 +308,7 @@ const mega2560Spi: SpiConfig = { ...spiConfig, spiInterrupt: 0x30 };
 const ATMEGA2560: AvrMcuConfig = {
   timers: [mega2560Timer0, mega2560Timer1, mega2560Timer2, mega2560Timer3, mega2560Timer4, mega2560Timer5],
   usart: mega2560Usart0,
+  extraUsarts: mega2560ExtraUsarts,
   adc: mega2560Adc,
   twi: mega2560Twi,
   spi: mega2560Spi,

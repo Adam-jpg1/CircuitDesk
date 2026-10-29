@@ -17,6 +17,7 @@ import { MCU_CONFIGS } from './avr/mcuConfig';
 import { I2cBus } from './devices/i2cBus';
 import { SpiBus, type SpiController } from './devices/spiBus';
 import type { SpiMode } from './devices/types';
+import type { UartPort } from './boardRunner';
 
 export const F_CPU = 16_000_000;
 
@@ -100,6 +101,11 @@ export class AVRRunner {
    */
   onUsbSerialByte: ((byte: number) => void) | null = null;
   private usb: Atmega32u4Usb | null = null;
+  /**
+   * The Mega's Serial1-3. The port objects outlive a reset; the USART behind
+   * each is rebuilt with the chip.
+   */
+  readonly extraUarts: AvrUartPort[] = [];
   /** Called on any digital pin change with (arduinoPin, isHigh). */
   onPinChange: ((pin: number, high: boolean) => void) | null = null;
 
@@ -239,6 +245,11 @@ export class AVRRunner {
     this.usart.onByteTransmit = (value: number) => {
       this.onSerialByte?.(value);
     };
+    (mcu.extraUsarts ?? []).forEach((spec, i) => {
+      const usart = new AVRUSART(this.cpu, spec.config, F_CPU);
+      const port = (this.extraUarts[i] ??= new AvrUartPort(spec.name, spec.rxPin, spec.txPin));
+      port.attach(usart);
+    });
     this.usart.onRxComplete = () => this.pumpSerialRx();
 
     for (const [name, port] of this.ports) {
@@ -434,5 +445,40 @@ export class AVRRunner {
       if (t.lastState) t.lastChangeCycles = now;
     }
     return { states, duty, pulseWidthUs, toggles };
+  }
+}
+
+/** One of the further USARTs, as a port the circuit can wire a part to. */
+class AvrUartPort implements UartPort {
+  onTransmit: ((byte: number) => void) | null = null;
+  private usart: AVRUSART | null = null;
+  private queue: number[] = [];
+
+  constructor(readonly name: string, readonly rxPin: number, readonly txPin: number) {}
+
+  /** Binds the port to the USART of a freshly built chip. */
+  attach(usart: AVRUSART): void {
+    this.usart = usart;
+    this.queue = [];
+    usart.onByteTransmit = (value: number) => this.onTransmit?.(value);
+    usart.onRxComplete = () => this.pump();
+  }
+
+  receive(text: string): void {
+    for (const ch of new TextEncoder().encode(text)) this.queue.push(ch);
+    this.pump();
+  }
+
+  get baudRate(): number {
+    return this.usart?.baudRate ?? 9600;
+  }
+
+  private pump(): void {
+    const usart = this.usart;
+    if (!usart) return;
+    while (this.queue.length > 0 && !usart.rxBusy) {
+      if (!usart.writeByte(this.queue[0])) break;
+      this.queue.shift();
+    }
   }
 }

@@ -137,7 +137,6 @@ const ATMEGA2560_MEGA: AvrBoardProfile = {
   ports: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L'],
   portMap: atmega2560Map(),
   unsupported: [
-    'Serial1/Serial2/Serial3 (USART1-3) — only Serial (USART0) is emulated',
     'EEPROM starts erased each time the simulation starts (it keeps its contents across the reset button)',
   ],
 };

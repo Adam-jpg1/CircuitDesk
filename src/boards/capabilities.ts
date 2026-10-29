@@ -92,10 +92,10 @@ const AVR_SIM_APIS = [
 ];
 
 /**
- * The Mega runs the same list on its own wiring: INT0-INT7 and PCINT0-2 at
- * the ATmega2560's vectors (tests/boards.eepromInterrupts.mts), not the 328P's.
+ * The Mega runs the same list on its own wiring (INT0-INT7 and PCINT0-2 at
+ * the ATmega2560's vectors, tests/boards.eepromInterrupts.mts), plus its three further USARTs.
  */
-const MEGA_SIM_APIS = AVR_SIM_APIS;
+const MEGA_SIM_APIS = [...AVR_SIM_APIS, 'Serial1, Serial2 and Serial3 (USART1-3, both directions, to the parts on their pins)'];
 
 /**
  * The Leonardo's list is written out rather than filtered, because two entries
@@ -356,7 +356,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       supportedPeripherals: [
         'GPIO ports A-L (D0-D53, A0-A15)',
         'Timer0/1/2 plus Mega-only Timer3/4/5 (PWM on pins 2-13 and 44-46)',
-        'USART0 (Serial)',
+        'USART0 (Serial) and USART1-3 (Serial1, Serial2, Serial3)',
         'ADC 16 channels incl. A8-A15 via MUX5',
       ],
     },
@@ -364,7 +364,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation:
       'Runs its own ATmega2560 profile (8 KB SRAM at 0x200, Mega vector table, ports A-L) — never the Uno profile. ' +
       'attachInterrupt on pins 2, 3 and 18-21 and pin-change interrupts (PCINT0-2) use the ATmega2560\'s own vectors. ' +
-      'Serial1-Serial3 (USART1-3) are not emulated; only Serial (USART0) is.',
+      'Serial (USART0) and Serial1-Serial3 (USART1-3, on pins 19/18, 17/16 and 15/14) are emulated, each reaching the parts wired to its own pins.',
   },
   'board.arduino-leonardo': {
     processorProfileId: 'proc.atmega32u4',

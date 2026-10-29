@@ -145,7 +145,12 @@ const ATMEGA2560: ProcessorProfile = {
     PK0: 8, PK1: 9, PK2: 10, PK3: 11, PK4: 12, PK5: 13, PK6: 14, PK7: 15,
   },
   pwmPads: ['PE4', 'PE5', 'PE3', 'PH3', 'PH4', 'PH5', 'PB4', 'PB5', 'PB6', 'PB7', 'PL3', 'PL4', 'PL5'],
-  uarts: [{ id: 'usart0', arduinoName: 'Serial', signals: { tx: ['PE1'], rx: ['PE0'] }, defaults: { tx: 'PE1', rx: 'PE0' } }],
+  uarts: [
+    { id: 'usart0', arduinoName: 'Serial', signals: { tx: ['PE1'], rx: ['PE0'] }, defaults: { tx: 'PE1', rx: 'PE0' } },
+    { id: 'usart1', arduinoName: 'Serial1', signals: { tx: ['PD3'], rx: ['PD2'] }, defaults: { tx: 'PD3', rx: 'PD2' } },
+    { id: 'usart2', arduinoName: 'Serial2', signals: { tx: ['PH1'], rx: ['PH0'] }, defaults: { tx: 'PH1', rx: 'PH0' } },
+    { id: 'usart3', arduinoName: 'Serial3', signals: { tx: ['PJ1'], rx: ['PJ0'] }, defaults: { tx: 'PJ1', rx: 'PJ0' } },
+  ],
   i2c: [{ id: 'twi0', arduinoName: 'Wire', signals: { sda: ['PD1'], scl: ['PD0'] }, defaults: { sda: 'PD1', scl: 'PD0' } }],
   spi: [
     {
@@ -159,7 +164,6 @@ const ATMEGA2560: ProcessorProfile = {
   interruptPads: ['PD0', 'PD1', 'PD2', 'PD3', 'PE4', 'PE5', 'PE6', 'PE7'],
   logicVolts: 5,
   notModelled: [
-    'USART1-3 (only USART0 is emulated)',
     'EEPROM across simulation restarts',
   ],
 };

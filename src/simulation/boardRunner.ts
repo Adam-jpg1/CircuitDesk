@@ -30,6 +30,21 @@ import type { SpiBus } from './devices/spiBus';
 
 export type PinLevel = 'high' | 'low' | 'input' | 'input-pullup';
 
+/** One more hardware UART, on fixed pins. */
+export interface UartPort {
+  /** The Arduino object it is, e.g. `Serial1`. */
+  readonly name: string;
+  /** Runner pin indices of its RX and TX pads. */
+  readonly rxPin: number;
+  readonly txPin: number;
+  /** Bytes arriving on the RX pad from something wired to it. */
+  receive(text: string): void;
+  /** Bytes the firmware sends out of the TX pad. */
+  onTransmit: ((byte: number) => void) | null;
+  /** The baud the firmware programmed, read from the peripheral. */
+  readonly baudRate: number;
+}
+
 export interface PinSnapshot {
   /** Level per runner pin index. */
   states: PinLevel[];
@@ -89,6 +104,13 @@ export interface BoardRunner {
    * UART link treats as the default rather than as a mismatch.
    */
   readonly uartBaudRate?: number;
+
+  /**
+   * UARTs beyond the one above, on boards that have more than one modelled —
+   * the Mega's Serial1, Serial2 and Serial3. A part wired to a port's pins
+   * talks to that port and no other, as on the bench.
+   */
+  readonly extraUarts?: readonly UartPort[];
 
   addMicrosecondEvent(us: number, callback: () => void): () => void;
   snapshot(): PinSnapshot;

@@ -123,5 +123,50 @@ for (const def of simulated) {
   if (usb) check(!text.includes('LEAK'), 'and nothing on the wire reached Serial, which is the USB port');
 }
 
+// The Mega's further UARTs. Each GPS is wired to one port's pins and the
+// sketch reads that port: the latitude has to arrive there, and nothing on the
+// other two ports or on Serial.
+const MEGA_PORTS = [
+  { port: 'Serial1', rx: 'D19', tx: 'D18' },
+  { port: 'Serial2', rx: 'D17', tx: 'D16' },
+  { port: 'Serial3', rx: 'D15', tx: 'D14' },
+];
+for (const { port, rx, tx } of MEGA_PORTS) {
+  console.log(`\n--- board.arduino-mega2560 ${port}`);
+  const p = emptyProject(`gps-mega-${port}`);
+  const board = inst('board.arduino-mega2560');
+  const gps = inst('comp.gps', { latitude: 48.8584, longitude: 2.2945, satellites: 9, baud: 9600 });
+  p.boardInstances.push(board);
+  p.componentInstances.push(gps);
+  const others = ['Serial', ...MEGA_PORTS.map((m) => m.port).filter((x) => x !== port)];
+  const sketch = sketchFor(port, false).replace(
+    `  ${port}.begin(9600);`,
+    `  Serial.begin(9600);\n  ${port}.begin(9600);\n${others.filter((o) => o !== 'Serial').map((o) => `  ${o}.begin(9600);`).join('\n')}`,
+  ).replace(
+    /\n}$/,
+    `\n${others.filter((o) => o !== 'Serial').map((o) => `  while (${o}.available()) { ${o}.read(); Serial.println("LEAK ${o}"); }`).join('\n')}\n}`,
+  );
+  p.codeFiles = [{ id: 'c', name: 'sketch.ino', content: sketch, language: 'cpp' }];
+  wire(p, board.id, '5V', gps.id, 'vcc');
+  wire(p, board.id, 'GND1', gps.id, 'gnd');
+  wire(p, board.id, rx, gps.id, 'tx');
+  wire(p, board.id, tx, gps.id, 'rx');
+  simulationController.stop();
+  const report = await simulationController.build(p);
+  if (!report.anyRunnable || !(await simulationController.start())) {
+    console.log(`SKIP: the Mega did not build or start here (${report.builds.map((b) => b.detail).join('; ')})`);
+    skipped++;
+    continue;
+  }
+  simulationController.pause();
+  simulationController.advance(3500);
+  simulationController.publishNow();
+  const text = useSimulationStore.getState().serialText ?? '';
+  simulationController.stop();
+  const lat = /LAT (\d+\.\d+)/.exec(text)?.[1];
+  check(lat === '4851.5040', `firmware parsed the GPS's latitude off ${port} on ${rx} (${lat ?? JSON.stringify(text.slice(-120))})`);
+  check(!text.includes('LEAK'), `and the sentences reached ${port} only (${/LEAK \w+/.exec(text)?.[0] ?? 'no leak'})`);
+}
+
 console.log(`\n--- ${failures} failing, ${skipped} skipped`);
 process.exit(failures ? 1 : 0);

@@ -203,8 +203,8 @@ function projectWith(boardDefId: string): CircuitProject {
   check(
     mega.simulation!.supportedPeripherals.some((p) => /Timer3\/4\/5/.test(p)) &&
       mega.metadata.limitation !== undefined &&
-      /Serial1-Serial3 \(USART1-3\) are not emulated/.test(String(mega.metadata.limitation)),
-    'Mega declares its Mega-only timers and states the Serial1-3 limitation',
+      /Serial1-Serial3 \(USART1-3/.test(String(mega.metadata.limitation)),
+    'Mega declares its Mega-only timers and its Serial1-3 (tests/uart.boards.mts wires a GPS to each)',
   );
   check(leo.compiler?.fqbn === 'arduino:avr:leonardo' && Number(leo.metadata.analogPinBase) === 18, 'Leonardo: arduino:avr:leonardo, A0=18');
   check(arduinoPinNumber(mega, 'A0') === 54 && arduinoPinNumber(mega, 'D53') === 53, 'Mega pin numbering: A0=54, D53=53 (not Uno numbering)');
@@ -366,8 +366,8 @@ function projectWith(boardDefId: string): CircuitProject {
   );
   const megaLimitation = String(mega.metadata.limitation ?? '');
   check(
-    /Serial1-Serial3/.test(megaLimitation) && !/attachInterrupt is not emulated/i.test(megaLimitation),
-    'Mega limitation text still names what is missing (USART1-3) and no longer calls interrupts unemulated',
+    /Serial1-Serial3/.test(megaLimitation) && !/not emulated/i.test(megaLimitation),
+    'Mega limitation text names its Serial1-3 and no longer calls interrupts or USARTs unemulated',
   );
   check(
     describeSupport(mega).includes(megaLimitation),

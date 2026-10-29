@@ -22,7 +22,7 @@ export interface BoardPinEndpoint {
   pin: number;
   board: BoardDefinition;
 }
-import { runnerPinIndex, runnerAdcChannel, boardAdcReference } from './boardRunner';
+import { runnerPinIndex, runnerAdcChannel, boardAdcReference, type UartPort } from './boardRunner';
 import { avrProfileFor } from '../boards/pinMaps';
 import { Ssd1306Device, SSD1306_ADDRESSES } from './devices/ssd1306';
 import { Sh1107Device, SH1107_ADDRESSES } from './devices/sh1107';
@@ -1017,6 +1017,8 @@ export class CircuitBinding {
     this.switchedPinListeners = [];
     this.serialTaps.forEach((off) => off());
     this.serialTaps.clear();
+    this.portTaps.forEach((off) => off());
+    this.portTaps.clear();
   }
 
   /**
@@ -1032,6 +1034,24 @@ export class CircuitBinding {
    * Chained rather than replaced, and released on re-bind, because stacking a
    * second tap on the same runner would deliver every byte twice.
    */
+  /** The TX of a further UART, to the parts linked to it. */
+  private tapPort(runner: BoardRunner, port: UartPort): void {
+    if (this.portTaps.has(port)) return;
+    const downstream = port.onTransmit;
+    port.onTransmit = (byte: number) => {
+      downstream?.(byte);
+      const nowUs = runner.timeMs * 1000;
+      for (const entry of this.uartLinks.values()) {
+        if (entry.port !== port) continue;
+        entry.link.setBoardConfig({ baud: port.baudRate });
+        entry.link.boardTransmitted(byte, nowUs);
+      }
+    };
+    this.portTaps.set(port, () => {
+      port.onTransmit = downstream;
+    });
+  }
+
   private tapBoardSerial(runner: BoardRunner): void {
     if (this.serialTaps.has(runner)) return;
     const downstream = runner.onSerialByte;
@@ -1039,8 +1059,8 @@ export class CircuitBinding {
       downstream?.(byte);
       this.rs485ByteFromBoard(runner, byte);
       const nowUs = runner.timeMs * 1000;
-      for (const { link, runner: owner } of this.uartLinks.values()) {
-        if (owner !== runner) continue;
+      for (const { link, runner: owner, port } of this.uartLinks.values()) {
+        if (owner !== runner || port) continue;
         // The rate as it is at this byte, not as it was at the last settle: a
         // sketch that changes Serial.begin() mid-run must corrupt from the
         // byte it changed on.
@@ -1143,7 +1163,19 @@ export class CircuitBinding {
     const boardRxPin = padWithCap('uart-rx');
     const boardTxPin = padWithCap('uart-tx');
     if (!boardRxPin || !boardTxPin) return;
+    this.linkUartDevices(runner, boardInstanceId, boardRxPin, boardTxPin);
 
+    // Further UARTs on their own pins: a GPS on a Mega's RX1/TX1 is Serial1's.
+    const pinIdOf = (index: number) => board.pins.find((p) => runnerPinIndex(board, p.id) === index)?.id;
+    for (const port of runner.extraUarts ?? []) {
+      const rx = pinIdOf(port.rxPin);
+      const tx = pinIdOf(port.txPin);
+      if (rx && tx) this.linkUartDevices(runner, boardInstanceId, rx, tx, port);
+    }
+  }
+
+  /** Links each UART part whose TX reaches `boardRxPin` to that UART: the primary one, or `port`. */
+  private linkUartDevices(runner: BoardRunner, boardInstanceId: string, boardRxPin: string, boardTxPin: string, port?: UartPort): void {
     const boardRxNet = this.netOfInstancePin(boardInstanceId, boardRxPin);
     const boardTxNet = this.netOfInstancePin(boardInstanceId, boardTxPin);
 
@@ -1170,10 +1202,13 @@ export class CircuitBinding {
       // A device whose RX is not wired still transmits — that is a perfectly
       // normal GPS install — but the board cannot configure it.
       if (deviceRxNet !== boardTxNet) link.noteContention(0);
-      this.uartLinks.set(inst.id, { link, runner });
+      this.uartLinks.set(inst.id, { link, runner, port });
       // Only a device whose RX is genuinely on the board's TX net hears it, so
       // the tap goes in once a link exists and the direction is real.
-      if (deviceRxNet === boardTxNet) this.tapBoardSerial(runner);
+      if (deviceRxNet === boardTxNet) {
+        if (port) this.tapPort(runner, port);
+        else this.tapBoardSerial(runner);
+      }
     }
   }
 
@@ -2324,7 +2359,7 @@ export class CircuitBinding {
 
   /** UART devices, kept across re-binds so a GPS does not lose its fix. */
   private uartDeviceCache = new Map<string, UartPeripheral>();
-  private uartLinks = new Map<string, { link: UartLink; runner: BoardRunner }>();
+  private uartLinks = new Map<string, { link: UartLink; runner: BoardRunner; port?: UartPort }>();
 
   /**
    * PWM as a load sees it, per pin of the primary board.
@@ -2373,6 +2408,7 @@ export class CircuitBinding {
 
   /** Serial-out taps, keyed by runner, so a re-bind cannot stack them. */
   private serialTaps = new Map<BoardRunner, () => void>();
+  private portTaps = new Map<UartPort, () => void>();
 
   /** The baud last pushed from a part's property, so AT+UART= is not undone. */
   private appliedUartBaud = new Map<string, number>();
@@ -2929,13 +2965,15 @@ export class CircuitBinding {
     }
 
 
-    for (const { link, runner: owner } of this.uartLinks.values()) {
+    for (const { link, runner: owner, port } of this.uartLinks.values()) {
       const nowUs = owner.timeMs * 1000;
-      link.setBoardConfig({ baud: owner.uartBaudRate ?? 9600 });
+      link.setBoardConfig({ baud: port ? port.baudRate : (owner.uartBaudRate ?? 9600) });
       link.poll(nowUs);
       const bytes = link.drainToBoard(nowUs);
       if (bytes.length > 0) {
-        uartInput(owner, String.fromCharCode(...bytes));
+        const text = String.fromCharCode(...bytes);
+        if (port) port.receive(text);
+        else uartInput(owner, text);
       }
     }
 
