@@ -6,6 +6,7 @@
 
 import type { BoardDefinition, CircuitProject, ComponentInstance } from '../types';
 import { buildCircuitGraph, splitNode, type CircuitGraph } from '../circuit/nets';
+import { solveDc, type CircuitElement, type DcSolution } from '../circuit/dcSolver';
 import type { BoardRunner } from './boardRunner';
 
 /**
@@ -157,6 +158,12 @@ export interface ComponentVisualState {
   readout?: string[];
   ledOn?: boolean;
   brightness?: number;
+  /** An LED driven past what it survives. It stays dark until the circuit changes. */
+  burnt?: boolean;
+  /** Current through the part from the electrical solve, in milliamps. */
+  currentMa?: number;
+  /** Something electrically wrong with the part, in words a learner can act on. */
+  fault?: string;
   rgb?: [number, number, number];
   buzzerOn?: boolean;
   servoAngle?: number;
@@ -754,6 +761,46 @@ interface ConductiveEdge {
    * through with the edge's resistance added.
    */
   transfer?: (from: NetLevel, existing: NetLevel | undefined, toB: boolean, levels: Map<string, NetLevel>) => { volts: number; ohms: number } | null;
+}
+
+/** An MCU pin's output resistance: an ATmega's pin sags about 0.5 V at 20 mA. */
+const PIN_OUTPUT_OHMS = 25;
+/** An input pull-up: the ATmega's are 20-50 kΩ. */
+const PIN_PULLUP_OHMS = 35_000;
+/** An LED's dynamic resistance past its knee. */
+const LED_OHMS = 15;
+/** A small hobby DC motor's winding. */
+const MOTOR_OHMS = 10;
+/** Average current an LED survives; past this it burns out. */
+const LED_BURNOUT_AMPS = 0.03;
+/** Peak current an LED survives even briefly. */
+const LED_PEAK_AMPS = 0.1;
+/** Current at which an LED looks fully bright — an indicator LED is at full glare from about 5 mA. Below it, brightness falls off as an eye sees it. */
+const LED_FULL_AMPS = 0.005;
+/** Internal resistance of each kind of supply, which is what limits a short. */
+const SUPPLY_INTERNAL_OHMS: Record<string, number> = {
+  'comp.battery-9v': 1.5,
+  'comp.battery-aa': 0.3,
+  'comp.cell-15': 0.15,
+  'comp.battery-coin': 15,
+  'comp.dc-supply': 0.05,
+};
+
+/**
+ * An LED's forward voltage. The colour decides it — red about 2 V, blue and
+ * white about 3 V — unless the part's own property has been set to something
+ * other than the old one-size default.
+ */
+export function ledForwardVolts(inst: ComponentInstance): number {
+  const set = inst.properties.forwardVoltage;
+  if (typeof set === 'number' && set !== 2.0) return set;
+  return LED_COLOR_VF[String(inst.properties.color ?? 'red')] ?? 2.0;
+}
+const LED_COLOR_VF: Record<string, number> = { red: 2.0, orange: 2.0, yellow: 2.1, green: 2.2, blue: 3.0, white: 3.0 };
+
+/** How bright an LED looks at a current: square-root, full at LED_FULL_AMPS. */
+export function ledBrightness(amps: number): number {
+  return amps <= 0 ? 0 : Math.min(1, Math.sqrt(amps / LED_FULL_AMPS));
 }
 
 /** A silicon diode's forward drop. */
@@ -2746,12 +2793,18 @@ export class CircuitBinding {
    * the whole point: a missing ground, a backwards bridge or an unwired enable
    * pin all produce a part that does nothing, exactly as on a bench.
    */
-  private updateMotors(levels: Map<string, NetLevel>, nowMs: number): void {
+  private updateMotors(levels: Map<string, NetLevel>, nowMs: number, analog: DcSolution): void {
     const voltsOn = (instanceId: string, pinId: string): number | null => {
       const netId = this.netOfInstancePin(instanceId, pinId);
       if (!netId) return null; // not wired: floating, which is not zero
       const v = levels.get(netId)?.volts;
       return v == null ? null : v;
+    };
+    /** A motor terminal as the electrical solve has it: loaded, so a weak source sags. */
+    const solvedOn = (instanceId: string, pinId: string): number | null => {
+      const netId = this.netOfInstancePin(instanceId, pinId);
+      if (!netId) return null;
+      return analog.voltages.get(netId) ?? null;
     };
     const isHigh = (instanceId: string, pinId: string): boolean => {
       const v = voltsOn(instanceId, pinId);
@@ -2774,8 +2827,8 @@ export class CircuitBinding {
         }
         // A motor switched on its low side by a transistor under PWM sees the
         // supply for the duty's share of every period: it runs at the average.
-        let plus = voltsOn(inst.id, motorSpec.plus);
-        const minus = voltsOn(inst.id, motorSpec.minus);
+        let plus = solvedOn(inst.id, motorSpec.plus) ?? voltsOn(inst.id, motorSpec.plus);
+        const minus = solvedOn(inst.id, motorSpec.minus) ?? voltsOn(inst.id, motorSpec.minus);
         const minusNet = this.netOfInstancePin(inst.id, motorSpec.minus);
         const switchPin = minusNet ? levels.get(minusNet)?.switchedBy : null;
         const d = switchPin != null ? this.pwmDuty(switchPin) : undefined;
@@ -2815,6 +2868,285 @@ export class CircuitBinding {
     }
   }
 
+  // ------------------------------------------------------------ electrical
+
+  /**
+   * Time for a circuit with no board: a bench of batteries, switches and
+   * parts still has capacitors charging and motors spinning up, so it keeps
+   * its own clock, advanced by whoever is running it.
+   */
+  private benchClockMs = 0;
+
+  /** The circuit's time: the primary board's when there is one, the bench clock otherwise. */
+  get clockMs(): number {
+    return this.runner?.timeMs ?? this.benchClockMs;
+  }
+
+  /** Moves a board-less circuit's clock on. Ignored while a board keeps time. */
+  advanceClock(ms: number): void {
+    if (ms > 0) this.benchClockMs += ms;
+  }
+
+  /** Regulators producing their output on the last update, and at what voltage. */
+  private regulating = new Map<string, number>();
+  /** The last electrical solution, and the circuit it solved, so an unchanged circuit is not solved again. */
+  private analogKey = '';
+  private analogSolution: DcSolution = solveDc([]);
+  /** Element ids of the solve by part, for reading results back. */
+  private analogParts = new Map<string, string[]>();
+  private analogElements = new Map<string, CircuitElement>();
+  /** LEDs that have been driven past what they survive. They stay dark until the circuit is changed. */
+  private burntLeds = new Map<string, number>();
+
+  /** The solution the parts were last drawn from. */
+  get electrical(): DcSolution {
+    return this.analogSolution;
+  }
+
+  /** A board instance's ground net: all its GND pins are one piece of copper. */
+  private boardGroundNet(instanceId: string): string | undefined {
+    const def = this.graph.definitions.get(instanceId);
+    const pin = def?.pins.find((p) => p.type === 'ground');
+    return pin ? this.netOfInstancePin(instanceId, pin.id) : undefined;
+  }
+
+  /**
+   * The whole circuit as nodal-analysis elements, solved.
+   *
+   * Sources: every battery and supply between its own terminals; every
+   * running board's 5V and 3V3 pins and its driven outputs against that
+   * board's ground, through a pin's real output resistance (PWM pins at their
+   * high level, since what a load averages is its on-phase current times the
+   * duty); input pull-ups as the weak resistors they are; and whatever chips
+   * and modules drive. Loads: resistors, closed switches and contacts, both
+   * halves of every potentiometer, diodes and LEDs at their forward voltages,
+   * buzzers, speakers, motors and relay coils at typical resistances, and
+   * transistors that are switched on.
+   *
+   * A board that is not running is unpowered: its pins source nothing, and
+   * only its copper (GND) is there.
+   */
+  private solveAnalog(
+    driverSources: { netId: string; volts: number; ohms: number }[],
+    controls: SimControls,
+    runner: BoardRunner | null,
+  ): DcSolution {
+    const elements: CircuitElement[] = [];
+    const parts = new Map<string, string[]>();
+    const tag = (instanceId: string, id: string) => {
+      const list = parts.get(instanceId) ?? [];
+      list.push(id);
+      parts.set(instanceId, list);
+    };
+    const net = (instanceId: string, pinId: string) => this.netOfInstancePin(instanceId, pinId);
+    const grounds = new Set<string>();
+
+    // Running boards: rails and pins.
+    for (const [instanceId, owner] of this.runners) {
+      const def = this.graph.definitions.get(instanceId);
+      const gnd = this.boardGroundNet(instanceId);
+      if (!def?.isBoard || !gnd) continue;
+      grounds.add(gnd);
+      for (const pin of def.pins) {
+        const n = net(instanceId, pin.id);
+        if (!n) continue;
+        if (pin.type === 'power-5v') elements.push({ kind: 'source', id: `rail:${instanceId}:${pin.id}`, plus: n, minus: gnd, volts: pin.voltage ?? 5, ohms: 0.05 });
+        else if (pin.type === 'power-3v3') elements.push({ kind: 'source', id: `rail:${instanceId}:${pin.id}`, plus: n, minus: gnd, volts: pin.voltage ?? 3.3, ohms: 0.2 });
+      }
+    }
+    for (const [netId, endpoints] of this.netEndpoints) {
+      for (const endpoint of endpoints) {
+        const owner = this.runners.get(endpoint.instance);
+        const gnd = owner ? this.boardGroundNet(endpoint.instance) : undefined;
+        if (!owner || !gnd) continue;
+        const state = owner.digitalPinLevel(endpoint.pin);
+        const high = Number(endpoint.board.metadata.logicVoltage ?? 5);
+        const id = `pin:${endpoint.instance}:${endpoint.pin}`;
+        if (state === 'high' || state === 'low') {
+          const pwm = owner === runner && owner.isOutput(endpoint.pin) && this.pwmDuty(endpoint.pin) !== undefined;
+          elements.push({ kind: 'source', id, plus: netId, minus: gnd, volts: state === 'high' || pwm ? high : 0, ohms: PIN_OUTPUT_OHMS });
+        } else if (state === 'input-pullup') {
+          elements.push({ kind: 'source', id, plus: netId, minus: gnd, volts: high, ohms: PIN_PULLUP_OHMS });
+        }
+      }
+    }
+
+    // Batteries and bench supplies, between their own terminals.
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (!def || def.isBoard || def.simulationAdapterId !== 'sim.supply') continue;
+      const plusPin = def.pins.find((p) => p.type === 'power-vin');
+      const minusPin = def.pins.find((p) => p.type === 'ground');
+      const plus = plusPin ? net(inst.id, plusPin.id) : undefined;
+      const minus = minusPin ? net(inst.id, minusPin.id) : undefined;
+      if (!plus || !minus) continue;
+      const volts = typeof inst.properties.voltage === 'number' ? (inst.properties.voltage as number) : plusPin?.voltage ?? 9;
+      const id = `supply:${inst.id}`;
+      elements.push({ kind: 'source', id, plus, minus, volts, ohms: SUPPLY_INTERNAL_OHMS[def.id] ?? 0.5 });
+      tag(inst.id, id);
+      grounds.add(minus);
+    }
+
+    // Regulators that are regulating, between their output and ground pins.
+    for (const [instanceId, volts] of this.regulating) {
+      const def = this.graph.definitions.get(instanceId);
+      const reg = def ? REGULATOR_PARTS[def.id] : undefined;
+      const out = reg ? net(instanceId, reg.vout) : undefined;
+      const gnd = reg ? net(instanceId, reg.gnd) : undefined;
+      if (out && gnd) elements.push({ kind: 'source', id: `reg:${instanceId}`, plus: out, minus: gnd, volts, ohms: 0.1 });
+    }
+    this.regulating.clear();
+
+    // Chip and module outputs, against the circuit's ground.
+    const reference = [...grounds][0] ?? [...this.groundNets][0];
+    if (reference) {
+      driverSources.forEach((d, i) => {
+        elements.push({ kind: 'source', id: `drv:${i}`, plus: d.netId, minus: reference, volts: d.volts, ohms: Math.max(0.01, d.ohms) });
+      });
+    }
+
+    // Conductive edges: resistors, contacts, diodes, level-shifter channels.
+    this.edges.forEach((edge, i) => {
+      if (!edge.enabled(controls)) return;
+      const id = `edge:${i}`;
+      if (edge.kind === 'diode') elements.push({ kind: 'diode', id, anode: edge.a, cathode: edge.b, vf: 0.7, ohms: 0.5 });
+      else elements.push({ kind: 'resistor', id, a: edge.a, b: edge.b, ohms: edge.kind === 'switch' ? Math.max(0.01, edge.ohms) : edge.kind === 'channel' ? 5 : edge.ohms });
+    });
+
+    for (const inst of this.graph.instances) {
+      const def = this.graph.definitions.get(inst.id);
+      if (!def || def.isBoard) continue;
+      const add = (e: CircuitElement) => {
+        elements.push(e);
+        tag(inst.id, e.id);
+      };
+      switch (def.simulationAdapterId) {
+        case 'sim.led': {
+          const a = net(inst.id, 'anode');
+          const k = net(inst.id, 'cathode');
+          if (a && k) add({ kind: 'diode', id: `led:${inst.id}`, anode: a, cathode: k, vf: ledForwardVolts(inst), ohms: LED_OHMS });
+          break;
+        }
+        case 'sim.rgb-led': {
+          const k = net(inst.id, 'cathode');
+          for (const [channel, vf] of [['red', 2.0], ['green', 3.0], ['blue', 3.0]] as const) {
+            const a = net(inst.id, channel);
+            if (a && k) add({ kind: 'diode', id: `led:${inst.id}:${channel}`, anode: a, cathode: k, vf, ohms: LED_OHMS });
+          }
+          break;
+        }
+        case 'sim.buzzer': {
+          const p = net(inst.id, 'plus');
+          const m = net(inst.id, 'minus');
+          // An active buzzer's driver only works the right way round.
+          if (p && m) add({ kind: 'diode', id: `buzzer:${inst.id}`, anode: p, cathode: m, vf: 0.3, ohms: 170 });
+          break;
+        }
+        case 'sim.speaker': {
+          const p = net(inst.id, 'plus');
+          const m = net(inst.id, 'minus');
+          if (p && m) add({ kind: 'resistor', id: `speaker:${inst.id}`, a: p, b: m, ohms: 8 });
+          break;
+        }
+        case 'sim.potentiometer': {
+          const t1 = net(inst.id, 't1');
+          const w = net(inst.id, 'wiper');
+          const t2 = net(inst.id, 't2');
+          const total = Math.max(1, Number(inst.properties.resistance ?? 10_000));
+          const pos = controls.potPositions.get(inst.id) ?? 0.5;
+          if (t1 && w) add({ kind: 'resistor', id: `pot:${inst.id}:1`, a: t1, b: w, ohms: Math.max(0.5, pos * total) });
+          if (w && t2) add({ kind: 'resistor', id: `pot:${inst.id}:2`, a: w, b: t2, ohms: Math.max(0.5, (1 - pos) * total) });
+          break;
+        }
+        default:
+          break;
+      }
+      const motor = MOTOR_PARTS[def.id];
+      if (motor) {
+        const p = net(inst.id, motor.plus);
+        const m = net(inst.id, motor.minus);
+        if (p && m) add({ kind: 'resistor', id: `motor:${inst.id}`, a: p, b: m, ohms: MOTOR_OHMS });
+      }
+      const relay = RELAY_PARTS[def.id];
+      if (relay) {
+        const c = net(inst.id, relay.coil);
+        const r = net(inst.id, relay.coilReturn);
+        if (c && r) add({ kind: 'resistor', id: `coil:${inst.id}`, a: c, b: r, ohms: 70 });
+      }
+      const transistor = SWITCHING_TRANSISTORS[def.id];
+      if (transistor) {
+        const out = net(inst.id, transistor.output);
+        const common = net(inst.id, transistor.common);
+        const control = net(inst.id, transistor.control);
+        if (out && common && this.transistorsOn.has(inst.id)) add({ kind: 'resistor', id: `q:${inst.id}:ce`, a: out, b: common, ohms: transistor.onOhms });
+        // A BJT's base is a diode to its emitter, and draws real current.
+        if (def.id === 'comp.transistor-npn' && control && common) add({ kind: 'diode', id: `q:${inst.id}:be`, anode: control, cathode: common, vf: 0.65, ohms: 5 });
+      }
+    }
+
+    const key = elements
+      .map((e) => (e.kind === 'resistor' ? `R${e.id}${e.a}${e.b}${e.ohms}` : e.kind === 'source' ? `V${e.id}${e.plus}${e.minus}${e.volts}${e.ohms}` : `D${e.id}${e.anode}${e.cathode}${e.vf}`))
+      .join(';');
+    if (key !== this.analogKey) {
+      this.analogKey = key;
+      this.analogSolution = solveDc(elements, { groundNodes: [...grounds, ...this.groundNets] });
+      this.analogParts = parts;
+      this.analogElements = new Map(elements.map((e) => [e.id, e]));
+    }
+    return this.analogSolution;
+  }
+
+  /**
+   * Puts the solved voltages where the rest of the model reads them.
+   *
+   * Only nets the digital model left undriven take a solved voltage, so
+   * nothing that drives a net is second-guessed; and only nets with a real
+   * path to a source — through resistors, closed contacts and conducting
+   * diodes — because a node reached only through a reverse-biased diode has
+   * no voltage worth reporting. Analog pins read any solved net that no chip
+   * already drives: a resistor divider, an LED's anode.
+   */
+  private applyAnalog(analog: DcSolution, levels: Map<string, NetLevel>, drivenNets: Set<string>, runner: BoardRunner | null): void {
+    if (analog.voltages.size === 0) return;
+    const solid = this.solidlyDriven(analog);
+    for (const [netId, volts] of analog.voltages) {
+      if (!solid.has(netId)) continue;
+      const existing = levels.get(netId);
+      if (existing?.volts == null) levels.set(netId, { volts, sourcePin: null, seriesOhms: 1000, conflict: false });
+      if (runner && !drivenNets.has(netId) && existing?.volts == null) {
+        for (const channel of this.netAdcChannels.get(netId) ?? []) runner.setAnalogVolts(channel, volts);
+      }
+    }
+  }
+
+  private solidCache: { solution: DcSolution; nets: Set<string> } | null = null;
+
+  /** Nets joined to a source through anything but a blocking diode. */
+  private solidlyDriven(analog: DcSolution): Set<string> {
+    if (this.solidCache?.solution === analog) return this.solidCache.nets;
+    const parent = new Map<string, string>();
+    const find = (x: string): string => {
+      let p = parent.get(x) ?? x;
+      while (p !== (parent.get(p) ?? p)) p = parent.get(p)!;
+      parent.set(x, p);
+      return p;
+    };
+    const union = (a: string, b: string) => parent.set(find(a), find(b));
+    const sources: string[] = [];
+    for (const e of this.analogElements.values()) {
+      if (e.kind === 'resistor') union(e.a, e.b);
+      else if (e.kind === 'source') {
+        union(e.plus, e.minus);
+        sources.push(e.plus);
+      } else if (analog.conducting.has(e.id)) union(e.anode, e.cathode);
+    }
+    const roots = new Set(sources.map(find));
+    const nets = new Set<string>();
+    for (const netId of analog.voltages.keys()) if (roots.has(find(netId))) nets.add(netId);
+    this.solidCache = { solution: analog, nets };
+    return nets;
+  }
+
   /** Volts across each capacitor, by instance, carried from one update to the next. */
   private capacitorVolts = new Map<string, number>();
   private capacitorLastMs: number | null = null;
@@ -2838,7 +3170,7 @@ export class CircuitBinding {
   private settleCapacitors(levels: Map<string, NetLevel>, propagateOn: (levels: Map<string, NetLevel>) => void): string[] {
     const caps = this.graph.instances.filter((i) => this.graph.definitions.get(i.id)?.id === 'comp.capacitor');
     if (caps.length === 0) return [];
-    const nowMs = this.runner?.timeMs ?? 0;
+    const nowMs = this.clockMs;
     const dtMs = this.capacitorLastMs === null || nowMs < this.capacitorLastMs ? 0 : nowMs - this.capacitorLastMs;
     this.capacitorLastMs = nowMs;
 
@@ -3072,7 +3404,7 @@ export class CircuitBinding {
    */
   private gpioSensorHold(instanceId: string, raw: boolean, holdMs: number, controls: SimControls): boolean {
     if (holdMs <= 0) return raw;
-    const now = this.runner?.timeMs ?? 0;
+    const now = this.clockMs;
     if (raw) {
       this.gpioSensorTriggeredAt.set(instanceId, now);
       return true;
@@ -3183,7 +3515,14 @@ export class CircuitBinding {
     // from the board rather than being fixed at an AVR's 2.5 V.
     const inputThreshold = highVolts / 2;
     const levels = new Map<string, NetLevel>();
+    // Everything that drives a net from here on — a chip's output, a
+    // regulator, a pull-up — is also a source in the electrical solve, at the
+    // resistance it drives with. Rails, grounds and board pins are added to
+    // the solve from the parts themselves, so they are not recorded.
+    let recordDrivers = false;
+    const driverSources: { netId: string; volts: number; ohms: number }[] = [];
     const setLevel = (netId: string, volts: number, sourcePin: number | null, seriesOhms: number) => {
+      if (recordDrivers) driverSources.push({ netId, volts, ohms: seriesOhms });
       const existing = levels.get(netId);
       if (!existing || existing.volts === null) {
         levels.set(netId, { volts, sourcePin, seriesOhms, conflict: false });
@@ -3233,6 +3572,13 @@ export class CircuitBinding {
       }
       if (levels.get(netId)?.conflict) this.contendedNets.add(netId);
     }
+    recordDrivers = true;
+    /** A driver the electrical solve models some other way. */
+    const setLevelUnrecorded = (netId: string, volts: number, sourcePin: number | null, seriesOhms: number) => {
+      recordDrivers = false;
+      setLevel(netId, volts, sourcePin, seriesOhms);
+      recordDrivers = true;
+    };
 
     // Propagate through conductive elements to a fixpoint (bounded iterations).
     const propagateOn = (levels: Map<string, NetLevel>) => {
@@ -3465,7 +3811,7 @@ export class CircuitBinding {
       const on = pwmPin !== null || (control?.volts != null && control.volts - common >= spec.onVolts);
       if (!on) continue;
       this.transistorsOn.add(inst.id);
-      setLevel(outNet, common + spec.saturationVolts, null, spec.onOhms);
+      setLevelUnrecorded(outNet, common + spec.saturationVolts, null, spec.onOhms);
       const level = levels.get(outNet);
       if (level && level.volts === common + spec.saturationVolts) level.switchedBy = pwmPin;
       drivenNets.add(outNet);
@@ -3556,7 +3902,8 @@ export class CircuitBinding {
       } else if (vin < nominal + reg.dropout) {
         continue;
       }
-      setLevel(outNet, nominal, null, 0);
+      setLevelUnrecorded(outNet, nominal, null, 0);
+      this.regulating.set(inst.id, nominal);
       drivenNets.add(outNet);
     }
 
@@ -3681,31 +4028,6 @@ export class CircuitBinding {
       }
     }
 
-    // Motors and steppers, driven from what is actually on their terminals.
-    //
-    // Deliberately after the logic settle and the expanders: a motor wired to
-    // an H-bridge that is wired to a shift register has to see the voltage the
-    // whole chain produced, not the one it had before the chain resolved.
-    this.updateMotors(levels, this.runner?.timeMs ?? 0);
-
-    // An encoder motor drives its two channels from the shaft the motor model
-    // integrated. Ninety degrees apart, so firmware can tell direction from the
-    // order the edges arrive in — which it cannot do from a pulse count.
-    for (const [instanceId, encoder] of this.encoders) {
-      const motor = this.motors.get(instanceId);
-      if (!motor) continue;
-      const position = motor.position;
-      for (const [pinId, level] of [
-        ['enca', encoder.channelA(position)],
-        ['encb', encoder.channelB(position)],
-      ] as [string, boolean][]) {
-        const netId = this.netOfInstancePin(instanceId, pinId);
-        if (!netId) continue;
-        setLevel(netId, level ? highVolts : 0, null, 0);
-        drivenNets.add(netId);
-      }
-    }
-
     // Logic ICs, settled to a fixed point.
     //
     // A gate's output is another gate's input, so one pass is not enough: a
@@ -3734,6 +4056,39 @@ export class CircuitBinding {
         }
       }
     }
+
+    // The circuit, solved electrically: every source and every load in one
+    // nodal analysis, whether or not there is a board on the canvas. Nets the
+    // digital model left undriven take their solved voltage, and an analog
+    // pin on any solved net reads it.
+    const analog = this.solveAnalog(driverSources, controls, runner);
+    this.applyAnalog(analog, levels, drivenNets, runner);
+
+    // Motors and steppers, driven from what is actually on their terminals.
+    //
+    // Deliberately after the logic settle and the expanders: a motor wired to
+    // an H-bridge that is wired to a shift register has to see the voltage the
+    // whole chain produced, not the one it had before the chain resolved.
+    this.updateMotors(levels, this.clockMs, analog);
+
+    // An encoder motor drives its two channels from the shaft the motor model
+    // integrated. Ninety degrees apart, so firmware can tell direction from the
+    // order the edges arrive in — which it cannot do from a pulse count.
+    for (const [instanceId, encoder] of this.encoders) {
+      const motor = this.motors.get(instanceId);
+      if (!motor) continue;
+      const position = motor.position;
+      for (const [pinId, level] of [
+        ['enca', encoder.channelA(position)],
+        ['encb', encoder.channelB(position)],
+      ] as [string, boolean][]) {
+        const netId = this.netOfInstancePin(instanceId, pinId);
+        if (!netId) continue;
+        setLevel(netId, level ? highVolts : 0, null, 0);
+        drivenNets.add(netId);
+      }
+    }
+    if (this.encoders.size > 0) propagate();
 
     const levelOf = (netId: string | undefined): NetLevel | undefined =>
       netId ? levels.get(netId) : undefined;
@@ -3786,46 +4141,47 @@ export class CircuitBinding {
 
       switch (def.simulationAdapterId) {
         case 'sim.led': {
+          // Lit by the current the solve puts through it, not by a voltage
+          // test: reversed it conducts nothing, with no resistor it takes
+          // far more than it survives, and through a large resistor it is
+          // dim. Under PWM the solve has the on-phase current, and the eye
+          // sees that times the duty.
           const anode = levelOf(net('anode'));
           const cathode = levelOf(net('cathode'));
-          const fV = Number(inst.properties.forwardVoltage ?? 2);
-          const onNow =
-            anode?.volts != null && cathode?.volts != null && anode.volts - cathode.volts >= fV - 0.4;
-          // Under PWM the pin spends part of every period low; the LED is lit
-          // at the average, not dark whenever a frame lands in a low phase.
-          const pwmDutyHere = pwm(anode?.sourcePin);
-          const on =
-            onNow ||
-            (pwmDutyHere !== undefined && cathode?.volts != null && pinHighVolts - cathode.volts >= fV - 0.4);
-          let brightness = on ? 1 : 0;
-          const sinkDuty = pwm(cathode?.switchedBy);
-          if (on && pwmDutyHere !== undefined) {
-            brightness = pwmDutyHere;
-          } else if (on && sinkDuty !== undefined) {
-            // Switched on its low side by a transistor whose base is PWM.
-            brightness = sinkDuty;
-          } else if (on && duty && anode?.sourcePin != null && runner?.isOutput(anode.sourcePin)) {
-            brightness = duty.duty[anode.sourcePin];
+          const amps = Math.max(0, this.analogSolution.currents.get(`led:${inst.id}`) ?? 0);
+          const dutyHere =
+            pwm(anode?.sourcePin) ??
+            pwm(cathode?.switchedBy) ??
+            (duty && anode?.sourcePin != null && runner?.isOutput(anode.sourcePin) ? duty.duty[anode.sourcePin] : 1);
+          const average = amps * dutyHere;
+          if (!this.burntLeds.has(inst.id) && (average > LED_BURNOUT_AMPS || amps > LED_PEAK_AMPS)) {
+            this.burntLeds.set(inst.id, amps);
           }
-          visuals.set(inst.id, { ledOn: on && brightness > 0.02, brightness });
+          const burnt = this.burntLeds.get(inst.id);
+          if (burnt !== undefined) {
+            visuals.set(inst.id, {
+              ledOn: false,
+              brightness: 0,
+              burnt: true,
+              currentMa: amps * 1000,
+              fault: `Burned out — ${Math.round(burnt * 1000)} mA went through it. An LED needs a resistor in series (220–1 kΩ).`,
+            });
+            break;
+          }
+          const brightness = ledBrightness(amps) * dutyHere;
+          visuals.set(inst.id, { ledOn: brightness > 0.02, brightness, currentMa: average * 1000 });
           break;
         }
         case 'sim.rgb-led': {
-          const cathode = levelOf(net('cathode'));
-          const channels: [string, number][] = [['red', 0], ['green', 1], ['blue', 2]];
           const rgb: [number, number, number] = [0, 0, 0];
-          for (const [pinId, idx] of channels) {
-            const level = levelOf(net(pinId));
-            const pwmDutyHere = pwm(level?.sourcePin);
-            if (pwmDutyHere !== undefined && cathode?.volts != null && pinHighVolts - cathode.volts >= 1.6) {
-              rgb[idx] = pwmDutyHere;
-            } else if (level?.volts != null && cathode?.volts != null && level.volts - cathode.volts >= 1.6) {
-              rgb[idx] =
-                duty && level.sourcePin != null && runner?.isOutput(level.sourcePin)
-                  ? duty.duty[level.sourcePin]
-                  : 1;
-            }
-          }
+          (['red', 'green', 'blue'] as const).forEach((channel, idx) => {
+            const amps = Math.max(0, this.analogSolution.currents.get(`led:${inst.id}:${channel}`) ?? 0);
+            const level = levelOf(net(channel));
+            const dutyHere =
+              pwm(level?.sourcePin) ??
+              (duty && level?.sourcePin != null && runner?.isOutput(level.sourcePin) ? duty.duty[level.sourcePin] : 1);
+            rgb[idx] = ledBrightness(amps) * dutyHere;
+          });
           visuals.set(inst.id, { rgb, ledOn: rgb.some((c) => c > 0.02) });
           break;
         }
@@ -3908,19 +4264,39 @@ export class CircuitBinding {
           break;
         }
         case 'sim.buzzer': {
-          const plus = levelOf(net('plus'));
-          const minus = levelOf(net('minus'));
-          const pwmDutyHere = pwm(plus?.sourcePin);
-          const on =
-            (plus?.volts != null && minus?.volts != null && plus.volts - minus.volts >= 2.5) ||
-            (pwmDutyHere !== undefined && minus?.volts != null && pinHighVolts - minus.volts >= 2.5);
-          let level = on ? 1 : 0;
-          if (on && pwmDutyHere !== undefined) {
-            level = pwmDutyHere;
-          } else if (on && duty && plus?.sourcePin != null && runner?.isOutput(plus.sourcePin)) {
-            level = duty.duty[plus.sourcePin];
-          }
+          // Sounds while its driver gets enough of the right polarity.
+          const plusNet = net('plus');
+          const minusNet = net('minus');
+          const across =
+            plusNet && minusNet
+              ? (this.analogSolution.voltages.get(plusNet) ?? 0) - (this.analogSolution.voltages.get(minusNet) ?? 0)
+              : 0;
+          const on = this.analogSolution.conducting.has(`buzzer:${inst.id}`) && across >= 2.5;
+          const plus = levelOf(plusNet);
+          const level = !on
+            ? 0
+            : pwm(plus?.sourcePin) ??
+              (duty && plus?.sourcePin != null && runner?.isOutput(plus.sourcePin) ? duty.duty[plus.sourcePin] : 1);
           visuals.set(inst.id, { buzzerOn: on && level > 0.02 });
+          break;
+        }
+        case 'sim.supply': {
+          const id = `supply:${inst.id}`;
+          const amps = this.analogSolution.currents.get(id);
+          if (amps === undefined) break;
+          const plusPin = def.pins.find((p) => p.type === 'power-vin');
+          const minusPin = def.pins.find((p) => p.type === 'ground');
+          const vp = plusPin ? this.analogSolution.voltages.get(net(plusPin.id) ?? '') : undefined;
+          const vm = minusPin ? this.analogSolution.voltages.get(net(minusPin.id) ?? '') : undefined;
+          const terminal = vp !== undefined && vm !== undefined ? vp - vm : undefined;
+          const shorted = this.analogSolution.shorts.includes(id);
+          visuals.set(inst.id, {
+            currentMa: amps * 1000,
+            readout: [terminal !== undefined ? `${terminal.toFixed(2)} V` : 'open', `${(amps * 1000).toFixed(amps < 0.1 ? 1 : 0)} mA`],
+            ...(shorted
+              ? { fault: `Short circuit — ${amps.toFixed(1)} A is flowing straight from + to −. Something with resistance has to be in the loop.` }
+              : {}),
+          });
           break;
         }
         case 'sim.speaker': {

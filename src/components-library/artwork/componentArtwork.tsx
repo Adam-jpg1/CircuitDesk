@@ -24,8 +24,9 @@ function LedArt({ def, instance, visual }: ArtProps) {
   const on = Boolean(visual?.ledOn);
   const brightness = visual?.brightness ?? (on ? 1 : 0);
   const cx = def.widthMm * MM * 0.5;
+  if (visual?.burnt) return <BurntLedArt def={def} />;
   return (
-    <g>
+    <g data-lit={on ? 'true' : 'false'}>
       {/* legs — anode longer */}
       <line x1={1.25 * MM} y1={5.8 * MM} x2={1.25 * MM} y2={9 * MM} stroke="#9aa4ad" strokeWidth="2" />
       <line x1={3.75 * MM} y1={5.8 * MM} x2={3.75 * MM} y2={8.4 * MM} stroke="#9aa4ad" strokeWidth="2" />
@@ -46,6 +47,27 @@ function LedArt({ def, instance, visual }: ArtProps) {
       <ellipse cx={cx - 0.9 * MM} cy={1.7 * MM} rx={0.65 * MM} ry={1 * MM} fill="rgba(255,255,255,0.65)" />
       {/* flat side marker on cathode */}
       <line x1={cx + 2.4 * MM} y1={2.6 * MM} x2={cx + 2.4 * MM} y2={3.4 * MM} stroke="rgba(0,0,0,0.4)" strokeWidth="1.4" />
+    </g>
+  );
+}
+
+/**
+ * An LED that took too much current: the die is gone, the epoxy has gone
+ * brown and smoky, and a crack runs through the lens. Nothing about it lights.
+ */
+function BurntLedArt({ def }: { def: ArtProps['def'] }) {
+  const cx = def.widthMm * MM * 0.5;
+  const dome = `M ${cx - 2.4 * MM} ${3.4 * MM} v -1.2 a ${2.4 * MM} ${2.4 * MM} 0 0 1 ${4.8 * MM} 0 v 1.2 z`;
+  return (
+    <g data-burnt="true">
+      <line x1={1.25 * MM} y1={5.8 * MM} x2={1.25 * MM} y2={9 * MM} stroke="#9aa4ad" strokeWidth="2" />
+      <line x1={3.75 * MM} y1={5.8 * MM} x2={3.75 * MM} y2={8.4 * MM} stroke="#9aa4ad" strokeWidth="2" />
+      <circle cx={cx} cy={0.6 * MM} r={1.6 * MM} fill="rgba(90,90,90,0.35)" />
+      <circle cx={cx + 1.2 * MM} cy={-0.9 * MM} r={1.1 * MM} fill="rgba(90,90,90,0.25)" />
+      <path d={dome} fill="#4a3b2c" stroke="rgba(0,0,0,0.5)" strokeWidth="0.6" />
+      <rect x={cx - 2.75 * MM} y={3.2 * MM} width={5.5 * MM} height={1.1 * MM} rx="1" fill="#3b3024" />
+      <path d={`M ${cx - 0.8 * MM} ${0.9 * MM} l ${0.6 * MM} ${0.9 * MM} l -${0.4 * MM} ${0.5 * MM} l ${0.7 * MM} ${1.0 * MM}`} stroke="#15100b" strokeWidth="0.7" fill="none" />
+      <ellipse cx={cx - 0.9 * MM} cy={1.7 * MM} rx={0.5 * MM} ry={0.8 * MM} fill="rgba(255,255,255,0.18)" />
     </g>
   );
 }
@@ -461,7 +483,19 @@ function BatteryArt({ def }: ArtProps) {
       <rect width={W} height={H} rx="5" fill={is9v ? '#20262d' : '#2c333b'} stroke="#0d1117" />
       <rect x="0" y={H * 0.42} width={W} height={H * 0.34} fill={is9v ? '#c9a227' : '#3a7bd5'} opacity="0.9" />
       <circle cx={8 * MM} cy={2 * MM} r={2.2 * MM} fill="#b9c1c9" stroke="#79828b" />
-      <circle cx={(is9v ? 18 : 27) * MM} cy={2 * MM} r={2.8 * MM} fill="#b9c1c9" stroke="#79828b" />
+      {is9v ? (
+        // A 9 V battery's negative terminal is the larger, hexagonal snap.
+        <polygon
+          points={Array.from({ length: 6 }, (_, i) => {
+            const t = (Math.PI / 3) * i;
+            return `${18 * MM + 2.9 * MM * Math.cos(t)},${2 * MM + 2.9 * MM * Math.sin(t)}`;
+          }).join(' ')}
+          fill="#b9c1c9"
+          stroke="#79828b"
+        />
+      ) : (
+        <circle cx={27 * MM} cy={2 * MM} r={2.8 * MM} fill="#b9c1c9" stroke="#79828b" />
+      )}
       <text x={W / 2} y={H * 0.58 + 4} fontSize="8" fontWeight="700" fill="#10151b" textAnchor="middle">
         {is9v ? '9V' : '2×AA'}
       </text>

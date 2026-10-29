@@ -77,7 +77,7 @@ export function Toolbar({ phone = false }: { phone?: boolean }) {
             <PlayIcon style={{ color: '#3fb950' }} />
           </button>
         )}
-        <button className="icon-btn" title="Reset: back to how it was before Run, and start again" aria-label="Reset" disabled={!simulationController.hasFirmware} onClick={() => void simulationController.reset()}><ResetIcon /></button>
+        <button className="icon-btn" title="Reset: back to how it was before Run, and start again" aria-label="Reset" disabled={!simulationController.hasFirmware && simStatus === 'stopped'} onClick={() => void simulationController.reset()}><ResetIcon /></button>
         <button className="icon-btn" title="Stop simulation" aria-label="Stop" disabled={simStatus === 'stopped'} onClick={() => simulationController.stop()}><StopIcon /></button>
         <button className={`icon-btn${menuOpen ? ' active' : ''}`} title="More" aria-label="More" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
           <span className="more-dots">⋯</span>
@@ -155,12 +155,12 @@ export function Toolbar({ phone = false }: { phone?: boolean }) {
       {simStatus === 'running' ? (
         <button className="icon-btn active" title="Pause simulation" onClick={() => simulationController.pause()}><PauseIcon /></button>
       ) : (
-        <button className="icon-btn" title="Run (Ctrl+Enter) — compiles if needed, then executes firmware in the AVR emulator" disabled={compiling} onClick={runAction}>
+        <button className="icon-btn" title="Run (Ctrl+Enter) — compiles the sketch if there is one, then runs the circuit" disabled={compiling} onClick={runAction}>
           <PlayIcon style={{ color: '#3fb950' }} />
         </button>
       )}
       <button className="icon-btn" title="Step ~1 ms of CPU time" disabled={simStatus === 'stopped' || simStatus === 'error'} onClick={() => simulationController.step()}><StepIcon /></button>
-      <button className="icon-btn" title="Reset — every board and part goes back to how it was before Run, and the sketch starts again" disabled={!simulationController.hasFirmware} onClick={() => void simulationController.reset()}><ResetIcon /></button>
+      <button className="icon-btn" title="Reset — every board and part goes back to how it was before Run, and the sketch starts again" disabled={!simulationController.hasFirmware && simStatus === 'stopped'} onClick={() => void simulationController.reset()}><ResetIcon /></button>
       <button className="icon-btn" title="Stop simulation" disabled={simStatus === 'stopped'} onClick={() => simulationController.stop()}><StopIcon /></button>
       <button className="icon-btn" title={soundOn ? 'Sound on — speakers and buzzers play. Click to mute' : 'Sound off. Click to hear speakers and buzzers'} aria-label={soundOn ? 'Mute' : 'Unmute'} onClick={toggleSound}>
         {soundOn ? <SoundIcon /> : <MutedIcon />}

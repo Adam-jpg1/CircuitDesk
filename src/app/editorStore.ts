@@ -55,6 +55,8 @@ export interface WireDraft {
   fromPinId: string;
   points: number[];
   cursor: { x: number; y: number } | null;
+  /** The pin the wire's free end is close enough to connect to, if any. */
+  snapTo?: { componentId: string; pinId: string } | null;
 }
 
 interface EditorState {

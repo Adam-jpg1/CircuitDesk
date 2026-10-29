@@ -213,6 +213,7 @@ function InstanceInspector({ inst }: { inst: ComponentInstance }) {
 }
 
 function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: PartDefinition; simStatus: string }) {
+  const circuitLive = useSimulationStore((x) => x.circuitLive);
   const sim = useSimulationStore;
   const potPositions = useSimulationStore((s) => s.potPositions);
   const sensorValues = useSimulationStore((s) => s.sensorValues);
@@ -235,7 +236,7 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
     }
     return null;
   }
-  const disabled = simStatus === 'stopped' || simStatus === 'error';
+  const disabled = (simStatus === 'stopped' || simStatus === 'error') && !circuitLive;
   const inputs = inputControlsFor(def.id);
 
   return (
@@ -343,6 +344,17 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
       {adapter === 'sim.buzzer' && (
         <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
           State: <b>{visuals?.buzzerOn ? 'sounding' : 'silent'}</b>
+        </div>
+      )}
+      {visuals?.fault && (
+        <div style={{ fontSize: 11.5, color: '#f0b72f', marginBottom: 4 }} role="alert">
+          ⚠ {visuals.fault}
+        </div>
+      )}
+      {(adapter === 'sim.led' || adapter === 'sim.supply') && visuals?.currentMa !== undefined && (
+        <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
+          Current: <b>{visuals.currentMa < 0.05 ? '0' : visuals.currentMa.toFixed(visuals.currentMa < 10 ? 1 : 0)} mA</b>
+          {adapter === 'sim.supply' && visuals.readout?.[0] ? <> at <b>{visuals.readout[0]}</b></> : null}
         </div>
       )}
       {adapter === 'sim.speaker' && (

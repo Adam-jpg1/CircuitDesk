@@ -85,6 +85,13 @@ export function runAction(): void {
   const project = s.project;
   if (project) {
     const { targets } = resolveWorkspaceTargets(project);
+    if (targets.length === 0) {
+      // Nothing to compile: a circuit of batteries, switches and parts runs
+      // as it is.
+      simulationController.previewCircuit(project);
+      void simulationController.start();
+      return;
+    }
     if (targets.length > 0 && targets.every((t) => !getSimulatorAdapter(t.board))) {
       // Compile-capable but not simulated: build for the real targets and say so.
       void compileAction(true);

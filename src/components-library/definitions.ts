@@ -114,7 +114,7 @@ export const LED = def(
     ],
     validationRules: ['led-needs-resistor', 'led-polarity'],
     simulationAdapterId: 'sim.led',
-    description: 'Standard 5 mm LED. Lights when the anode is driven high with a current path from cathode to ground. Brightness follows PWM duty cycle.',
+    description: 'Standard 5 mm LED. Lit by the current the circuit actually puts through it, from a board pin or a battery: brightness follows the current (and PWM duty), reversed it stays dark, and over about 30 mA — no series resistor — it burns out. Forward voltage follows the colour: about 2 V red, 3 V blue and white.',
   },
 );
 
@@ -1615,7 +1615,7 @@ export const BATTERY_9V = def(
     pin('minus', '−', 18.0, 2.0, { type: 'ground', caps: ['ground'] }),
   ],
   'simulated',
-  { simulationAdapterId: 'sim.supply', description: '9 V battery. Acts as a real supply in the circuit graph (drives VIN-level nets).' },
+  { simulationAdapterId: 'sim.supply', description: '9 V battery: the small round terminal is +, the large hexagonal one −. A real source with about 1.5 Ω internal resistance, so it powers a circuit with no board and a short across it is reported rather than drawn as infinite current.' },
 );
 
 export const BATTERY_AA = def(

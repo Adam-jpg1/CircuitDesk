@@ -38,6 +38,21 @@ import { useSimulationStore } from './simulationStore';
 import type { CompileStage } from '../app/editorStore';
 import type { BoardDefinition, CircuitProject, CompileResult, SimulationNote } from '../types';
 
+/** How often the live bench is re-solved while nothing is running. */
+const PREVIEW_TICK_MS = 50;
+const EMPTY_SNAPSHOT = { states: [], duty: [], pulseWidthUs: [], toggles: [] };
+
+/** Whether any board on the canvas has a sketch the simulator could run. */
+function hasRunnableBoard(project: CircuitProject | null): boolean {
+  if (!project) return false;
+  return resolveWorkspaceTargets(project).targets.some((t) => getSimulatorAdapter(t.board));
+}
+
+/** Whether anything on the canvas can power a circuit by itself. */
+function hasBenchSource(project: CircuitProject): boolean {
+  return project.componentInstances.some((i) => resolveDefinition(i.definitionId, project)?.simulationAdapterId === 'sim.supply');
+}
+
 const TICK_MS = 12;
 /** How long a Run waits for a busy compiler before reporting it. */
 const BUSY_WAIT_LIMIT_MS = 45_000;
@@ -146,6 +161,20 @@ class SimulationController {
 
   /** Controls sampled once per tick and read by the world's settle callback. */
   private controlsNow: SimControls = emptyControls();
+
+  /**
+   * The circuit with no board running: batteries, switches, LEDs, motors.
+   *
+   * Solved live while nothing is running, so a battery wired through a
+   * resistor to an LED lights the moment the last wire goes in, exactly as on
+   * a bench. Pressing Run on a canvas with no board runs this same circuit
+   * with the clock going and the parts clickable.
+   */
+  private bench: CircuitBinding | null = null;
+  /** Run was pressed on a canvas with nothing to compile. */
+  private benchRun = false;
+  private previewTimer: ReturnType<typeof setInterval> | null = null;
+  private previewLastWall = 0;
 
   private compileFn: CompileFn = (project, target) => compileProjectCode(project, target);
 
@@ -605,7 +634,13 @@ class SimulationController {
       store.setStatus('error', 'No project loaded.');
       return Promise.resolve(false);
     }
+    if (store.status === 'paused' && this.benchRun) {
+      this.resumeLoop();
+      store.setStatus('running');
+      return Promise.resolve(true);
+    }
     if (!this.hasFirmware) {
+      if (!hasRunnableBoard(this.project)) return Promise.resolve(this.startBench());
       store.setStatus('error', 'No compiled firmware loaded. Compile the sketch first.');
       return Promise.resolve(false);
     }
@@ -679,6 +714,8 @@ class SimulationController {
     }
 
     this.world = world;
+    this.stopPreview();
+    this.benchRun = false;
     this.rebind();
     this.publishSerialTargets();
     if (failures.length > 0) console.warn('[CircuitDesk]', failures.join(' '));
@@ -805,6 +842,13 @@ class SimulationController {
    * one rather than a parallel implementation.
    */
   advance(simMs: number): boolean {
+    if (!this.world && this.benchRun && this.bench) {
+      this.controlsNow = this.controls();
+      this.bench.advanceClock(simMs);
+      this.bench.update(this.controlsNow);
+      this.simMsRecently += simMs;
+      return true;
+    }
     const world = this.world;
     const binding = this.binding;
     if (!world || !binding) return false;
@@ -829,6 +873,10 @@ class SimulationController {
    * stepping, and anything driving the controller a fixed amount at a time.
    */
   publishNow(): void {
+    if (!this.world && this.bench) {
+      this.publishBench();
+      return;
+    }
     const world = this.world;
     const binding = this.binding;
     if (!world || !binding) return;
@@ -858,7 +906,7 @@ class SimulationController {
   /** Advances a fixed slice of simulated time while paused (single-step). */
   step(simMs = 1): void {
     const store = useSimulationStore.getState();
-    if (!this.world || !this.binding) return;
+    if (!(this.world && this.binding) && !(this.benchRun && this.bench)) return;
     if (store.status === 'running') this.pause();
     if (this.advance(simMs)) {
       this.publishNow();
@@ -886,6 +934,17 @@ class SimulationController {
    */
   reset(): Promise<boolean> {
     const store = useSimulationStore.getState();
+    if (this.benchRun && !this.world) {
+      // A board-less circuit starts again from cold: capacitors empty, motors
+      // at rest, a burned-out LED replaced.
+      const wasRunning = store.status === 'running';
+      this.stopLoop();
+      this.bench = this.project ? new CircuitBinding(this.project, null) : null;
+      this.publishBench(0);
+      if (wasRunning) this.resumeLoop();
+      store.setStatus(wasRunning ? 'running' : 'paused');
+      return Promise.resolve(true);
+    }
     if (!this.world || this.starting) return Promise.resolve(false);
     const wasRunning = store.status === 'running';
     this.stopLoop();
@@ -953,6 +1012,7 @@ class SimulationController {
     this.world?.dispose();
     this.world = null;
     this.binding = null;
+    this.benchRun = false;
     const store = useSimulationStore.getState();
     store.setStatus('stopped');
     store.publishFrame({
@@ -961,6 +1021,8 @@ class SimulationController {
       pinSnapshot: { states: [], duty: [], pulseWidthUs: [], toggles: [] },
       visuals: {},
     });
+    // Back to the live bench: the batteries are still in the circuit.
+    if (this.project) this.previewCircuit(this.project);
   }
 
   /**
@@ -977,6 +1039,8 @@ class SimulationController {
    */
   closeProject(): void {
     this.stop();
+    this.stopPreview();
+    this.bench = null;
     this.project = null;
     this.builds = [];
     this.artifacts.clear();
@@ -991,6 +1055,85 @@ class SimulationController {
     store.setSerialTarget(null);
     store.setBuilds([]);
     store.resetInputs();
+  }
+
+  // ---------------------------------------------------------------- bench
+
+  /**
+   * Keeps the board-less circuit solved while nothing is running.
+   *
+   * Called on every change to the project. Rebuilding the binding is what a
+   * changed circuit is: new wiring, new parts, and any LED that burned out in
+   * the old circuit replaced. While a board world is running this does
+   * nothing — the world's own binding is the live circuit then.
+   */
+  previewCircuit(project: CircuitProject): void {
+    this.project = project;
+    if (this.world) return;
+    this.bench = new CircuitBinding(project, null);
+    if (this.benchRun) return; // the run loop drives it
+    const store = useSimulationStore.getState();
+    if (!hasBenchSource(project)) {
+      this.stopPreview();
+      store.setCircuitLive(false);
+      store.publishFrame({ simTimeMs: 0, speedFactor: 1, pinSnapshot: EMPTY_SNAPSHOT, visuals: {} });
+      return;
+    }
+    store.setCircuitLive(true);
+    this.publishBench(0);
+    if (!this.previewTimer) {
+      this.previewLastWall = performance.now();
+      this.previewTimer = setInterval(() => this.previewTick(), PREVIEW_TICK_MS);
+    }
+  }
+
+  private previewTick(): void {
+    const now = performance.now();
+    const elapsed = Math.min(100, now - this.previewLastWall);
+    this.previewLastWall = now;
+    const status = useSimulationStore.getState().status;
+    if (this.world || this.benchRun || !this.bench || (status !== 'stopped' && status !== 'error')) return;
+    this.controlsNow = this.controls();
+    this.bench.advanceClock(elapsed);
+    this.publishBench(0);
+  }
+
+  private stopPreview(): void {
+    if (this.previewTimer) {
+      clearInterval(this.previewTimer);
+      this.previewTimer = null;
+    }
+    useSimulationStore.getState().setCircuitLive(false);
+  }
+
+  /** Run on a canvas with no board to run: the circuit itself, clock going. */
+  private startBench(): boolean {
+    const project = this.project;
+    if (!project) return false;
+    this.stopPreview();
+    this.bench = new CircuitBinding(project, null);
+    this.benchRun = true;
+    this.clearSerial();
+    this.publishBench(0);
+    useSimulationStore.getState().setStatus('running');
+    this.resumeLoop();
+    return true;
+  }
+
+  private publishBench(simTimeMs?: number): void {
+    const bench = this.bench;
+    if (!bench) return;
+    this.controlsNow = this.controls();
+    const { visuals } = bench.update(this.controlsNow);
+    const speedFactor = this.wallRecently > 0 ? this.simMsRecently / this.wallRecently : 1;
+    this.simMsRecently = 0;
+    this.wallRecently = 0;
+    useSimulationStore.getState().publishFrame({
+      simTimeMs: simTimeMs ?? bench.clockMs,
+      speedFactor,
+      pinSnapshot: EMPTY_SNAPSHOT,
+      visuals: Object.fromEntries(visuals),
+    });
   }
 
   private stopLoop(): void {

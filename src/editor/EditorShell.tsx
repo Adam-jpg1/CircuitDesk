@@ -46,9 +46,11 @@ export function EditorShell({ projectId }: { projectId: string }) {
   const boardInstances = project?.boardInstances;
   useEffect(() => {
     const p = useEditorStore.getState().project;
-    if (p && useSimulationStore.getState().status !== 'stopped') {
-      simulationController.refreshCircuit(p);
-    }
+    if (!p) return;
+    if (useSimulationStore.getState().status !== 'stopped') simulationController.refreshCircuit(p);
+    // The circuit is live without a run: a battery lights its LED as soon as
+    // it is wired. Ignored while a board world is running.
+    simulationController.previewCircuit(p);
   }, [connections, componentInstances, boardInstances]);
 
   // Compile in the background once the code has been still for a moment, so

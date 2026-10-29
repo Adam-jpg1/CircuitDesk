@@ -53,6 +53,12 @@ interface SimulationState {
   visuals: Record<string, ComponentVisualState>;
   /** Bumped on every published frame so canvas layers can subscribe cheaply. */
   frame: number;
+  /**
+   * True while the circuit is being solved without a run: batteries and the
+   * parts they power behave as they would on a bench, and switches and knobs
+   * in the inspector work, before any board is started.
+   */
+  circuitLive: boolean;
 
   // user inputs
   pressedButtons: string[];
@@ -61,6 +67,7 @@ interface SimulationState {
   sensorValues: Record<string, number>;
 
   setStatus(status: SimStatus, error?: string | null): void;
+  setCircuitLive(live: boolean): void;
   publishFrame(data: {
     simTimeMs: number;
     speedFactor: number;
@@ -94,12 +101,14 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   pinSnapshot: null,
   visuals: {},
   frame: 0,
+  circuitLive: false,
   pressedButtons: [],
   toggleStates: {},
   potPositions: {},
   sensorValues: {},
 
   setStatus: (status, error = null) => set({ status, error }),
+  setCircuitLive: (live) => set({ circuitLive: live }),
 
   publishFrame: (data) =>
     set((s) => ({

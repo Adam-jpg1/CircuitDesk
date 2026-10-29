@@ -2,7 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
 import { resolveDefinition, resolvePin } from '../project/partsRegistry';
-import { buildCircuitGraph } from '../circuit/nets';
+import { buildCircuitGraph, isBreadboard, seatInBreadboards, seatingOffset, splitNode } from '../circuit/nets';
+import { toast } from '../ui/primitives';
 import { arduinoPinNumber } from '../boards/pinMaps';
 import { runnerPinIndex } from '../simulation/boardRunner';
 import { pinAbsolute, partBounds, partSize, wirePath, snap, type Pt } from './geometry';
@@ -34,6 +35,8 @@ interface DragState {
 
 /** How far from a pin, in screen pixels, a fingertip still counts as on it. */
 const TOUCH_PIN_SLOP_PX = 22;
+/** How close, on screen, a mouse has to be to a pin for a wire's end to snap to it. */
+const MOUSE_PIN_SNAP_PX = 14;
 /** How far a finger may wander and still have tapped. */
 const TAP_SLOP_PX = 6;
 
@@ -255,15 +258,18 @@ export function CanvasStage() {
    * within reach rather than needing to land on one.
    */
   const pinNearTouch = useCallback(
-    (clientX: number, clientY: number): { componentId: string; pinId: string } | null => {
+    (clientX: number, clientY: number, reachPx = TOUCH_PIN_SLOP_PX): { componentId: string; pinId: string } | null => {
       const world = toWorld(clientX, clientY);
-      const reach = TOUCH_PIN_SLOP_PX / view.zoom;
+      const reach = reachPx / view.zoom;
+      const from = store.getState().wireDraft;
       let best: { componentId: string; pinId: string } | null = null;
       let bestDist = reach;
       for (const inst of instances) {
         const def = definitions.get(inst.id);
         if (!def) continue;
         for (const pin of def.pins) {
+          // A wire does not end where it started.
+          if (from && from.fromComponentId === inst.id && from.fromPinId === pin.id) continue;
           const at = pinAbsolute(inst, def, pin);
           const d = Math.hypot(at.x - world.x, at.y - world.y);
           if (d < bestDist) {
@@ -274,7 +280,7 @@ export function CanvasStage() {
       }
       return best;
     },
-    [toWorld, view.zoom, instances, definitions],
+    [toWorld, view.zoom, instances, definitions, store],
   );
 
   const onBackgroundPointerDown = useCallback(
@@ -304,7 +310,12 @@ export function CanvasStage() {
         return;
       }
       if (s.wireDraft) {
-        // add a waypoint
+        // Near a pin, the wire connects to it; anywhere else, a click bends it.
+        const target = pinNearTouch(e.clientX, e.clientY, MOUSE_PIN_SNAP_PX);
+        if (target) {
+          finishWire(target.componentId, target.pinId);
+          return;
+        }
         s.setWireDraft({ ...s.wireDraft, points: [...s.wireDraft.points, snap(world.x), snap(world.y)] });
         return;
       }
@@ -317,7 +328,7 @@ export function CanvasStage() {
         if (!e.shiftKey) s.setSelection({ componentIds: [], connectionIds: [] });
       }
     },
-    [toWorld, tool, spaceHeld, view, store, pinNearTouch, wireFromOrTo],
+    [toWorld, tool, spaceHeld, view, store, pinNearTouch, wireFromOrTo, finishWire],
   );
 
   /**
@@ -461,7 +472,15 @@ export function CanvasStage() {
         onBackgroundPointerDown(e);
         return;
       }
-      if (s.wireDraft) return;
+      if (s.wireDraft) {
+        // A wire dropped on a part connects to the pin it is nearest, if it
+        // is near one. On the body, away from every pin, it used to do
+        // nothing at all and say nothing — now it says why.
+        const target = pinNearTouch(e.clientX, e.clientY, MOUSE_PIN_SNAP_PX);
+        if (target) finishWire(target.componentId, target.pinId);
+        else toast('A wire connects at a pin — move to one of the part\'s pins (it lights up green) and click there.', 'info');
+        return;
+      }
 
       const already = s.selection.componentIds.includes(inst.id);
       if (e.shiftKey) {
@@ -490,7 +509,8 @@ export function CanvasStage() {
       const s = store.getState();
       if (s.wireDraft) {
         const world = toWorld(e.clientX, e.clientY);
-        s.setWireDraft({ ...s.wireDraft, cursor: world });
+        const target = pinNearTouch(e.clientX, e.clientY, e.pointerType === 'touch' ? TOUCH_PIN_SLOP_PX : MOUSE_PIN_SNAP_PX);
+        s.setWireDraft({ ...s.wireDraft, cursor: world, snapTo: target });
       }
       const drag = dragRef.current;
       if (!drag) return;
@@ -523,7 +543,7 @@ export function CanvasStage() {
         });
       }
     },
-    [store, toWorld],
+    [store, toWorld, pinNearTouch],
   );
 
   const onPointerUp = useCallback(() => {
@@ -532,6 +552,15 @@ export function CanvasStage() {
     const s = store.getState();
     if (!drag) return;
     if (drag.kind === 'move' && drag.moved) {
+      // Dropped over a breadboard, a part's legs go into the holes: nudge it
+      // so the nearest leg sits exactly in its hole. Not when a breadboard is
+      // itself being moved — the parts on it travel with it or stay put.
+      const moving = instances.filter((i) => s.selection.componentIds.includes(i.id));
+      if (!moving.some((i) => isBreadboard(definitions.get(i.id)))) {
+        const lead = moving.find((i) => definitions.get(i.id));
+        const offset = lead ? seatingOffset(lead, definitions.get(lead.id)!, instances, definitions) : null;
+        if (offset) s.moveInstances(s.selection.componentIds, offset.dx, offset.dy, false);
+      }
       s.moveInstances(s.selection.componentIds, 0, 0, true);
     } else if (drag.kind === 'pan' && !drag.moved) {
       if (drag.tapClears) s.setSelection({ componentIds: [], connectionIds: [] });
@@ -632,8 +661,16 @@ export function CanvasStage() {
       add(c.sourceComponentId, c.sourcePinId);
       add(c.targetComponentId, c.targetPinId);
     }
+    // A leg pushed into a breadboard is connected without a wire, and so is
+    // the hole it is in.
+    for (const [pinKey, holeKey] of seatInBreadboards(instances, definitions)) {
+      for (const key of [pinKey, holeKey]) {
+        const [instId, pinId] = splitNode(key);
+        add(instId, pinId);
+      }
+    }
     return map;
-  }, [project?.connections]);
+  }, [project?.connections, instances, definitions]);
 
   const issueHighlights = useMemo(() => {
     if (!highlightedIssueId) return { comps: new Set<string>(), conns: new Set<string>() };
@@ -796,7 +833,19 @@ const WiresLayer = memo(function WiresLayer({
       {project.connections.map((conn) => {
         const a = pinPos(conn.sourceComponentId, conn.sourcePinId);
         const b = pinPos(conn.targetComponentId, conn.targetPinId);
-        if (!a || !b) return null;
+        if (!a || !b) {
+          // One end names a pin that is not there any more — a part was
+          // swapped for one without it. Show the loose end, not nothing.
+          const at = a ?? b;
+          if (!at) return null;
+          return (
+            <g key={conn.id} data-connection-id={conn.id} data-dangling="true">
+              <title>This wire is not connected at its other end: the pin it went to no longer exists. Delete it or rewire it.</title>
+              <circle cx={at.x} cy={at.y} r="5" fill="none" stroke="#f85149" strokeWidth="1.6" />
+              <path d={`M ${at.x - 3} ${at.y - 3} l 6 6 M ${at.x + 3} ${at.y - 3} l -6 6`} stroke="#f85149" strokeWidth="1.4" />
+            </g>
+          );
+        }
         const d = wirePath(a, b, conn.points, conn.routing);
         const selected = selection.includes(conn.id);
         const active = activity.get(conn.id);
@@ -852,11 +901,23 @@ function WireDraftLayer({ pinPos }: { pinPos: (c: string, p: string) => Pt | nul
   if (!draft || !draft.cursor) return null;
   const from = pinPos(draft.fromComponentId, draft.fromPinId);
   if (!from) return null;
-  const d = wirePath(from, draft.cursor, draft.points, 'smooth');
+  const target = draft.snapTo ? pinPos(draft.snapTo.componentId, draft.snapTo.pinId) : null;
+  const end = target ?? draft.cursor;
+  const d = wirePath(from, end, draft.points, 'smooth');
   return (
     <g pointerEvents="none">
       <path d={d} stroke="#3d9df2" strokeWidth="3" fill="none" strokeLinecap="round" strokeDasharray="7 5" opacity="0.9" />
       <circle cx={from.x} cy={from.y} r="3.4" fill="#3d9df2" />
+      {target ? (
+        // Will connect here.
+        <g data-wire-end="snapped">
+          <circle cx={target.x} cy={target.y} r="7" fill="rgba(63,185,80,0.25)" stroke="#3fb950" strokeWidth="1.8" />
+          <circle cx={target.x} cy={target.y} r="2.6" fill="#3fb950" />
+        </g>
+      ) : (
+        // Dangling: a click here bends the wire rather than ending it.
+        <circle data-wire-end="dangling" cx={end.x} cy={end.y} r="4" fill="none" stroke="#f0883e" strokeWidth="1.6" strokeDasharray="2 2" />
+      )}
     </g>
   );
 }
@@ -963,6 +1024,16 @@ const PartView = memo(function PartView({
         )
       ) : (
         <ComponentArtwork def={def} instance={inst} visual={visual} />
+      )}
+
+      {visual?.fault && (
+        // Something electrically wrong: a burned-out LED, a shorted battery.
+        // Hover for what happened and what to do about it.
+        <g transform={`translate(${w - 2} ${-2}) rotate(${-inst.rotation})`} pointerEvents="all" data-fault={visual.fault}>
+          <title>{visual.fault}</title>
+          <circle r={7} fill="#d29922" stroke="#0d1117" strokeWidth={1.2} />
+          <text y={3.4} fontSize={10} fontWeight={800} fill="#0d1117" textAnchor="middle">!</text>
+        </g>
       )}
 
       {(selected || issueHighlight) && (
