@@ -44,12 +44,21 @@ const GPIO_IN = 0x3c;
 const GPIO_STATUS = 0x44;
 const GPIO_STATUS_W1TS = 0x48;
 const GPIO_STATUS_W1TC = 0x4c;
+const GPIO_PCPU_INT = 0x5c;
 const GPIO_PIN_BASE = 0x74;
 const GPIO_FUNC_IN_SEL_BASE = 0x154;
 const GPIO_FUNC_OUT_SEL_BASE = 0x554;
 
 /** GPIO_PINn_REG: bit 2 puts the pad into open-drain mode. */
 const GPIO_PIN_PAD_DRIVER = 1 << 2;
+/** GPIO_PINn_REG.INT_TYPE (bits 7-9) and INT_ENA (bits 13-17; bit 13 is the CPU's). */
+const INT_TYPE_SHIFT = 7;
+const INT_ENA_CPU = 1 << 13;
+const INT_RISING = 1;
+const INT_FALLING = 2;
+const INT_ANY_EDGE = 3;
+const INT_LOW = 4;
+const INT_HIGH = 5;
 
 /** FUNCn_OUT_SEL_CFG fields. */
 const OUT_SEL_MASK = 0xff;
@@ -107,6 +116,17 @@ export interface Esp32C3GpioOptions {
   base?: number;
   ioMuxBase?: number;
   pinCount?: number;
+  /** The GPIO interrupt's source number on this chip's interrupt matrix (16 on the C3, 30 on the C6). */
+  interruptSource?: number;
+  /** FUNCn_IN_SEL_CFG: the GPIO-number mask, then the invert and route-through-matrix bits (C3: 0x1f, 5, 6; C6: 0x3f, 6, 7). */
+  inSel?: { mask: number; invBit: number; sigSelBit: number };
+}
+
+/** What a peripheral is putting on one of its matrix output signals. */
+export interface SignalDrive {
+  level: 0 | 1;
+  /** The peripheral's own output enable for the signal. */
+  enable: boolean;
 }
 
 /**
@@ -131,6 +151,12 @@ export class Esp32C3Gpio implements Peripheral {
 
   private readonly listeners = new Set<(change: PinChange) => void>();
 
+  /** Peripheral output signals currently driven, by matrix signal number. */
+  private readonly signals = new Map<number, SignalDrive>();
+
+  /** Called when the GPIO interrupt may have changed without a register write. */
+  onInterruptChange: (() => void) | null = null;
+
   /** The IO MUX, exposed as its own peripheral because it has its own base. */
   readonly ioMux: Esp32C3IoMux;
 
@@ -154,6 +180,7 @@ export class Esp32C3Gpio implements Peripheral {
     }
     this.external.clear();
     this.reported.clear();
+    this.signals.clear();
     this.ioMux.reset();
     this.refresh();
   }
@@ -162,6 +189,7 @@ export class Esp32C3Gpio implements Peripheral {
 
   readUint32(offset: number): number {
     if (offset === GPIO_IN) return this.inputRegister();
+    if (offset === GPIO_PCPU_INT) return this.cpuInterruptStatus();
     return (this.registers.get(offset) ?? 0) >>> 0;
   }
 
@@ -187,6 +215,8 @@ export class Esp32C3Gpio implements Peripheral {
         break;
       case GPIO_STATUS_W1TC:
         this.registers.set(GPIO_STATUS, (this.peek(GPIO_STATUS) & ~v) >>> 0);
+        // A level interrupt whose level still holds is raised again at once.
+        this.latchLevels();
         break;
       case GPIO_IN:
       case GPIO_STRAP:
@@ -204,37 +234,40 @@ export class Esp32C3Gpio implements Peripheral {
 
   // ------------------------------------------------------------ pad model
 
-  /** True when the matrix and IO MUX let the GPIO register reach this pad. */
-  private padFollowsGpioRegister(pin: number): boolean {
-    if (this.ioMux.functionOf(pin) !== PIN_FUNC_GPIO) return false;
-    return (this.peek(GPIO_FUNC_OUT_SEL_BASE + pin * 4) & OUT_SEL_MASK) === SIG_GPIO_OUT_IDX;
+  private outSel(pin: number): number {
+    return this.peek(GPIO_FUNC_OUT_SEL_BASE + pin * 4);
   }
 
   /**
-   * True when the pad is configured to drive at all.
+   * What the matrix puts on a pad: whether it drives, and the level, before
+   * open-drain is applied.
    *
-   * Where the enable comes from depends on what the matrix routed. The
-   * special signal meaning "this is a plain GPIO" carries its enable in the
-   * GPIO enable register, and firmware leaves OEN_SEL clear for it — requiring
-   * that bit would leave every ordinary output looking undriven. A pad routed
-   * to a real peripheral takes its enable from that peripheral unless OEN_SEL
-   * overrides it, and those peripherals are not modelled here, so such a pad
-   * is reported as not driven rather than guessed at.
+   * SIG_GPIO_OUT_IDX means the pad follows the GPIO output and enable
+   * registers. Any other signal is a peripheral's: its level comes from the
+   * peripheral, and its enable too unless OEN_SEL hands that to the GPIO
+   * enable register. A signal no modelled peripheral drives is left undriven
+   * rather than guessed at. Either way the IO MUX must have given the pad to
+   * the matrix.
    */
-  private outputEnabled(pin: number): boolean {
-    if (this.ioMux.functionOf(pin) !== PIN_FUNC_GPIO) return false;
-    const config = this.peek(GPIO_FUNC_OUT_SEL_BASE + pin * 4);
-    const fromGpioRegister = (config & OUT_SEL_MASK) === SIG_GPIO_OUT_IDX || (config & OEN_SEL) !== 0;
-    if (!fromGpioRegister) return false;
-    const enabled = (this.peek(GPIO_ENABLE) & (1 << pin)) !== 0;
-    return (config & OEN_INV_SEL) !== 0 ? !enabled : enabled;
-  }
-
-  /** The value the chip would put on the pad, before open-drain is applied. */
-  private outputValue(pin: number): 0 | 1 {
-    const value = (this.peek(GPIO_OUT) & (1 << pin)) !== 0 ? 1 : 0;
-    const inverted = (this.peek(GPIO_FUNC_OUT_SEL_BASE + pin * 4) & OUT_INV_SEL) !== 0;
-    return (inverted ? 1 - value : value) as 0 | 1;
+  private matrixDrive(pin: number): { driving: boolean; value: 0 | 1 } {
+    if (this.ioMux.functionOf(pin) !== PIN_FUNC_GPIO) return { driving: false, value: 0 };
+    const config = this.outSel(pin);
+    const signal = config & OUT_SEL_MASK;
+    const gpioEnabled = (this.peek(GPIO_ENABLE) & (1 << pin)) !== 0;
+    let enabled: boolean;
+    let value: 0 | 1;
+    if (signal === SIG_GPIO_OUT_IDX) {
+      enabled = gpioEnabled;
+      value = (this.peek(GPIO_OUT) & (1 << pin)) !== 0 ? 1 : 0;
+    } else {
+      const drive = this.signals.get(signal);
+      if (!drive) return { driving: false, value: 0 };
+      enabled = (config & OEN_SEL) !== 0 ? gpioEnabled : drive.enable;
+      value = drive.level;
+    }
+    if ((config & OEN_INV_SEL) !== 0) enabled = !enabled;
+    if ((config & OUT_INV_SEL) !== 0) value = (1 - value) as 0 | 1;
+    return { driving: enabled, value };
   }
 
   private openDrain(pin: number): boolean {
@@ -249,9 +282,8 @@ export class Esp32C3Gpio implements Peripheral {
    * pull-up or another device decides the level instead.
    */
   private resolve(pin: number): { level: PinLevel; driver: PadDriver } {
-    const driving = this.outputEnabled(pin) && this.padFollowsGpioRegister(pin);
+    const { driving, value } = this.matrixDrive(pin);
     if (driving) {
-      const value = this.outputValue(pin);
       if (!(this.openDrain(pin) && value === 1)) return { level: value, driver: 'chip' };
     }
     const external = this.external.get(pin);
@@ -289,7 +321,7 @@ export class Esp32C3Gpio implements Peripheral {
 
   pinState(pin: number): PinState {
     const { level } = this.resolve(pin);
-    const driving = this.outputEnabled(pin) && this.padFollowsGpioRegister(pin);
+    const { driving } = this.matrixDrive(pin);
     const direction = driving ? 'output' : this.ioMux.inputEnabled(pin) ? 'input' : 'disabled';
     return {
       pin,
@@ -322,13 +354,110 @@ export class Esp32C3Gpio implements Peripheral {
    * moment it happens and never later.
    */
   private refresh(): void {
+    const before = this.cpuInterruptStatus();
     for (let pin = 0; pin < this.pinCount; pin++) {
       const current = this.pinState(pin);
       const previous = this.reported.get(pin);
       this.reported.set(pin, current);
-      if (previous === undefined || !pinStateChanged(previous, current)) continue;
+      if (previous === undefined) continue;
+      if (previous.level !== current.level) this.edge(pin, current.level === 1);
+      if (!pinStateChanged(previous, current)) continue;
       for (const listener of this.listeners) listener({ previous, current });
     }
+    this.latchLevels();
+    if (this.cpuInterruptStatus() !== before) this.onInterruptChange?.();
+  }
+
+  // ------------------------------------------------------------- matrix signals
+
+  /**
+   * A peripheral drives one of its output signals. Pads the matrix routes the
+   * signal to follow at once, and report the change like any other.
+   */
+  driveSignal(signal: number, drive: SignalDrive | undefined): void {
+    const previous = this.signals.get(signal);
+    if (drive === undefined) {
+      if (!previous) return;
+      this.signals.delete(signal);
+    } else {
+      if (previous && previous.level === drive.level && previous.enable === drive.enable) return;
+      this.signals.set(signal, drive);
+    }
+    this.refresh();
+  }
+
+  /**
+   * The pad a peripheral input signal reads, if the matrix routes one to it.
+   * A signal not routed through the matrix (SIG_IN_SEL clear) reads its IO MUX
+   * pad directly, which no modelled peripheral uses, so it reports none.
+   */
+  inputSignalPin(signal: number): number | undefined {
+    const layout = this.options.inSel ?? { mask: 0x1f, invBit: 5, sigSelBit: 6 };
+    const config = this.peek(GPIO_FUNC_IN_SEL_BASE + signal * 4);
+    if (!(config & (1 << layout.sigSelBit))) return undefined;
+    const pin = config & layout.mask;
+    return pin < this.pinCount ? pin : undefined;
+  }
+
+  /** The first pad the matrix routes a peripheral output signal to, if any. */
+  outputSignalPin(signal: number): number | undefined {
+    for (let pin = 0; pin < this.pinCount; pin++) {
+      if (this.ioMux.functionOf(pin) === PIN_FUNC_GPIO && (this.outSel(pin) & OUT_SEL_MASK) === signal) return pin;
+    }
+    return undefined;
+  }
+
+  /** The level a peripheral input signal sees: its pad, inverted if asked, or a constant. */
+  inputSignalLevel(signal: number): 0 | 1 {
+    const layout = this.options.inSel ?? { mask: 0x1f, invBit: 5, sigSelBit: 6 };
+    const config = this.peek(GPIO_FUNC_IN_SEL_BASE + signal * 4);
+    const pin = config & layout.mask;
+    // Past the last GPIO are the constants: the highest numbers read high.
+    let level: 0 | 1 = pin < this.pinCount ? (this.resolve(pin).level === 1 ? 1 : 0) : pin === layout.mask ? 1 : 0;
+    if (config & (1 << layout.invBit)) level = (1 - level) as 0 | 1;
+    return level;
+  }
+
+  // --------------------------------------------------------------- interrupts
+
+  private intType(pin: number): number {
+    return (this.peek(GPIO_PIN_BASE + pin * 4) >>> INT_TYPE_SHIFT) & 0x7;
+  }
+
+  /** An edge on a pad sets its STATUS bit if the pin's interrupt type wants it. */
+  private edge(pin: number, high: boolean): void {
+    const type = this.intType(pin);
+    if (type === INT_ANY_EDGE || (type === INT_RISING && high) || (type === INT_FALLING && !high)) {
+      this.registers.set(GPIO_STATUS, (this.peek(GPIO_STATUS) | (1 << pin)) >>> 0);
+    }
+  }
+
+  /** Level types hold their STATUS bit for as long as the level does. */
+  private latchLevels(): void {
+    let set = 0;
+    for (let pin = 0; pin < this.pinCount; pin++) {
+      const type = this.intType(pin);
+      if (type !== INT_LOW && type !== INT_HIGH) continue;
+      if (this.resolve(pin).level === (type === INT_HIGH ? 1 : 0)) set |= 1 << pin;
+    }
+    if (set) this.registers.set(GPIO_STATUS, (this.peek(GPIO_STATUS) | set) >>> 0);
+  }
+
+  /** GPIO_PCPU_INT: the STATUS bits of pins whose interrupt goes to the CPU. */
+  private cpuInterruptStatus(): number {
+    const status = this.peek(GPIO_STATUS);
+    if (!status) return 0;
+    let value = 0;
+    for (let pin = 0; pin < this.pinCount; pin++) {
+      if (status & (1 << pin) && this.peek(GPIO_PIN_BASE + pin * 4) & INT_ENA_CPU) value |= 1 << pin;
+    }
+    return value >>> 0;
+  }
+
+  /** The GPIO interrupt source is asserted while any CPU-enabled pin has its STATUS bit. */
+  assertedInterruptSources(): number[] {
+    const source = this.options.interruptSource;
+    return source !== undefined && this.cpuInterruptStatus() !== 0 ? [source] : [];
   }
 }
 

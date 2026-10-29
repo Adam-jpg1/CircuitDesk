@@ -28,6 +28,9 @@ import { Esp32C6InterruptController, ESP32C6_INTERRUPT_SOURCE } from './interrup
 import { Esp32C6LpTimer } from './lpTimer';
 import { Esp32C6AnalogMaster } from './analogMaster';
 import { Esp32C6Pcr } from './pcr';
+import { EspLedc, ESP32C6_LEDC } from '../espRiscv/ledc';
+import { EspI2c, ESP32C6_I2C0, type EspBusPorts } from '../espRiscv/i2c';
+import { EspSpi2, ESP32C6_SPI2 } from '../espRiscv/spi2';
 
 /** Documented ESP32-C6 peripheral base addresses. */
 export const ESP32C6_PERIPHERAL_BASE = {
@@ -91,6 +94,8 @@ export function esp32c6Gpio(clock: SimulatedClock): Esp32C3Gpio {
     base: ESP32C6_PERIPHERAL_BASE.gpio,
     ioMuxBase: ESP32C6_PERIPHERAL_BASE.ioMux,
     pinCount: ESP32C6_GPIO_COUNT,
+    interruptSource: ESP32C6_INTERRUPT_SOURCE.gpio,
+    inSel: { mask: 0x3f, invBit: 6, sigSelBit: 7 },
   });
 }
 
@@ -110,7 +115,11 @@ export interface Esp32C6Peripherals {
  * because callers need to talk to them directly — a runner drives pads through
  * the first and nothing else can reach the second's two halves as one object.
  */
-export function createEsp32C6Peripherals(clock: SimulatedClock, flash?: SerialNorFlash): Esp32C6Peripherals {
+export function createEsp32C6Peripherals(
+  clock: SimulatedClock,
+  flash?: SerialNorFlash,
+  ports: EspBusPorts = { i2c: null, spi: null },
+): Esp32C6Peripherals {
   const mmu = new Esp32C6FlashMmu();
   const interrupts = new Esp32C6InterruptController();
   const gpio = esp32c6Gpio(clock);
@@ -156,6 +165,12 @@ export function createEsp32C6Peripherals(clock: SimulatedClock, flash?: SerialNo
     uart0,
     // The SAR ADC's one-shot path: analogRead().
     adc,
+    // The LED PWM controller; its clock source is selected in PCR on this part
+    // (PCR_LEDC_SCLK_CONF.SEL, bits 20-21).
+    new EspLedc(ESP32C6_LEDC, clock, gpio, () => (pcr.readUint32(0x38) >>> 20) & 0x3),
+    // Wire and SPI, on the shared device buses.
+    new EspI2c(ESP32C6_I2C0, clock, () => ports.i2c),
+    new EspSpi2(ESP32C6_SPI2, () => ports.spi),
   ];
 
   return { peripherals, gpio, uart0, adc, interrupts, mmu };

@@ -16,6 +16,7 @@ import type { EspSarAdc } from '../espRiscv/sarAdc';
 import { EspRiscvMachine, type EspMachineOptions } from '../espRiscv/machine';
 import { ESP32C6_SOC } from '../espRiscv/soc';
 import { createEsp32C6Peripherals, type Esp32C6Peripherals } from './peripherals';
+import type { EspBusPorts } from '../espRiscv/i2c';
 import type { SerialNorFlash } from '../esp32c3/spiFlash';
 import type { Esp32C3Gpio } from '../esp32c3/gpio';
 import type { Esp32C6InterruptController } from './interrupts';
@@ -62,9 +63,13 @@ export interface Esp32C6MachineParts {
  * here means no caller has to know that the C6 splits what the C3 keeps
  * together.
  */
-export function createEsp32C6Machine(flash?: SerialNorFlash, options: EspMachineOptions = {}): Esp32C6MachineParts {
+export function createEsp32C6Machine(
+  flash?: SerialNorFlash,
+  options: EspMachineOptions = {},
+  ports?: EspBusPorts,
+): Esp32C6MachineParts {
   const machine = new Esp32C6Machine(options);
-  const parts: Esp32C6Peripherals = createEsp32C6Peripherals(machine, flash);
+  const parts: Esp32C6Peripherals = createEsp32C6Peripherals(machine, flash, ports);
   for (const peripheral of parts.peripherals) machine.addPeripheral(peripheral);
   // The controller itself is what the machine consults for routing; its two
   // register windows went in above as ordinary peripherals, and INTPRI was

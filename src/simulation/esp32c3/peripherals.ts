@@ -22,6 +22,9 @@ import { FlashMmu, SpiMemController, SPI_MEM_BASE } from './spiMem';
 import { Esp32C3Gpio } from './gpio';
 import { InterruptMatrix, INTERRUPT_SOURCE, SystemRegisters, type InterruptingPeripheral } from './interrupts';
 import { EspUart, ESP32C3_UART_LAYOUT } from '../espRiscv/uart';
+import { EspLedc, ESP32C3_LEDC } from '../espRiscv/ledc';
+import { EspI2c, ESP32C3_I2C0, type EspBusPorts } from '../espRiscv/i2c';
+import { EspSpi2, ESP32C3_SPI2 } from '../espRiscv/spi2';
 import { EspSarAdc, ESP32C3_SAR_ADC } from '../espRiscv/sarAdc';
 
 export { RegisterFile } from './registerFile';
@@ -477,11 +480,17 @@ export class SystemConfiguration extends RegisterFile {
  * whether the GPIO matrix owns a pad at all.
  */
 function gpioPeripherals(clock: SimulatedClock): Peripheral[] {
-  const gpio = new Esp32C3Gpio(clock);
-  return [gpio, gpio.ioMux];
+  const gpio = new Esp32C3Gpio(clock, { interruptSource: INTERRUPT_SOURCE.gpio });
+  // The LED PWM controller drives its channels' matrix signals, so it is
+  // built with the GPIO block it drives: analogWrite(), tone(), servos.
+  return [gpio, gpio.ioMux, new EspLedc(ESP32C3_LEDC, clock, gpio)];
 }
 
-export function createStartupPeripherals(clock: SimulatedClock, flash?: SerialNorFlash): Peripheral[] {
+export function createStartupPeripherals(
+  clock: SimulatedClock,
+  flash?: SerialNorFlash,
+  ports: EspBusPorts = { i2c: null, spi: null },
+): Peripheral[] {
   return [
     // SPI0 belongs to the cache. Firmware configures it but runs no
     // transactions through it, so its registers only need to read back.
@@ -503,6 +512,9 @@ export function createStartupPeripherals(clock: SimulatedClock, flash?: SerialNo
     new EspUart('uart0', PERIPHERAL_BASE.uart0, clock, INTERRUPT_SOURCE.uart0, ESP32C3_UART_LAYOUT),
     // The SAR ADC's one-shot path: analogRead().
     new EspSarAdc(ESP32C3_SAR_ADC),
+    // Wire and SPI, on the shared device buses.
+    new EspI2c(ESP32C3_I2C0, clock, () => ports.i2c),
+    new EspSpi2(ESP32C3_SPI2, () => ports.spi),
 
   ];
 }

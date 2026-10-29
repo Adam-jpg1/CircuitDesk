@@ -125,9 +125,8 @@
             "esp32:esp32:esp32c3",
             "esp32:esp32:esp32c6"
           ],
-          "effect": "compiles-only",
-          "effectReason": "ESP32Servo generates the pulse with the LEDC peripheral, which is not in the C3/C6 peripheral map (server-side: src/simulation/esp32c3/peripherals.ts). The writes land in unmodelled address space and no edge reaches the pin.",
-          "workaround": "Write the pulse directly (digitalWrite / delayMicroseconds), or use an AVR board."
+          "effect": "works",
+          "note": "Generates the pulse with the LED PWM controller, which the C3 and C6 models run on the simulated clock, so the pulse is real at the library's 10-bit resolution and the modelled shaft follows write() (tests/esp32.peripherals.mts)."
         }
       ],
       "unavailable": [

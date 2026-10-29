@@ -115,12 +115,12 @@ section('2. a board cannot declare itself simulated');
     const summary = capabilitySummary(board);
     check(summary.supportLevel === 'simulated', 'it is simulated, with the C6\'s own narrow capability');
     check(
-      summary.supported.every((api) => !/analogwrite|wire|spi/i.test(api)),
-      `and claims no analogWrite, Wire or SPI (${summary.supported.join(', ')})`,
+      ['analogwrite', 'wire', 'spi'].every((api) => summary.supported.some((s) => s.toLowerCase().includes(api))),
+      `and claims analogWrite, Wire and SPI, which the C6 runtime now runs (${summary.supported.join(', ')})`,
     );
     check(
-      summary.notSimulated.some((n) => /PWM/i.test(n)),
-      'and says PWM is not modelled, exactly as the native C6 does',
+      summary.notSimulated.some((n) => /Wi-Fi/i.test(n)),
+      'and says the radios are not modelled, exactly as the native C6 does',
     );
     check(/Not modelled/.test(describeLimits(board)), 'the limitation sentence comes from the processor');
   }
@@ -214,13 +214,14 @@ section('4. a pin cannot map to a pad that is not there');
     'but it is warned about, because the usual cause is an import mistake',
   );
 
+  // PD2 is a plain GPIO on the ATmega328P: no timer output reaches it.
   const pwmClaim = goodBoard({
-    processorProfileId: 'proc.esp32c6',
-    compileProfileId: 'compile.esp32c6-arduino',
-    runtimeProfileId: 'runtime.esp32c6',
-    pins: [{ id: 'M', label: 'M', pad: 'IO4', xMm: 2, yMm: 4, type: 'digital', capabilities: ['pwm'] }],
+    processorProfileId: 'proc.atmega328p',
+    compileProfileId: 'compile.avr-arduino',
+    runtimeProfileId: 'runtime.avr8js-328p',
+    pins: [{ id: 'M', label: 'M', pad: 'PD2', xMm: 2, yMm: 4, type: 'digital', capabilities: ['pwm'] }],
   });
-  check(errorsOf(pwmClaim).some((e) => e.code === 'pad-has-no-pwm'), 'a PWM claim on a chip with no modelled PWM is refused');
+  check(errorsOf(pwmClaim).some((e) => e.code === 'pad-has-no-pwm'), 'a PWM claim on a pad with no modelled PWM is refused');
 }
 
 // ========================================== 5. bus assignment is checked =====

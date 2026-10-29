@@ -124,15 +124,22 @@ if (!board) {
   const apis = (board.simulation?.supportedApis ?? []).join(' ').toLowerCase();
   // Serial is UART0, which tests/esp.uart.mts runs on this chip, and
   // analogRead the SAR ADC, which tests/esp.adc.mts reads through the canvas.
-  for (const claim of ['pinmode', 'digitalwrite', 'digitalread', 'delay', 'setup', 'serial (uart0', 'analogread']) {
+  // PWM, Wire, SPI, interrupts, floating point and EEPROM joined the list once
+  // tests/esp32.peripherals.mts, esp32.softFloat.mts and boards.eepromInterrupts.mts
+  // measured them on this chip.
+  for (const claim of ['pinmode', 'digitalwrite', 'digitalread', 'delay', 'setup', 'serial (uart0', 'analogread', 'analogwrite', 'tone()', 'wire', 'spi', 'attachinterrupt', 'floating point', 'eeprom']) {
     check(apis.includes(claim), `the API list names ${claim}, which really works`);
   }
-  for (const absent of ['wifi', 'bluetooth', 'ble', 'zigbee', 'thread', 'usb', 'pwm', 'analogwrite', 'i2c', 'wire', 'spi']) {
-    check(!apis.includes(absent), `and does not name ${absent}, which does not`);
+  // Whole words: "ble" is inside "double".
+  for (const absent of ['wifi', 'wi-fi', 'bluetooth', 'ble', 'zigbee', 'thread', 'usb']) {
+    check(!new RegExp(`\\b${absent}\\b`).test(apis), `and does not name ${absent}, which does not`);
   }
   const limitationText = (board.metadata?.limitation ?? '').toLowerCase();
-  for (const named of ['wi-fi', 'bluetooth', 'zigbee', 'thread', 'usb', 'pwm', 'i2c', 'spi', 'uart']) {
+  for (const named of ['wi-fi', 'bluetooth', 'zigbee', 'thread', 'usb']) {
     check(limitationText.includes(named), `and the limitation note says ${named} is not simulated`);
+  }
+  for (const named of ['pwm', 'wire', 'spi', 'uart0']) {
+    check(limitationText.includes(named), `and says what does run: ${named}`);
   }
 
   const limitation = String(board.metadata.limitation ?? '');

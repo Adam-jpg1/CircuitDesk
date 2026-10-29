@@ -144,9 +144,12 @@ export class SpiMemController implements Peripheral, FlashOwner {
     let address = 0;
     if ((user & USER_ADDR) !== 0) {
       const bits = ((user1 >>> 26) & 0x3f) + 1;
-      // The address sits in the most significant bits of ADDR, because the
-      // hardware shifts it out starting from bit 31.
-      address = bits >= 32 ? this.peek(ADDR) >>> 0 : this.peek(ADDR) >>> (32 - bits);
+      // ESP-IDF writes the address into ADDR as it is, in the low bits
+      // (spimem_flash_ll_set_address is `dev->addr = addr` on both parts), and
+      // the bit length says how many of them are sent. Reading it from the top
+      // bits instead put every NVS page program 256 times too low — into the
+      // bootloader — so EEPROM and Preferences never reached their partition.
+      address = bits >= 32 ? this.peek(ADDR) >>> 0 : this.peek(ADDR) & ((1 << bits) - 1);
     }
 
     const mosiLength = (user & USER_MOSI) !== 0 ? Math.ceil(((this.peek(MOSI_DLEN) & 0x3ff) + 1) / 8) : 0;

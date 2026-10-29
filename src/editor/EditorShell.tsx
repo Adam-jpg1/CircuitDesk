@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useEditorStore } from '../app/editorStore';
 import { useSimulationStore } from '../simulation/simulationStore';
 import { simulationController } from '../simulation/simulationController';
@@ -164,6 +164,10 @@ export function EditorShell({ projectId }: { projectId: string }) {
  */
 function PhoneEditor() {
   const pane = usePhoneLayout((s) => s.pane);
+  const [visited, setVisited] = useState<Set<PhonePane>>(() => new Set([pane]));
+  useEffect(() => {
+    setVisited((v) => (v.has(pane) ? v : new Set([...v, pane])));
+  }, [pane]);
   const selected = useEditorStore((s) => s.selection.componentIds.length + s.selection.connectionIds.length);
   const serialLines = useSimulationStore((s) => s.serialLineCount);
   const tabs: { id: PhonePane; label: string; badge?: boolean }[] = [
@@ -184,24 +188,29 @@ function PhoneEditor() {
             <KeyPanelHost />
           </ErrorBoundary>
           {pane === 'circuit' && <PhoneCanvasTools />}
-          {pane !== 'circuit' && (
-            <div className={`phone-pane phone-pane-${pane}`}>
-              {pane === 'parts' && (
-                <ErrorBoundary name="library panel">
-                  <LibraryPanel />
-                </ErrorBoundary>
-              )}
-              {pane === 'code' && (
-                <ErrorBoundary name="bottom panel (code / serial / simulation)">
-                  <BottomPanel />
-                </ErrorBoundary>
-              )}
-              {pane === 'inspect' && (
-                <ErrorBoundary name="inspector">
-                  <Inspector />
-                </ErrorBoundary>
-              )}
-            </div>
+          {/* A pane stays mounted once opened and is only hidden after: the
+              code editor keeps its cursor, scroll and undo history, and is
+              not torn down and rebuilt on every tab switch. */}
+          {(['parts', 'code', 'inspect'] as const).map((id) =>
+            visited.has(id) ? (
+              <div key={id} className={`phone-pane phone-pane-${id}`} hidden={pane !== id}>
+                {id === 'parts' && (
+                  <ErrorBoundary name="library panel">
+                    <LibraryPanel />
+                  </ErrorBoundary>
+                )}
+                {id === 'code' && (
+                  <ErrorBoundary name="bottom panel (code / serial / simulation)">
+                    <BottomPanel />
+                  </ErrorBoundary>
+                )}
+                {id === 'inspect' && (
+                  <ErrorBoundary name="inspector">
+                    <Inspector />
+                  </ErrorBoundary>
+                )}
+              </div>
+            ) : null,
           )}
         </div>
       </div>

@@ -376,7 +376,8 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
     }
     // The ROM publishes constants the application reads directly, so they have
     // to exist before it runs.
-    installRomData(this, this.soc.romData);
+    const flashBytes = this.flash?.bytes.length;
+    installRomData(this, this.soc.romData, flashBytes ? { sizeBytes: flashBytes, jedecId: 0xc84016 } : undefined);
     this.core.reset(image.entryPoint);
     // The application is entered on the ROM's stack, exactly as it would be on
     // hardware. x2 is sp in the RISC-V calling convention.

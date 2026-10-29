@@ -285,17 +285,33 @@ const ESP32C3: ProcessorProfile = {
   pads: Array.from({ length: 22 }, (_, i) => `IO${i}`),
   // ADC1 channels 0-4 on IO0-IO4, ADC2 channel 0 on IO5 (espRiscv/sarAdc.ts).
   adcChannels: { IO0: 0, IO1: 1, IO2: 2, IO3: 3, IO4: 4, IO5: 5 },
-  pwmPads: [],
+  // The GPIO matrix can route LEDC, I2C0, SPI2 and the GPIO interrupt to any
+  // pad, so every pad carries them; the defaults are Arduino-ESP32's variant's.
+  pwmPads: Array.from({ length: 22 }, (_, i) => `IO${i}`),
   uarts: [],
-  i2c: [],
-  spi: [],
-  interruptPads: [],
-  logicVolts: 3.3,
-  notModelled: [
-    'LEDC/PWM',
-    'I2C and SPI controllers',
-    'Wi-Fi and Bluetooth',
+  i2c: [
+    {
+      id: 'i2c0',
+      arduinoName: 'Wire',
+      signals: { sda: Array.from({ length: 22 }, (_, i) => `IO${i}`), scl: Array.from({ length: 22 }, (_, i) => `IO${i}`) },
+      defaults: { sda: 'IO8', scl: 'IO9' },
+    },
   ],
+  spi: [
+    {
+      id: 'spi2',
+      arduinoName: 'SPI',
+      signals: {
+        sck: Array.from({ length: 22 }, (_, i) => `IO${i}`),
+        mosi: Array.from({ length: 22 }, (_, i) => `IO${i}`),
+        miso: Array.from({ length: 22 }, (_, i) => `IO${i}`),
+      },
+      defaults: { sck: 'IO4', mosi: 'IO6', miso: 'IO5' },
+    },
+  ],
+  interruptPads: Array.from({ length: 22 }, (_, i) => `IO${i}`),
+  logicVolts: 3.3,
+  notModelled: ['Wi-Fi and Bluetooth', 'USB Serial/JTAG', 'LEDC hardware fades'],
 };
 
 const ESP32C6: ProcessorProfile = {
@@ -310,17 +326,33 @@ const ESP32C6: ProcessorProfile = {
   pads: Array.from({ length: 31 }, (_, i) => `IO${i}`),
   // ADC1 channels 0-6 on IO0-IO6 (espRiscv/sarAdc.ts).
   adcChannels: { IO0: 0, IO1: 1, IO2: 2, IO3: 3, IO4: 4, IO5: 5, IO6: 6 },
-  pwmPads: [],
+  // The GPIO matrix can route LEDC, I2C0, SPI2 and the GPIO interrupt to any
+  // pad, so every pad carries them; the defaults are Arduino-ESP32's variant's.
+  pwmPads: Array.from({ length: 31 }, (_, i) => `IO${i}`),
   uarts: [],
-  i2c: [],
-  spi: [],
-  interruptPads: [],
-  logicVolts: 3.3,
-  notModelled: [
-    'LEDC/PWM',
-    'I2C and SPI controllers',
-    'Wi-Fi, Bluetooth, 802.15.4',
+  i2c: [
+    {
+      id: 'i2c0',
+      arduinoName: 'Wire',
+      signals: { sda: Array.from({ length: 31 }, (_, i) => `IO${i}`), scl: Array.from({ length: 31 }, (_, i) => `IO${i}`) },
+      defaults: { sda: 'IO23', scl: 'IO22' },
+    },
   ],
+  spi: [
+    {
+      id: 'spi2',
+      arduinoName: 'SPI',
+      signals: {
+        sck: Array.from({ length: 31 }, (_, i) => `IO${i}`),
+        mosi: Array.from({ length: 31 }, (_, i) => `IO${i}`),
+        miso: Array.from({ length: 31 }, (_, i) => `IO${i}`),
+      },
+      defaults: { sck: 'IO21', mosi: 'IO19', miso: 'IO20' },
+    },
+  ],
+  interruptPads: Array.from({ length: 31 }, (_, i) => `IO${i}`),
+  logicVolts: 3.3,
+  notModelled: ['Wi-Fi, Bluetooth, 802.15.4', 'USB Serial/JTAG', 'LEDC hardware fades'],
 };
 
 /**

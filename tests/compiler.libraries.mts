@@ -139,17 +139,16 @@ section('2. resolving a header against a board');
   const feather = resolveHeader('Servo.h', 'adafruit:samd:adafruit_feather_m0');
   check(feather.available === true && feather.effect === 'works', 'Servo.h is available for a Feather M0, and works there');
 
-  // ESP32Servo on a C3 builds and drives LEDC, which is not modelled: it
-  // compiles, and is recorded as doing nothing.
+  // ESP32Servo on a C3 drives the LED PWM controller, which the C3 model runs
+  // (tests/esp32.peripherals.mts measures its pulses).
   const espServo = resolveHeader('ESP32Servo.h', 'esp32:esp32:esp32c3');
-  check(
-    espServo.available === true && espServo.effect === 'compiles-only',
-    'ESP32Servo.h on a C3 is recorded as compiling with no effect, which is the whole point of the distinction',
-  );
-  check(
-    espServo.available === true && Boolean(espServo.workaround),
-    'and it offers something the user can do instead',
-  );
+  check(espServo.available === true && espServo.effect === 'works', 'ESP32Servo.h is available for a C3, and works there');
+
+  // Every measured library now does what it says on these boards. The
+  // distinction stays in the manifest's vocabulary for the next one that does
+  // not, and section 1 holds any such claim to the same standard of proof.
+  const inert = HEADER_CLAIMS.flatMap((c) => c.via.filter((v) => v.effect === 'compiles-only').map((v) => `${c.header} on ${v.targets.join(', ')}`));
+  check(inert.length === 0, `no measured library is recorded as compiling to no effect (${inert.join('; ') || 'none'})`);
 
   const c3 = resolveHeader('Servo.h', 'esp32:esp32:esp32c3');
   check(c3.available === false, 'Servo.h is not available for an ESP32-C3');
@@ -198,13 +197,8 @@ section('2b. finding the includes in a sketch');
   const warnFeather = includeWarnings(src, 'adafruit:samd:adafruit_feather_m0');
   check(warnFeather.length === 0, 'nor on a Feather M0, where Servo runs on a TC interrupt');
 
-  // A library that builds and does nothing is warned about, with the reason.
   const quiet = includeWarnings('#include <ESP32Servo.h>\nvoid setup() {}', 'esp32:esp32:esp32c3');
-  check(quiet.length === 1 && quiet[0].kind === 'no-effect', 'ESP32Servo on a C3 is warned that it does nothing');
-  check(
-    /\bLEDC\b/.test(quiet[0]?.reason ?? ''),
-    'and the reason names the peripheral rather than shrugging',
-  );
+  check(quiet.length === 0, 'nor ESP32Servo on a C3, where it runs on the LED PWM controller');
 
   const warnC3 = includeWarnings(src, 'esp32:esp32:esp32c3');
   check(warnC3.length === 1 && warnC3[0].kind === 'unsupported', 'and on a C3 it is reported as not building at all');
@@ -381,7 +375,7 @@ section('5. the Pico and the Feather M0 move the shaft');
 }
 
 // ================================= 6. the same, one architecture further on ==
-section('6. ESP32Servo compiles for a C3 and is reported as inert');
+section('6. ESP32Servo moves the shaft on a C3');
 {
   const ESP_SWEEP = [
     '#include <ESP32Servo.h>',
@@ -402,11 +396,12 @@ section('6. ESP32Servo compiles for a C3 and is reported as inert');
     skip('the ESP32 toolchain is unavailable');
   } else {
     console.log(`   angles: ${angles.map((a) => a?.toFixed(1) ?? '—').join(', ')}`);
+    const [e0, e90, e180] = angles;
     check(
-      angles.every((a) => a !== undefined && Math.abs(a - 90) < 1),
-      'the shaft never moves — LEDC is not in the C3 peripheral map',
+      e0 !== undefined && e90 !== undefined && e180 !== undefined && e0 < 15 && Math.abs(e90 - 90) < 15 && e180 > 165,
+      'the shaft follows write(0), write(90) and write(180) on the LED PWM controller',
     );
-    check(notes.includes('no-effect:ESP32Servo.h'), 'and the build report says so');
+    check(!notes.includes('no-effect:ESP32Servo.h'), 'and the build report has no caveat to give');
   }
 }
 

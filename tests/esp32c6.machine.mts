@@ -282,8 +282,13 @@ function check(cond: boolean, msg: string) {
   for (const entry of ESP32C6_ROM_WATCHDOG) {
     check(table.entries.get(entry.address) === entry, `${entry.name} is dispatchable at 0x${entry.address.toString(16)}`);
   }
+  // By name, not by address: the C3 publishes other routines at some of the
+  // same addresses (0x400003a0 is its islower), which is exactly the hazard
+  // the per-chip tables exist for.
+  const c3Names = new Set([...romTableFor('esp32c3').entries.values()].map((e) => e.name));
   check(
-    romTableFor('esp32c3').entries.get(0x400003a0) === undefined,
+    ESP32C6_ROM_WATCHDOG.every((e) => !c3Names.has(e.name)) &&
+      ESP32C6_ROM_WATCHDOG.every((e) => romTableFor('esp32c3').entries.get(e.address)?.name !== e.name),
     'and none of it is offered on a C3, whose ROM does not publish a watchdog HAL',
   );
 

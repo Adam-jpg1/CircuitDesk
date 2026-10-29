@@ -161,7 +161,8 @@ const bytes = (...values: number[]) => Uint8Array.from(values);
       const bits = options.addressBits ?? 24;
       user |= 1 << 30;
       controller.writeUint32(USER1, ((bits - 1) << 26) >>> 0);
-      controller.writeUint32(ADDR, (options.address << (32 - bits)) >>> 0);
+      // As ESP-IDF writes it: the address as-is, in the low bits (spimem_flash_ll_set_address).
+      controller.writeUint32(ADDR, options.address >>> 0);
     }
     if (options.mosi) {
       user |= 1 << 27;

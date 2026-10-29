@@ -28,6 +28,10 @@ import { Esp32C3Gpio } from './esp32c3/gpio';
 import type { EspRiscvMachine } from './espRiscv/machine';
 import type { BoardRunner, PinLevel, PinSnapshot } from './boardRunner';
 import type { PinChange } from './gpioEvents';
+import { I2cBus } from './devices/i2cBus';
+import { SpiBus } from './devices/spiBus';
+import { ESP32C3_I2C0, type EspBusPorts } from './espRiscv/i2c';
+import { FSPI_SIGNALS } from './espRiscv/spi2';
 
 /**
  * What differs between one Espressif RISC-V part and another, from a runner's
@@ -41,7 +45,32 @@ export interface EspRunnerConfig {
   /** Every GPIO the chip has, whether or not a given board brings it out. */
   pinCount: number;
   /** Builds the machine and its peripherals, and returns its GPIO block. */
-  build(flash: SerialNorFlash): { machine: EspRiscvMachine; gpio: Esp32C3Gpio; uart?: EspUart; adc?: EspSarAdc };
+  build(flash: SerialNorFlash): {
+    machine: EspRiscvMachine;
+    gpio: Esp32C3Gpio;
+    uart?: EspUart;
+    adc?: EspSarAdc;
+    /** Where the chip's I2C and SPI controllers reach the device buses. */
+    ports?: EspBusPorts;
+    /** The matrix signals of I2C0's SCL/SDA and SPI2's pins on this chip. */
+    buses?: EspBusSignals;
+  };
+  /**
+   * Where Arduino-ESP32's variant puts Wire and SPI by default (pins_arduino.h),
+   * reported until firmware routes the buses through the matrix — so a part
+   * wired to those pins is attached before Wire.begin() talks to it, as on the
+   * other boards.
+   */
+  busDefaults?: { sda: number; scl: number; sck: number; mosi: number; miso: number };
+}
+
+export interface EspBusSignals {
+  scl: number;
+  sda: number;
+  clk: number;
+  mosi: number;
+  miso: number;
+  cs0: number;
 }
 
 /**
@@ -114,11 +143,83 @@ export class EspRiscvRunner implements BoardRunner {
     this.gpio = built.gpio;
     this.uart = built.uart;
     this.adc = built.adc;
+    this.busSignals = built.buses;
+    this.busDefaults = config.busDefaults;
+    if (built.ports) this.attachBuses(built.ports);
     if (this.uart) this.uart.onByte = (byte: number) => this.onSerialByte?.(byte);
 
     for (let i = 0; i < this.pinCount; i++) this.history.push(this.freshHistory());
     this.gpio.onPinChange((change) => this.recordChange(change));
+    // A pad driven from the canvas can raise a GPIO interrupt with no register
+    // write to prompt the machine to look.
+    this.gpio.onInterruptChange = () => this.machine.interruptSourceChanged();
     this.machine.loadImage(image);
+  }
+
+  /**
+   * I2C and SPI devices on the canvas attach to these, as on every other
+   * board: an SSD1306 driven from a C3 is the same model an Uno drives.
+   */
+  readonly i2cBus = new I2cBus();
+  readonly spiBus = new SpiBus();
+  private busSignals: EspBusSignals | undefined;
+  private busDefaults: EspRunnerConfig['busDefaults'];
+
+  private attachBuses(ports: EspBusPorts): void {
+    let acked = false;
+    let read = 0xff;
+    const handler = this.i2cBus.handler({
+      completeStart: () => {},
+      completeStop: () => {},
+      completeConnect: (ack) => (acked = ack),
+      completeWrite: (ack) => (acked = ack),
+      completeRead: (value) => (read = value),
+    });
+    ports.i2c = {
+      start: (repeated) => handler.start(repeated),
+      connect: (address, write) => {
+        handler.connectToSlave(address, write);
+        return acked;
+      },
+      writeByte: (value) => {
+        handler.writeByte(value);
+        return acked;
+      },
+      readByte: (ack) => {
+        handler.readByte(ack);
+        return read;
+      },
+      stop: () => handler.stop(),
+    };
+    ports.spi = {
+      transfer: (mosi, mode, lsbFirst) =>
+        this.spiBus.transferByte(mosi, { mode, bitOrder: lsbFirst ? 'lsbFirst' : 'msbFirst' }, (pin) => this.digitalPinLevel(pin)),
+    };
+  }
+
+  /** The pads Wire.begin() routed I2C0's SDA and SCL to, through the matrix. */
+  activeI2cPins(): { sda?: number; scl?: number } {
+    const s = this.busSignals;
+    if (!s) return {};
+    // Line by line: Wire.begin() routes SDA and then SCL, and a circuit
+    // re-bind landing between the two must not see a bus with one wire.
+    const d = this.busDefaults;
+    return { sda: this.gpio.inputSignalPin(s.sda) ?? d?.sda, scl: this.gpio.inputSignalPin(s.scl) ?? d?.scl };
+  }
+
+  /** The pads SPI.begin() routed SPI2's clock and data lines to. */
+  activeSpiPins(): { sck?: number; mosi?: number; miso?: number } {
+    const s = this.busSignals;
+    if (!s) return {};
+    // Line by line, for the same reason: SPI.begin() routes SCK, MISO and MOSI
+    // one after another, and a re-bind between them once dropped every SPI
+    // part off the bus for the transfers that followed.
+    const d = this.busDefaults;
+    return {
+      sck: this.gpio.outputSignalPin(s.clk) ?? d?.sck,
+      mosi: this.gpio.outputSignalPin(s.mosi) ?? d?.mosi,
+      miso: this.gpio.inputSignalPin(s.miso) ?? d?.miso,
+    };
   }
 
   private freshHistory(): PadHistory {
@@ -366,15 +467,17 @@ export function decodeRegion(data: string): Uint8Array {
 export const ESP32C3_RUNNER: EspRunnerConfig = {
   engine: 'esp32c3',
   pinCount: 22,
+  busDefaults: { sda: 8, scl: 9, sck: 4, mosi: 6, miso: 5 },
   build(flash) {
     const machine = new Esp32C3Machine();
-    const peripherals = createStartupPeripherals(machine, flash);
+    const ports: EspBusPorts = { i2c: null, spi: null };
+    const peripherals = createStartupPeripherals(machine, flash, ports);
     for (const peripheral of peripherals) machine.addPeripheral(peripheral);
     const gpio = peripherals.find((p): p is Esp32C3Gpio => p instanceof Esp32C3Gpio);
     if (!gpio) throw new Error('The ESP32-C3 machine was built without a GPIO block.');
     const uart = peripherals.find((p): p is EspUart => p instanceof EspUart && p.name === 'uart0');
     const adc = peripherals.find((p): p is EspSarAdc => p instanceof EspSarAdc);
-    return { machine, gpio, uart, adc };
+    return { machine, gpio, uart, adc, ports, buses: { scl: ESP32C3_I2C0.sclSignal, sda: ESP32C3_I2C0.sdaSignal, ...FSPI_SIGNALS } };
   },
 };
 

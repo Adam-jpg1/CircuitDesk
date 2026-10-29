@@ -15,14 +15,21 @@ import { createEsp32C6Machine } from './esp32c6/esp32c6Machine';
 import { parseEspApplicationImage, ESP32C6_REGIONS, type EspApplicationImage } from './esp32c3/espImage';
 import { decodeRegion } from './espRiscvRunner';
 import type { SerialNorFlash } from './esp32c3/spiFlash';
+import { ESP32C6_I2C0, type EspBusPorts } from './espRiscv/i2c';
+import { FSPI_SIGNALS } from './espRiscv/spi2';
+
+/** The C6's I2C0 and SPI2 matrix signals, for finding which pads carry the buses. */
+const ESP32C6_BUS_SIGNALS = { scl: ESP32C6_I2C0.sclSignal, sda: ESP32C6_I2C0.sdaSignal, ...FSPI_SIGNALS };
 
 /** The ESP32-C6: 31 GPIOs, SOC_GPIO_PIN_COUNT. */
 export const ESP32C6_RUNNER_CONFIG: EspRunnerConfig = {
   engine: 'esp32c6',
   pinCount: 31,
+  busDefaults: { sda: 23, scl: 22, sck: 21, mosi: 19, miso: 20 },
   build(flash: SerialNorFlash) {
-    const { machine, gpio, uart0, adc } = createEsp32C6Machine(flash);
-    return { machine, gpio, uart: uart0, adc };
+    const ports: EspBusPorts = { i2c: null, spi: null };
+    const { machine, gpio, uart0, adc } = createEsp32C6Machine(flash, {}, ports);
+    return { machine, gpio, uart: uart0, adc, ports, buses: ESP32C6_BUS_SIGNALS };
   },
 };
 

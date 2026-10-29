@@ -141,6 +141,13 @@ const ESP32C3_SIM_APIS = [
   'setup() and repeated loop()',
   'Serial (UART0 through the ESP-IDF driver, both directions, at the baud rate set)',
   'analogRead (12-bit, on IO0-IO5)',
+  'floating point (float and double, bit-exact IEEE-754 through the ROM soft-float routines)',
+  'analogWrite, ledcWrite and tone() (the LED PWM controller)',
+  'Servo pulses through the ESP32Servo library',
+  'external interrupts (attachInterrupt)',
+  'Wire (I2C master, on SDA/SCL or wherever Wire.begin() routes it)',
+  'SPI (master, on SCK/MOSI/MISO or wherever SPI.begin() routes it)',
+  'EEPROM and Preferences (NVS on the flash, kept across the reset button)',
 ];
 
 const ESP32C3_SIM_PERIPHERALS = [
@@ -150,6 +157,10 @@ const ESP32C3_SIM_PERIPHERALS = [
   'SPI flash and the flash MMU',
   'UART0 — FIFOs, the TX-empty, RX-full, RX-timeout and TX-done interrupts, baud from the programmed divider',
   'SAR ADC one-shot conversions, at the attenuation the sketch sets',
+  'GPIO interrupts, through the interrupt matrix',
+  'LED PWM controller: four timers, six channels, routed through the GPIO matrix',
+  'I2C0 in master mode, running the command list on the shared device bus',
+  'GP-SPI2 in master mode, on the shared device bus',
 ];
 
 /**
@@ -157,9 +168,10 @@ const ESP32C3_SIM_PERIPHERALS = [
  * does is large and a student should not have to discover it by being wrong.
  */
 const ESP32C3_LIMITATION =
-  'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO, ' +
-  'Serial on UART0 and analogRead(). Wi-Fi, Bluetooth LE, USB Serial/JTAG, PWM, I2C and SPI to devices are not simulated — ' +
-  'sketches using them compile and run, but those peripherals do nothing.';
+  'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO and ' +
+  'interrupts, floating point, Serial on UART0, analogRead(), analogWrite()/tone()/servos on the LED PWM controller, ' +
+  'Wire, SPI and EEPROM/Preferences. Wi-Fi, Bluetooth LE and USB Serial/JTAG are not simulated — sketches using them ' +
+  'compile and run, but those radios and that port do nothing.';
 
 /**
  * The ESP32-C6's list, which is the C3's minus the pull-down.
@@ -176,6 +188,13 @@ const ESP32C6_SIM_APIS = [
   'setup() and repeated loop()',
   'Serial (UART0 through the ESP-IDF driver, both directions, at the baud rate set)',
   'analogRead (12-bit, on IO0-IO6)',
+  'floating point (float and double, bit-exact IEEE-754 through the ROM soft-float routines)',
+  'analogWrite, ledcWrite and tone() (the LED PWM controller)',
+  'Servo pulses through the ESP32Servo library',
+  'external interrupts (attachInterrupt)',
+  'Wire (I2C master, on SDA/SCL or wherever Wire.begin() routes it)',
+  'SPI (master, on SCK/MOSI/MISO or wherever SPI.begin() routes it)',
+  'EEPROM and Preferences (NVS on the flash, kept across the reset button)',
 ];
 
 const ESP32C6_SIM_PERIPHERALS = [
@@ -187,6 +206,10 @@ const ESP32C6_SIM_PERIPHERALS = [
   'ROM watchdog, heap, system-timer and flash drivers this part boots on',
   'UART0 — FIFOs, the TX-empty, RX-full, RX-timeout and TX-done interrupts, baud from the programmed divider',
   'SAR ADC one-shot conversions, at the attenuation the sketch sets',
+  'GPIO interrupts, through the interrupt matrix',
+  'LED PWM controller: four timers, six channels, routed through the GPIO matrix',
+  'I2C0 in master mode, running the command list on the shared device bus',
+  'GP-SPI2 in master mode, on the shared device bus',
 ];
 
 /**
@@ -195,8 +218,9 @@ const ESP32C6_SIM_PERIPHERALS = [
  */
 const ESP32C6_LIMITATION =
   'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO ' +
-  'with its pulls, Serial on UART0 and analogRead(). Wi-Fi, Bluetooth LE, Zigbee/802.15.4, Thread, USB Serial/JTAG, PWM, ' +
-  'I2C and SPI to devices are not simulated — sketches using them compile and run, but those peripherals do nothing.';
+  'with its pulls and interrupts, floating point, Serial on UART0, analogRead(), analogWrite()/tone()/servos on the LED ' +
+  'PWM controller, Wire, SPI and EEPROM/Preferences. Wi-Fi, Bluetooth LE, Zigbee/802.15.4, Thread and USB Serial/JTAG ' +
+  'are not simulated — sketches using them compile and run, but those radios and that port do nothing.';
 
 const SAMD21_SIM_APIS = [
   'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
@@ -468,9 +492,10 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       supportedPeripherals: ESP32C3_SIM_PERIPHERALS,
     },
     limitation:
-      'Real RISC-V execution of the compiled image, with GPIO and Serial on UART0 (built through the generic C3 '
-      + 'target, so Serial is the UART rather than the native USB port). Wi-Fi, Bluetooth, the ADC, PWM, I2C and SPI '
-      + 'are not simulated — sketches using them compile, run, and do nothing.',
+      'Real RISC-V execution of the compiled image, with the same peripherals as the DevKitM-1 entry — GPIO and '
+      + 'interrupts, floating point, analogRead(), PWM/tone()/servos, Wire, SPI and EEPROM — built through the generic C3 '
+      + 'target, so Serial is the UART rather than the native USB port. Wi-Fi and Bluetooth are not simulated — sketches '
+      + 'using them compile, run, and do nothing.',
   },
   'board.arduino-due': {
     manufacturer: 'Arduino',

@@ -298,9 +298,12 @@ export const RUNTIME_PROFILES: RuntimeProfile[] = [
     engine: 'esp32c3',
     processorProfileIds: ['proc.esp32c3'],
     acceptsFormats: ['esp-image'],
-    supportedApis: ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'delay/millis/micros', 'Serial (UART0)'],
-    supportedPeripherals: ['GPIO matrix', 'system timer', 'UART0', 'SAR ADC (one-shot)'],
-    description: 'Executes ESP32-C3 application images on the CircuitDesk RISC-V core: GPIO, UART0 and the ADC.',
+    supportedApis: [
+      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'delay/millis/micros', 'Serial (UART0)',
+      'floating point', 'analogWrite (PWM)', 'tone()', 'Servo (ESP32Servo)', 'attachInterrupt', 'Wire', 'SPI', 'EEPROM',
+    ],
+    supportedPeripherals: ['GPIO matrix', 'GPIO interrupts', 'system timer', 'UART0', 'SAR ADC (one-shot)', 'LED PWM controller', 'I2C0 (master)', 'GP-SPI2 (master)', 'NVS on SPI flash'],
+    description: 'Executes ESP32-C3 application images on the CircuitDesk RISC-V core: GPIO, UART0, the ADC, LED PWM, I2C, SPI and NVS.',
   },
   {
     id: 'runtime.esp32c6',
@@ -308,9 +311,12 @@ export const RUNTIME_PROFILES: RuntimeProfile[] = [
     engine: 'esp32c6',
     processorProfileIds: ['proc.esp32c6'],
     acceptsFormats: ['esp-image'],
-    supportedApis: ['pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'delay/millis/micros', 'Serial (UART0)'],
-    supportedPeripherals: ['GPIO matrix', 'system timer', 'UART0', 'SAR ADC (one-shot)'],
-    description: 'Executes ESP32-C6 application images on the CircuitDesk RISC-V core (RV32IMAC): GPIO, UART0 and the ADC.',
+    supportedApis: [
+      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'delay/millis/micros', 'Serial (UART0)',
+      'floating point', 'analogWrite (PWM)', 'tone()', 'Servo (ESP32Servo)', 'attachInterrupt', 'Wire', 'SPI', 'EEPROM',
+    ],
+    supportedPeripherals: ['GPIO matrix', 'GPIO interrupts', 'system timer', 'UART0', 'SAR ADC (one-shot)', 'LED PWM controller', 'I2C0 (master)', 'GP-SPI2 (master)', 'NVS on SPI flash'],
+    description: 'Executes ESP32-C6 application images on the CircuitDesk RISC-V core (RV32IMAC): GPIO, UART0, the ADC, LED PWM, I2C, SPI and NVS.',
   },
   {
     id: 'runtime.none',

@@ -18,6 +18,18 @@
 
 /** C6 ROM entry points, keyed by the name the runtime implements them under. */
 export const ESP32C6_ROM_ADDRESSES: Record<string, number> = {
+  atol: 0x400005a4,
+  strtoul: 0x400005ac,
+  isalpha: 0x400004e0,
+  isdigit: 0x400004f0,
+  islower: 0x400004f4,
+  isupper: 0x40000508,
+  strcasecmp: 0x40000524,
+  strncasecmp: 0x4000054c,
+  strcoll: 0x4000053c,
+  strlwr: 0x40000548,
+  strupr: 0x4000056c,
+  rand_r: 0x4000058c,
   Cache_Enable_ICache: 0x40000694,
   Cache_Freeze_ICache_Disable: 0x400006a4,
   Cache_Freeze_ICache_Enable: 0x400006a0,

@@ -138,6 +138,15 @@ export interface EspRomDataLayout {
   readonly romStackSize: number;
   /** Where the coexistence version string is placed. */
   readonly coexVersionAddress: number;
+  /**
+   * Address of `rom_spiflash_legacy_data`, the ROM's pointer to its flash
+   * descriptor (`g_rom_flashchip`: JEDEC id, size, block, sector and page
+   * sizes), and where this runtime places that descriptor. The bootloader
+   * fills it on hardware; ESP-IDF's flash driver takes the chip size from it,
+   * and with none every flash write was refused as out of range.
+   */
+  readonly flashLegacyPointer: number;
+  readonly flashLegacyAddress: number;
 }
 
 export interface EspSocConfig {
@@ -246,6 +255,10 @@ export const ESP32C3_SOC: EspSocConfig = {
     // only dispatched as code when the program counter enters it, so a data
     // read here reads memory.
     coexVersionAddress: 0x4005ff00,
+    // `rom_spiflash_legacy_data = 0x3fcdfff0` in esp32c3.rom.ld; the descriptor
+    // goes below the layout structure, in the same unused stretch.
+    flashLegacyPointer: 0x3fcdfff0,
+    flashLegacyAddress: 0x3ff1fe00,
   },
 };
 
@@ -340,6 +353,9 @@ export const ESP32C6_SOC: EspSocConfig = {
     romStackStart: 0x4087e610,
     romStackSize: 0x2000,
     coexVersionAddress: 0x4004fe00,
+    // `rom_spiflash_legacy_data = 0x4087ffec` in esp32c6.rom.ld.
+    flashLegacyPointer: 0x4087ffec,
+    flashLegacyAddress: 0x4004fd00,
   },
 };
 

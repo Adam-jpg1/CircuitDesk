@@ -7,6 +7,18 @@ import { resolveDefinition } from '../project/partsRegistry';
 import { boardsUsingSketch, isSketchFile, sketchDocuments, sketchIdFor } from '../project/sketches';
 import { buildSerialLabels } from '../simulation/serialLog';
 
+// On a touch device Monaco's touch helpers leave a cancellation promise
+// unhandled when an editor is disposed — switching the phone's Code pane from
+// the sketch to Serial does it. Monaco treats a cancellation as benign
+// everywhere else; only that exact error is ignored here, so any other
+// rejection still surfaces.
+if (typeof window !== 'undefined') {
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason as { name?: string; message?: string } | undefined;
+    if (reason?.name === 'Canceled' && reason.message === 'Canceled') event.preventDefault();
+  });
+}
+
 // Bundle Monaco locally (no CDN) so CircuitDesk works fully offline.
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 loader.config({ monaco: MonacoNS });

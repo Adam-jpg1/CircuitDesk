@@ -7,6 +7,9 @@
 //     boot ROM had no flash_range_erase or flash_range_program.
 //   * attachInterrupt() never fired on the Mega or the Leonardo: avr8js ships
 //     only the 328P's INT0/INT1 on PD2/PD3, and every AVR shared that wiring.
+// On the ESP32-C3 and C6, EEPROM lives in NVS on the flash; every write was
+// refused (the flash driver read a chip size of zero) and then, once allowed,
+// landed 256 times too low.
 // EEPROM is non-volatile, so here a sketch counts its own boots in it and has
 // to see the count go up across the reset button. Each interrupt pin is
 // driven with real edges and the ISR's count read back over Serial, and a
@@ -55,6 +58,11 @@ const EEPROM_BOARDS = [
   ['board.arduino-mega2560', 'arduino:avr:mega', true],
   ['board.arduino-leonardo', 'arduino:avr:leonardo', true],
   ['board.raspberry-pi-pico', 'rp2040:rp2040:rpipico', false],
+  // Arduino-ESP32 keeps EEPROM in an NVS blob, in the flash's nvs partition.
+  // It needed the ROM's flash descriptor (chip size) and SPI1 addresses read
+  // from the low bits of ADDR, as ESP-IDF writes them.
+  ['board.esp32-c3', 'esp32:esp32:esp32c3', false],
+  ['board.esp32-c6-devkitc-1', 'esp32:esp32:esp32c6', false],
 ] as const;
 
 for (const [boardId, fqbn, avr] of EEPROM_BOARDS) {

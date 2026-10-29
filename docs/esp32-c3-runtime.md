@@ -172,8 +172,22 @@ Peripheral pages the startup path touches, for the next pass:
 0x6001d000           0x60005000             0x60006000
 ```
 
-## Not yet started
+## Since then
 
-Peripherals (GPIO, timers, UART, interrupt controller), the `BoardRunner`
-adapter, canvas integration, Pin States, and the board's capability text. The
-board remains **not Simulated**, and no capability claim was added.
+This document records how the runtime was first brought up. The board is now
+**Simulated**, on both the C3 and the C6, through the shared `EspRiscvRunner`:
+
+- GPIO with the IO MUX and the GPIO matrix, including peripheral signals
+  routed to any pad and GPIO interrupts (`esp32c3/gpio.ts`);
+- the ROM's GPIO-matrix routines and its soft-float/libgcc routines, written
+  from their documented contracts (`espRiscv/romGpio.ts`,
+  `espRiscv/romSoftFloat.ts`) — float and double results are bit-identical to
+  IEEE-754 (`tests/esp32.softFloat.mts`);
+- the LED PWM controller (analogWrite, tone, ESP32Servo), I2C0 in master mode
+  and GP-SPI2, all on the shared device buses (`espRiscv/ledc.ts`, `i2c.ts`,
+  `spi2.ts`; `tests/esp32.peripherals.mts`);
+- NVS on the SPI flash, so EEPROM and Preferences persist across the reset
+  button — which needed the ROM's flash descriptor installed at boot and SPI1
+  addresses read from the low bits of `ADDR`, as ESP-IDF writes them.
+
+Wi-Fi, Bluetooth, 802.15.4 and USB Serial/JTAG are not simulated.

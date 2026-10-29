@@ -1091,3 +1091,7 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .editor-root.phone .keymatrix-overlay { bottom: 64px; }
 /* The minimap is a mouse affordance; on a phone it would sit under the tools. */
 .editor-root.phone .minimap { display: none; }
+.phone-pane[hidden] { display: none; }
+/* The serial input shrinks to fit beside its controls rather than pushing Clear off the screen. */
+.phone-pane .serial-input-row input { min-width: 0; }
+.phone-pane .serial-input-row { flex-wrap: nowrap; }

@@ -205,14 +205,12 @@ if (!capabilities) {
   const picoServo = pico?.headers?.find((h) => h.header === 'Servo.h');
   check(picoServo?.effect === 'works', 'the Pico target reports Servo.h as working');
 
-  // And it has to be honest where it cannot. A Feather M0 compiles Servo.h and
-  // moves nothing (its pulse is a TC interrupt the model does not run); a
-  // capability report that hid that would be the same bug this file was
-  // written for, one layer up. Only where the SAMD core is installed.
+  // A Feather M0's Servo pulses from a TC compare interrupt, which the SAMD21
+  // model runs (tests/samd21.timers.mts). Only where the SAMD core is installed.
   const feather = capabilities.targets?.find((t) => t.fqbn === 'adafruit:samd:adafruit_feather_m0');
   if (feather?.headers?.length) {
     const featherServo = feather.headers.find((h) => h.header === 'Servo.h');
-    check(featherServo?.effect === 'compiles-only', 'the Feather M0 target reports Servo.h as compiling without effect');
+    check(featherServo?.effect === 'works', 'the Feather M0 target reports Servo.h as working');
   }
 }
 

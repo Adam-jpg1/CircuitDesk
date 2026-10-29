@@ -22,6 +22,8 @@
 
 import type { Bus } from '../riscv/rv32Core';
 import { ESP32C3_SOC, type EspRomDataLayout } from '../espRiscv/soc';
+import { romGpioFunctions, ESP32C3_ROM_GPIO_LAYOUT, ESP32C3_ROM_GPIO_ADDRESSES } from '../espRiscv/romGpio';
+import { ESP32C3_ROM_SOFT_FLOAT } from '../espRiscv/romSoftFloat';
 
 /** RISC-V calling convention: a0..a7 are x10..x17. */
 export const ARG_REGISTER_BASE = 10;
@@ -1059,6 +1061,63 @@ const strtol: RomHandler = ({ args, bus }) => {
   return (text[signIndex] === '-' ? -parsed : parsed) | 0;
 };
 
+/** `atol(s)`: long is 32 bits here, so this is atoi. */
+const atol: RomHandler = (context) => atoi(context);
+
+/**
+ * `strtoul(s, endptr, base)`: strtol's parsing, read as unsigned — a leading
+ * minus negates in the unsigned type, as the standard says, so "-1" is
+ * 0xFFFFFFFF.
+ */
+const strtoul: RomHandler = (context) => (strtol(context) as number) >>> 0;
+
+const ctype = (test: (c: number) => boolean): RomHandler => ({ args }) => (test(args[0] & 0xff) ? 1 : 0);
+const isalpha = ctype((c) => (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a));
+const isdigit = ctype((c) => c >= 0x30 && c <= 0x39);
+const islower = ctype((c) => c >= 0x61 && c <= 0x7a);
+const isupper = ctype((c) => c >= 0x41 && c <= 0x5a);
+
+const lowerByte = (c: number) => (c >= 0x41 && c <= 0x5a ? c + 0x20 : c);
+
+/** Compares byte by byte as unsigned chars, folding ASCII case, for at most `limit` bytes. */
+function compareFolded(bus: Bus, a: number, b: number, limit: number, fold: boolean): number {
+  for (let i = 0; i < limit; i++) {
+    let x = bus.readUint8((a + i) >>> 0);
+    let y = bus.readUint8((b + i) >>> 0);
+    if (fold) {
+      x = lowerByte(x);
+      y = lowerByte(y);
+    }
+    if (x !== y || x === 0) return x - y;
+  }
+  return 0;
+}
+
+const strcasecmp: RomHandler = ({ args, bus }) => compareFolded(bus, args[0] >>> 0, args[1] >>> 0, Infinity, true);
+const strncasecmp: RomHandler = ({ args, bus }) => compareFolded(bus, args[0] >>> 0, args[1] >>> 0, args[2] >>> 0, true);
+/** In the C locale, collation is plain byte order. */
+const strcoll: RomHandler = ({ args, bus }) => compareFolded(bus, args[0] >>> 0, args[1] >>> 0, Infinity, false);
+
+/** `strlwr` / `strupr`: case-convert in place and return the string. */
+const caseInPlace = (upper: boolean): RomHandler => ({ args, bus }) => {
+  const start = args[0] >>> 0;
+  for (let at = start; ; at++) {
+    const c = bus.readUint8(at);
+    if (c === 0) break;
+    if (upper && c >= 0x61 && c <= 0x7a) bus.writeUint8(at, c - 0x20);
+    if (!upper && c >= 0x41 && c <= 0x5a) bus.writeUint8(at, c + 0x20);
+  }
+  return start;
+};
+
+/** `rand_r(&seed)`: rand()'s generator, on the caller's own seed. */
+const randR: RomHandler = ({ args, bus }) => {
+  const at = args[0] >>> 0;
+  const next = (Math.imul(bus.readUint32(at) >>> 0, 1103515245) + 12345) >>> 0;
+  bus.writeUint32(at, next);
+  return (next >>> 16) & 0x7fff;
+};
+
 const strstr: RomHandler = ({ args, bus }) => {
   const haystackAddress = args[0] >>> 0;
   const at = readCString(bus, haystackAddress).indexOf(readCString(bus, args[1] >>> 0));
@@ -1565,6 +1624,18 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
   { address: 0x40000444, name: 'utoa', handler: utoa, rationale: 'Unsigned conversion in any radix.' },
   { address: 0x4000044c, name: 'atoi', handler: atoi, rationale: 'Leading space, optional sign, decimal digits.' },
   { address: 0x40000454, name: 'strtol', handler: strtol, rationale: 'Base 0 auto-detection and a correct endptr.' },
+  { address: 0x40000450, name: 'atol', handler: atol, rationale: 'long is 32 bits, so atoi.' },
+  { address: 0x40000458, name: 'strtoul', handler: strtoul, rationale: 'strtol read as unsigned, so "-1" is ULONG_MAX.' },
+  { address: 0x4000038c, name: 'isalpha', handler: isalpha, rationale: 'ASCII classification.' },
+  { address: 0x4000039c, name: 'isdigit', handler: isdigit, rationale: 'ASCII classification.' },
+  { address: 0x400003a0, name: 'islower', handler: islower, rationale: 'ASCII classification.' },
+  { address: 0x400003b4, name: 'isupper', handler: isupper, rationale: 'ASCII classification.' },
+  { address: 0x400003d0, name: 'strcasecmp', handler: strcasecmp, rationale: 'Unsigned byte order with ASCII case folded.' },
+  { address: 0x400003f8, name: 'strncasecmp', handler: strncasecmp, rationale: 'The same, for at most n bytes.' },
+  { address: 0x400003e8, name: 'strcoll', handler: strcoll, rationale: 'The C locale collates in byte order.' },
+  { address: 0x400003f4, name: 'strlwr', handler: caseInPlace(false), rationale: 'Lowercases in place.' },
+  { address: 0x40000418, name: 'strupr', handler: caseInPlace(true), rationale: 'Uppercases in place.' },
+  { address: 0x40000438, name: 'rand_r', handler: randR, rationale: "rand()'s generator on the caller's seed." },
   { address: 0x40000378, name: 'strstr', handler: strstr, rationale: 'Returns a pointer into the haystack, or null.' },
   { address: 0x400003e0, name: 'strchr', handler: strchr, rationale: 'Finds the terminator when asked for NUL.' },
   { address: 0x400003d8, name: 'strcat', handler: strcat, rationale: 'Appends at the destination terminator.' },
@@ -1800,6 +1871,10 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
     handler: regi2cWrite,
     rationale: 'Whole-byte write to the same register file.',
   },
+  // The GPIO matrix and pad routines (espRiscv/romGpio.ts).
+  ...romGpioFunctions(ESP32C3_ROM_GPIO_LAYOUT, ESP32C3_ROM_GPIO_ADDRESSES),
+  // Soft-float and the rest of libgcc's helpers (espRiscv/romSoftFloat.ts).
+  ...ESP32C3_ROM_SOFT_FLOAT,
 ];
 
 // ------------------------------------------------------- ROM data structures
@@ -1912,8 +1987,18 @@ export const ROM_COEX_VERSION = 'circuitdesk';
  * Every address involved differs between the C3 and the C6, so the layout is a
  * parameter. It defaults to the C3's for the callers that predate the C6.
  */
-export function installRomData(bus: Bus, layout: EspRomDataLayout = ESP32C3_ROM_DATA): void {
+export function installRomData(
+  bus: Bus,
+  layout: EspRomDataLayout = ESP32C3_ROM_DATA,
+  flash: { sizeBytes: number; jedecId: number } = { sizeBytes: 4 * 1024 * 1024, jedecId: 0xc84016 },
+): void {
   installRomLayout(bus, layout);
+  // g_rom_flashchip, as the bootloader leaves it: device_id, chip_size,
+  // block_size, sector_size, page_size, status_mask, then dummy_len_plus[3]
+  // and sig_matrix, all zero for a plain SPI part.
+  const chip = [flash.jedecId, flash.sizeBytes, 64 * 1024, 4 * 1024, 256, 0xffff, 0];
+  for (let i = 0; i < chip.length; i++) bus.writeUint32((layout.flashLegacyAddress + i * 4) >>> 0, chip[i] >>> 0);
+  bus.writeUint32(layout.flashLegacyPointer, layout.flashLegacyAddress >>> 0);
   for (let i = 0; i < ROM_COEX_VERSION.length; i++) {
     bus.writeUint8((layout.coexVersionAddress + i) >>> 0, ROM_COEX_VERSION.charCodeAt(i));
   }

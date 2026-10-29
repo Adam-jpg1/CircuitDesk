@@ -16,6 +16,8 @@
     "test:ui": "tsx tests/ui.smoke.mts",
     "test:ui:phone": "tsx tests/phone.ui.mts",
     "test:boards:eeprom": "tsx tests/boards.eepromInterrupts.mts",
+    "test:esp32:peripherals": "tsx tests/esp32.peripherals.mts",
+    "test:esp32:float": "tsx tests/esp32.softFloat.mts",
     "test:sim": "tsx tests/sim.behaviors.mts",
     "test:qa": "tsx tests/qa.beta.mts",
     "start:backend": "node dist-server/index.js",

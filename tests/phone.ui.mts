@@ -158,7 +158,7 @@ try {
   await page.waitForSelector('.phone-pane .monaco-editor', { timeout: 20000 });
   check(await page.locator('.phone-pane .bottom-tab', { hasText: 'Serial' }).isVisible(), 'Code shows the sketch, with Serial a tab away');
   await page.locator('.phone-tab', { hasText: 'Inspect' }).tap();
-  check(await page.locator('.phone-pane').isVisible(), 'Inspect shows the inspector');
+  check(await page.locator('.phone-pane-inspect').isVisible(), 'Inspect shows the inspector');
   await page.locator('.phone-tab', { hasText: 'Circuit' }).tap();
   const back = await viewBox(page);
   check(back.join() === zoomed.join(), 'and the circuit is where it was left');

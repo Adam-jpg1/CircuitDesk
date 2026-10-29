@@ -26,6 +26,8 @@ import { ESP32C6_ROM_HEAP } from './romHeap';
 import { ESP32C6_ROM_SYSTIMER } from './romSysTimer';
 import { ESP32C6_ROM_FLASH } from './romFlash';
 import { ESP32C6_ROM_NEWLIB } from './romNewlib';
+import { romGpioFunctions, ESP32C6_ROM_GPIO_LAYOUT, ESP32C6_ROM_GPIO_ADDRESSES } from '../espRiscv/romGpio';
+import { ESP32C6_ROM_SOFT_FLOAT } from '../espRiscv/romSoftFloat';
 
 /** Chips this runtime can dispatch ROM calls for. */
 export type EspRomChip = 'esp32c3' | 'esp32c6';
@@ -73,7 +75,10 @@ function buildEsp32C6Table(): ChipRomTable {
   // Entry points this part publishes and the C3 does not, so they have no
   // shared implementation to borrow. The watchdog HAL is the whole of it: the
   // C3 links its own copy into the application, and the C6's ROM provides one.
-  for (const entry of [...ESP32C6_ROM_WATCHDOG, ...ESP32C6_ROM_HEAP, ...ESP32C6_ROM_SYSTIMER, ...ESP32C6_ROM_FLASH, ...ESP32C6_ROM_NEWLIB]) {
+  // The GPIO routines are shared too, but bound to the C6's own block addresses
+  // and field widths rather than borrowed by name.
+  const gpio = romGpioFunctions(ESP32C6_ROM_GPIO_LAYOUT, ESP32C6_ROM_GPIO_ADDRESSES);
+  for (const entry of [...ESP32C6_ROM_WATCHDOG, ...ESP32C6_ROM_HEAP, ...ESP32C6_ROM_SYSTIMER, ...ESP32C6_ROM_FLASH, ...ESP32C6_ROM_NEWLIB, ...gpio, ...ESP32C6_ROM_SOFT_FLOAT]) {
     entries.set(entry.address >>> 0, entry);
   }
   return { chip: 'esp32c6', entries, absent: new Set(NOT_PUBLISHED_ON_C6) };

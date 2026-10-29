@@ -105,16 +105,18 @@ section('3. a profile claims only what its runtime models');
 {
   const c6 = processorProfile('proc.esp32c6')!;
   // UART0 is modelled but fixed to Serial, so it is no muxable UART to declare;
-  // the ADC is modelled on IO0-IO6 (tests/esp.adc.mts); PWM is not modelled.
+  // the ADC is modelled on IO0-IO6 (tests/esp.adc.mts); the LED PWM controller
+  // drives any pad through the GPIO matrix (tests/esp32.peripherals.mts).
   check(c6.uarts.length === 0, 'the C6 processor profile declares no muxable UART');
   check(Object.keys(c6.adcChannels).length === 7, `and its seven ADC1 channels (${Object.keys(c6.adcChannels).length})`);
-  check(c6.pwmPads.length === 0, 'and no PWM pads');
+  check(c6.pwmPads.length === c6.pads.length, `and PWM on every pad the matrix reaches (${c6.pwmPads.length})`);
   check(c6.notModelled.length > 0, `and says so in plain words (${c6.notModelled.length} entries)`);
 
   const c6runtime = runtimeProfile('runtime.esp32c6')!;
+  // Claimed since tests/esp32.peripherals.mts measured each on this chip.
   check(
-    c6runtime.supportedApis.every((api) => !/analogwrite|wire|spi/i.test(api)),
-    `the C6 runtime claims no analogWrite, Wire or SPI (${c6runtime.supportedApis.join(', ')})`,
+    ['analogwrite', 'wire', 'spi'].every((api) => c6runtime.supportedApis.some((s) => s.toLowerCase().includes(api))),
+    `the C6 runtime claims analogWrite, Wire and SPI (${c6runtime.supportedApis.join(', ')})`,
   );
 
   // The RP2040 is the opposite case and must not be trimmed by accident.
