@@ -125,9 +125,9 @@ section('3. a profile claims only what its runtime models');
   check(rp.i2c.length === 2 && rp.spi.length === 2, 'and both I2C and both SPI controllers');
   check(Object.keys(rp.adcChannels).length === 4, `and four ADC channels (${Object.keys(rp.adcChannels).length})`);
 
-  // The 32U4's missing Timer4 has to show up as missing pads, not as a note.
+  // The 32U4's seven PWM pads: five on Timer0/1/3, PC7 and PD7 on Timer4.
   const u4 = processorProfile('proc.atmega32u4')!;
-  check(u4.pwmPads.length === 5, `the 32U4 lists only the PWM pads Timer0/1/3 drive (${u4.pwmPads.length})`);
+  check(u4.pwmPads.length === 7 && u4.pwmPads.includes('PC7') && u4.pwmPads.includes('PD7'), `the 32U4 lists its PWM pads, Timer4's included (${u4.pwmPads.length})`);
   check(u4.notModelled.some((n) => /USB/i.test(n)), 'and says native USB is not emulated');
 }
 

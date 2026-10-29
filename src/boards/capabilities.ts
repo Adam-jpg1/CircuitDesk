@@ -101,12 +101,12 @@ const MEGA_SIM_APIS = [...AVR_SIM_APIS, 'Serial1, Serial2 and Serial3 (USART1-3,
  * The Leonardo's list is written out rather than filtered, because two entries
  * differ in meaning: "Serial" on this board is native USB CDC, served by the
  * 32U4 USB controller model (tests/leonardo.usbSerial.mts) rather than by a
- * UART, and PWM exists on five of the seven physical PWM pins because Timer4
- * is not modeled.
+ * UART, and D6 and D13's PWM comes from the 32U4's own Timer4 (avr/timer4.ts),
+ * not one of the timers it shares with the Uno.
  */
 const LEONARDO_SIM_APIS = [
   'pinMode', 'digitalWrite', 'digitalRead', 'analogRead (A0-A5)',
-  'analogWrite (PWM on D3, D5, D9, D10, D11)', 'delay/millis/micros',
+  'analogWrite (PWM on D3, D5, D6, D9, D10, D11, D13)', 'delay/millis/micros',
   'Serial (native USB CDC, to the serial monitor, both directions; while (!Serial) returns once connected)',
   'Serial1 (hardware UART on D0/D1, both directions)', 'timers', ...AVR_COMMON_APIS,
 ];
@@ -390,7 +390,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation:
       'Runs its own ATmega32U4 profile (2.5 KB SRAM, 32U4 vector table, ports B-F) — never the Uno profile. ' +
       'Serial is the native USB port and reaches the serial monitor; USB HID (Keyboard, Mouse) enumerates but nothing reads its reports. ' +
-      'Timer4 is not modeled, so analogWrite on D6 and D13 produces no PWM (digitalWrite on those pins works normally). ' +
+      'analogWrite on D6 and D13 runs on a model of the 32U4\'s own Timer4, at its 490 Hz. ' +
       'attachInterrupt (INT0-INT3, INT6), pin-change interrupts, SPI, I2C and EEPROM run on the 32U4\'s own registers and vectors. ' +
       'The A6-A11 alternate ADC channels are not emulated, and EEPROM starts erased each time the simulation starts.',
   },

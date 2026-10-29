@@ -88,7 +88,7 @@ function run(runner: AVRRunner, binding: CircuitBinding, controls: ReturnType<ty
   check(LEO.portMap[24] === undefined, 'A6-A11 are not exposed as separate pins (unsupported ADC channels)');
   check(!LEO.unsupported.some((u) => /Serial \(native USB/i.test(u)), 'the USB Serial port is no longer declared unsupported');
   check(LEO.unsupported.some((u) => /USB HID/i.test(u)), 'while USB HID still is');
-  check(LEO.unsupported.some((u) => /Timer4/.test(u)), 'Timer4 (D6/D13 PWM) declared unsupported');
+  check(!LEO.unsupported.some((u) => /Timer4/.test(u)), 'Timer4 (D6/D13 PWM) is no longer declared unsupported');
   check(LEO.unsupported.some((u) => /ADC channels 8-13/.test(u)), 'A6-A11 ADC channels declared unsupported');
 }
 
@@ -215,15 +215,23 @@ void loop(){}`);
 
 // ---------- 7. Honesty: unemulated hardware stays silent, it is not faked ----------
 {
-  // (a) Timer4 PWM (D13/D6) is declared unsupported — it must not appear to work.
+  // (a) Timer4 PWM on D13 (OC4A) and D6 (OC4D): the duty analogWrite asks for,
+  //     at the 490 Hz the core's phase-and-frequency-correct setup gives.
   const hex = await compileLeo(`void setup(){ pinMode(13, OUTPUT); pinMode(6, OUTPUT);
-  analogWrite(13, 128); analogWrite(6, 128); }
+  analogWrite(13, 64); analogWrite(6, 191); }
 void loop(){}`);
   const runner = new AVRRunner(hex, LEO);
-  runner.runToCycles(0.2 * F_CPU);
+  const rises: number[] = [];
+  runner.addPinListener((p, high) => {
+    if (p === 13 && high) rises.push(runner.cpu.cycles);
+  });
+  runner.runToCycles(0.3 * F_CPU);
   const snap = runner.snapshot();
-  const flat = (d: number) => d < 0.02 || d > 0.98;
-  check(flat(snap.duty[13]) && flat(snap.duty[6]), `Timer4 PWM on D13/D6 produces no modulation, as declared (duty ${snap.duty[13].toFixed(2)}/${snap.duty[6].toFixed(2)})`);
+  const recent = rises.slice(-20);
+  const hz = F_CPU / ((recent.at(-1)! - recent[0]) / (recent.length - 1));
+  check(Math.abs(snap.duty[13] - 0.25) < 0.02, `Timer4 PWM on D13 (OC4A/PC7): analogWrite(64) → ${(snap.duty[13] * 100).toFixed(1)}%`);
+  check(Math.abs(snap.duty[6] - 0.75) < 0.02, `Timer4 PWM on D6 (OC4D/PD7): analogWrite(191) → ${(snap.duty[6] * 100).toFixed(1)}%`);
+  check(Math.abs(hz - 490.2) < 2, `at ${hz.toFixed(1)} Hz, 16 MHz / 64 / (2 × 255)`);
 
   // (b) The native-USB "Serial" object goes out over USB, and only there — the
   //     alternative would be silently routing USB CDC onto USART1 and calling

@@ -13,6 +13,7 @@ import { CPU, avrInstruction, AVRIOPort, AVRTimer, AVRUSART, AVRADC, AVRTWI, AVR
 import { parseIntelHex, intelHexHighestAddress } from './intelHex';
 import { AVR_BOARD_PROFILES, type AvrBoardProfile, type AvrPortName } from '../boards/pinMaps';
 import { Atmega32u4Usb } from './avr/usb32u4';
+import { Timer4 } from './avr/timer4';
 import { MCU_CONFIGS } from './avr/mcuConfig';
 import { I2cBus } from './devices/i2cBus';
 import { SpiBus, type SpiController } from './devices/spiBus';
@@ -229,6 +230,10 @@ export class AVRRunner {
     for (const [pinStr, ref] of Object.entries(profile.portMap)) {
       this.portPins.get(ref.port)?.push([Number(pinStr), ref.index]);
     }
+    // The 32U4's Timer4, which avr8js does not have: PWM on D13 and D6.
+    const portC = this.ports.get('C');
+    const portD = this.ports.get('D');
+    if (profile.mcu === 'atmega32u4' && portC && portD) new Timer4(this.cpu, portC, portD);
 
     for (let pin = 0; pin < profile.pinCount; pin++) {
       this.trackers.push({

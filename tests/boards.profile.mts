@@ -383,7 +383,7 @@ function projectWith(boardDefId: string): CircuitProject {
     'D18-D21 keep their real hardware interrupt capability metadata',
   );
 
-  // ---- Leonardo: Serial is the modelled USB port; Timer4 is never claimed ----
+  // ---- Leonardo: Serial is the modelled USB port; Timer4 drives D6 and D13 ----
   const leonardo = getBoardDefinition('board.arduino-leonardo')!;
   const leoApis = leonardo.simulation!.supportedApis;
   check(
@@ -397,8 +397,8 @@ function projectWith(boardDefId: string): CircuitProject {
     'Leonardo claims Serial as its USB CDC port, never as a UART, and Serial1 as USART1',
   );
   check(
-    leoApis.some((a) => /analogWrite \(PWM on D3, D5, D9, D10, D11\)/.test(a)),
-    'Leonardo claims PWM only on the Timer0/1/3 pins, not on the Timer4 pins D6/D13',
+    leoApis.some((a) => /analogWrite \(PWM on D3, D5, D6, D9, D10, D11, D13\)/.test(a)),
+    'Leonardo claims PWM on all seven of its PWM pins, D6 and D13 on Timer4 (tests/leonardo.runtime.mts measures them)',
   );
   check(
     leoApis.some((a) => /analogRead \(A0-A5\)/.test(a)),
@@ -406,8 +406,8 @@ function projectWith(boardDefId: string): CircuitProject {
   );
   const leoLimitation = String(leonardo.metadata.limitation ?? '');
   check(
-    /native USB/i.test(leoLimitation) && /Timer4/.test(leoLimitation) && /HID/.test(leoLimitation) && !/while \(!Serial\)" will never/.test(leoLimitation),
-    'Leonardo limitation text names native USB, HID and Timer4, and no longer warns of a while (!Serial) stall',
+    /native USB/i.test(leoLimitation) && /Timer4/.test(leoLimitation) && !/Timer4 is not modeled/.test(leoLimitation) && /HID/.test(leoLimitation) && !/while \(!Serial\)" will never/.test(leoLimitation),
+    'Leonardo limitation text names native USB, HID and its Timer4 model, and no longer warns of a while (!Serial) stall',
   );
   check(describeSupport(leonardo).includes(leoLimitation), 'the Leonardo badge tooltip states its limitations');
   const leoProfile = AVR_BOARD_PROFILES['board.arduino-leonardo'];

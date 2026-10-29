@@ -184,8 +184,8 @@ export const ARDUINO_LEONARDO: BoardDefinition = {
     uartPins: ['D0', 'D1'],
     i2cPins: ['D2', 'D3'],
     spiPins: ['D14', 'D15', 'D16'],
-    // Physical PWM outputs. D6 and D13 are Timer4 outputs on real hardware and
-    // are not emulated — the simulation capability list says so.
+    // Physical PWM outputs. D6 and D13 are Timer4's OC4D and OC4A, which the
+    // simulator models separately from the Uno-style timers (avr/timer4.ts).
     pwmPins: ['D3', 'D5', 'D6', 'D9', 'D10', 'D11', 'D13'],
   },
 };

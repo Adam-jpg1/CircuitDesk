@@ -179,8 +179,8 @@ const ATMEGA32U4: ProcessorProfile = {
   ramBytes: 2_560,
   pads: avrPads({ B: 8, C: 8, D: 8, E: 8, F: 8 }),
   adcChannels: { PF0: 0, PF1: 1, PF4: 4, PF5: 5, PF6: 6, PF7: 7 },
-  // Timer4 is not modelled, so its two PWM pads are deliberately absent.
-  pwmPads: ['PD0', 'PC6', 'PB5', 'PB6', 'PB7'],
+  // Timer0/1/3 drive the first five; Timer4 drives PC7 (OC4A) and PD7 (OC4D).
+  pwmPads: ['PD0', 'PC6', 'PB5', 'PB6', 'PB7', 'PC7', 'PD7'],
   uarts: [{ id: 'usart1', arduinoName: 'Serial1', signals: { tx: ['PD3'], rx: ['PD2'] }, defaults: { tx: 'PD3', rx: 'PD2' } }],
   i2c: [{ id: 'twi0', arduinoName: 'Wire', signals: { sda: ['PD1'], scl: ['PD0'] }, defaults: { sda: 'PD1', scl: 'PD0' } }],
   spi: [
@@ -196,7 +196,7 @@ const ATMEGA32U4: ProcessorProfile = {
   logicVolts: 5,
   notModelled: [
     'native USB beyond the CDC serial port — Keyboard and Mouse enumerate, but nothing reads their reports',
-    'Timer4, so no PWM on the two pads it drives',
+    'Timer4\'s OC4B, complementary outputs, dead time and PLL clock (OC4A and OC4D, which analogWrite uses, are modelled)',
     'EEPROM across simulation restarts',
   ],
 };
