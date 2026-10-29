@@ -872,20 +872,50 @@ class SimulationController {
    * The shared clock goes back to zero with them, because nothing on the bench
    * is still running.
    */
-  reset(): void {
+  /**
+   * The Reset button: the project goes back to how it was before Run was
+   * pressed, then starts again.
+   *
+   * Resetting only the microcontrollers left every part as the firmware last
+   * drew it — a display kept its last frame, a servo its angle, a motor its
+   * speed — until the restarted sketch got round to changing them. So the whole
+   * world goes: boards, part models, their state and the serial log. The canvas
+   * shows the circuit as it looked before the run, and a fresh world boots
+   * from the same firmware. A run that was going carries on; a paused one waits
+   * at its first instant.
+   */
+  reset(): Promise<boolean> {
     const store = useSimulationStore.getState();
+    if (!this.world || this.starting) return Promise.resolve(false);
     const wasRunning = store.status === 'running';
     this.stopLoop();
-    if (!this.world) return;
-    this.world.reset();
+    this.world.dispose();
+    this.world = null;
+    this.binding = null;
     this.clearSerial();
-    if (wasRunning) {
-      this.resumeLoop();
-      store.setStatus('running');
-    } else {
-      this.publishNow();
-      store.setStatus('paused');
-    }
+    store.publishFrame({
+      simTimeMs: 0,
+      speedFactor: 1,
+      pinSnapshot: { states: [], duty: [], pulseWidthUs: [], toggles: [] },
+      visuals: {},
+    });
+    this.starting = true;
+    return this.createWorld()
+      .then((ok) => {
+        if (!ok) return false;
+        if (wasRunning) {
+          this.resumeLoop();
+          useSimulationStore.getState().setStatus('running');
+        } else {
+          // Not published: until time moves, the canvas stays exactly as it
+          // looked before Run, not as the new world's first instant draws it.
+          useSimulationStore.getState().setStatus('paused');
+        }
+        return true;
+      })
+      .finally(() => {
+        this.starting = false;
+      });
   }
 
   /**

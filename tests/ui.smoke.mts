@@ -46,6 +46,26 @@ const svgParts = await page.locator('.canvas-wrap svg g').count();
 if (svgParts < 3) fail(`canvas seems empty (${svgParts} groups)`);
 pass(`canvas renders parts (${svgParts} svg groups)`);
 
+// A trackpad pinch is a Ctrl+wheel: it must zoom the canvas, and the browser
+// must never get it as page zoom — over the canvas or anywhere else in the editor.
+const ctrlWheel = (sel: string) =>
+  page.evaluate((sel) => {
+    const el = document.querySelector(sel)!;
+    const r = el.getBoundingClientRect();
+    const ev = new WheelEvent('wheel', { deltaY: -20, ctrlKey: true, bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
+    el.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  }, sel);
+const canvasSvg = '.canvas-wrap svg:not(.minimap)';
+const vbBefore = await page.locator(canvasSvg).getAttribute('viewBox');
+if (!(await ctrlWheel(canvasSvg))) fail('a pinch over the canvas reached the browser as page zoom');
+await page.waitForTimeout(150);
+if ((await page.locator(canvasSvg).getAttribute('viewBox')) === vbBefore) fail('a pinch over the canvas did not zoom it');
+for (const sel of ['.toolbar', '.side-panel.left', '.side-panel.right']) {
+  if (!(await ctrlWheel(sel))) fail(`a pinch over ${sel} reached the browser as page zoom`);
+}
+pass('a pinch zooms the canvas and never the page');
+
 // 3. validate
 await page.getByRole('button', { name: 'Validate' }).click();
 await page.waitForTimeout(600);

@@ -11,7 +11,7 @@
 // refused (the flash driver read a chip size of zero) and then, once allowed,
 // landed 256 times too low.
 // EEPROM is non-volatile, so here a sketch counts its own boots in it and has
-// to see the count go up across the reset button. Each interrupt pin is
+// to see the count go up across a chip reset (the RESET pin, runner.reset()). Each interrupt pin is
 // driven with real edges and the ISR's count read back over Serial, and a
 // pin-change interrupt is checked on each pin-change group the Mega has.
 
@@ -90,7 +90,7 @@ void loop() {}
   check(last(b.out(), /far (\d+)/g) === '165', 'a byte further in reads back what was written');
   b.r.reset();
   run(b.r, 1200);
-  check(last(b.out(), /boot (\d+)/g) === '2', `after the reset button it reads 1 back and counts 2 (${last(b.out(), /boot (\d+)/g)})`);
+  check(last(b.out(), /boot (\d+)/g) === '2', `after a chip reset it reads 1 back and counts 2 (${last(b.out(), /boot (\d+)/g)})`);
   b.r.reset();
   run(b.r, 1200);
   check(last(b.out(), /boot (\d+)/g) === '3', 'and 3 after another');

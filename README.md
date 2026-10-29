@@ -128,6 +128,6 @@ npm run test:qa        # full beta QA: create → edit → undo/redo → compile
   headers are wiring/validation level: their badges say so, and running them is refused rather than faked.
 - Not simulated on any board: Wi-Fi, Bluetooth and the other radios; the RP2040's second core; USB other than
   the CDC serial port; DMA, the SAMD21 DAC and sleep modes. The SAMD21 has no EEPROM
-  (FlashStorage is the usual stand-in), and EEPROM on every board starts erased when a simulation starts.
+  (FlashStorage is the usual stand-in), and EEPROM on every board starts erased when a simulation starts or is Reset.
 - Analog simulation is a digital-level circuit model (documented); a SPICE-class engine is an adapter slot,
   not a claim.

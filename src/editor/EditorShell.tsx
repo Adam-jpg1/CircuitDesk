@@ -55,6 +55,7 @@ export function EditorShell({ projectId }: { projectId: string }) {
   useEffect(() => startBackgroundBuilds(), [projectId]);
 
   useKeyboardShortcuts();
+  usePageZoomGuard();
 
   useEffect(() => {
     layoutCodeEditor();
@@ -383,3 +384,28 @@ function useKeyboardShortcuts() {
 
 // re-export for actions module (avoids a cycle warning in some bundlers)
 export { compileAction };
+
+/**
+ * Keeps the browser's own page zoom out of the editor. A trackpad pinch
+ * arrives as a wheel event with Ctrl held (Safari: as gesture events), and
+ * one that landed anywhere but the canvas — a panel, the toolbar, the gap
+ * between them — zoomed the whole app. The canvas zooms itself and cancels
+ * the event; everywhere else in the editor it is simply cancelled. Ctrl/Cmd
+ * with + or - is left alone: that is a deliberate request for page zoom.
+ */
+function usePageZoomGuard() {
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) e.preventDefault();
+    };
+    const onGesture = (e: Event) => e.preventDefault();
+    window.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('gesturestart', onGesture);
+    window.addEventListener('gesturechange', onGesture);
+    return () => {
+      window.removeEventListener('wheel', onWheel);
+      window.removeEventListener('gesturestart', onGesture);
+      window.removeEventListener('gesturechange', onGesture);
+    };
+  }, []);
+}

@@ -149,21 +149,61 @@ export function CanvasStage() {
     }
   }, [project, measured, fitToView]);
 
-  const onWheel = useCallback(
-    (e: React.WheelEvent) => {
+  /** Zooms by `factor` about a point on screen, keeping that point still. */
+  const zoomAbout = useCallback(
+    (clientX: number, clientY: number, factor: number) => {
       const rect = svgRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const worldBefore = toWorld(e.clientX, e.clientY);
-      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const worldBefore = toWorld(clientX, clientY);
       const zoom = Math.min(4, Math.max(0.12, view.zoom * factor));
       store.getState().setView({
-        x: worldBefore.x - (e.clientX - rect.left) / zoom,
-        y: worldBefore.y - (e.clientY - rect.top) / zoom,
+        x: worldBefore.x - (clientX - rect.left) / zoom,
+        y: worldBefore.y - (clientY - rect.top) / zoom,
         zoom,
       });
     },
     [toWorld, view.zoom, store],
   );
+  const zoomAboutRef = useRef(zoomAbout);
+  zoomAboutRef.current = zoomAbout;
+
+  // The wheel and the trackpad pinch, as native listeners. React attaches
+  // wheel handlers as passive, so the old onWheel could never cancel the
+  // browser's own handling: a pinch — which browsers deliver as a wheel with
+  // Ctrl held — zoomed the canvas and the whole page with it. Safari sends a
+  // pinch as gesture events instead, which nothing handled at all.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      // Proportional to the distance scrolled, so a pinch's many small steps
+      // and a mouse wheel's few large ones both zoom at a sensible rate.
+      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      // A Ctrl+wheel notch on a mouse is a large delta: cap any one step.
+      const step = Math.max(-0.25, Math.min(0.25, -dy * (e.ctrlKey ? 0.01 : 0.0015)));
+      zoomAboutRef.current(e.clientX, e.clientY, Math.exp(step));
+    };
+    let lastScale = 1;
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      lastScale = 1;
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      const g = e as Event & { scale: number; clientX: number; clientY: number };
+      zoomAboutRef.current(g.clientX, g.clientY, g.scale / lastScale);
+      lastScale = g.scale;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('gesturestart', onGestureStart);
+    el.addEventListener('gesturechange', onGestureChange);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('gesturestart', onGestureStart);
+      el.removeEventListener('gesturechange', onGestureChange);
+    };
+  }, []);
 
   const finishWire = useCallback(
     (toComponentId: string, toPinId: string) => {
@@ -636,7 +676,6 @@ export function CanvasStage() {
         height={size.h}
         viewBox={vb}
         style={{ cursor, display: 'block' }}
-        onWheel={onWheel}
         onPointerDown={onBackgroundPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

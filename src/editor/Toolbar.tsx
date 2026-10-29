@@ -73,7 +73,7 @@ export function Toolbar({ phone = false }: { phone?: boolean }) {
             <PlayIcon style={{ color: '#3fb950' }} />
           </button>
         )}
-        <button className="icon-btn" title="Reset the MCU" aria-label="Reset" disabled={!simulationController.hasFirmware} onClick={() => simulationController.reset()}><ResetIcon /></button>
+        <button className="icon-btn" title="Reset: back to how it was before Run, and start again" aria-label="Reset" disabled={!simulationController.hasFirmware} onClick={() => void simulationController.reset()}><ResetIcon /></button>
         <button className="icon-btn" title="Stop simulation" aria-label="Stop" disabled={simStatus === 'stopped'} onClick={() => simulationController.stop()}><StopIcon /></button>
         <button className={`icon-btn${menuOpen ? ' active' : ''}`} title="More" aria-label="More" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
           <span className="more-dots">⋯</span>
@@ -156,7 +156,7 @@ export function Toolbar({ phone = false }: { phone?: boolean }) {
         </button>
       )}
       <button className="icon-btn" title="Step ~1 ms of CPU time" disabled={simStatus === 'stopped' || simStatus === 'error'} onClick={() => simulationController.step()}><StepIcon /></button>
-      <button className="icon-btn" title="Reset the MCU (firmware restarts)" disabled={!simulationController.hasFirmware} onClick={() => simulationController.reset()}><ResetIcon /></button>
+      <button className="icon-btn" title="Reset — every board and part goes back to how it was before Run, and the sketch starts again" disabled={!simulationController.hasFirmware} onClick={() => void simulationController.reset()}><ResetIcon /></button>
       <button className="icon-btn" title="Stop simulation" disabled={simStatus === 'stopped'} onClick={() => simulationController.stop()}><StopIcon /></button>
 
       <div style={{ flex: 1 }} />

@@ -83,7 +83,7 @@ const AVR_COMMON_APIS = [
   'Wire (I2C master)',
   'SPI (master)',
   'Servo and tone()',
-  'EEPROM (kept across the reset button; erased when the simulation starts)',
+  'EEPROM (kept for the whole run, through the sketch\'s own resets; Run and Reset start it erased)',
 ];
 
 const AVR_SIM_APIS = [
@@ -147,7 +147,7 @@ const ESP32C3_SIM_APIS = [
   'external interrupts (attachInterrupt)',
   'Wire (I2C master, on SDA/SCL or wherever Wire.begin() routes it)',
   'SPI (master, on SCK/MOSI/MISO or wherever SPI.begin() routes it)',
-  'EEPROM and Preferences (NVS on the flash, kept across the reset button)',
+  'EEPROM and Preferences (NVS on the flash, kept for the whole run; Run and Reset start it erased)',
 ];
 
 const ESP32C3_SIM_PERIPHERALS = [
@@ -194,7 +194,7 @@ const ESP32C6_SIM_APIS = [
   'external interrupts (attachInterrupt)',
   'Wire (I2C master, on SDA/SCL or wherever Wire.begin() routes it)',
   'SPI (master, on SCK/MOSI/MISO or wherever SPI.begin() routes it)',
-  'EEPROM and Preferences (NVS on the flash, kept across the reset button)',
+  'EEPROM and Preferences (NVS on the flash, kept for the whole run; Run and Reset start it erased)',
 ];
 
 const ESP32C6_SIM_PERIPHERALS = [
@@ -296,7 +296,7 @@ const RP2040_LIMITATION =
   'and GP18/GP19/GP16 for SPI. ' +
   'Floating point runs on CircuitDesk\'s own implementation of the boot ROM\'s float tables, not Raspberry Pi\'s. ' +
   'PIO runs on the simulated clock, so Servo and tone() work. ' +
-  'EEPROM writes go to the simulated flash and survive the reset button. ' +
+  'EEPROM writes go to the simulated flash and last the whole run. ' +
   'The second core and PIO-fed DMA are not simulated.';
 
 const avrCliCompiler = (fqbn: string): BoardCompilerInfo => ({
