@@ -106,7 +106,7 @@ check((await statusBar()).includes('Paused'), 'pause works');
 await page.getByTitle(/Step ~1 ms/).click();
 await page.waitForTimeout(300);
 check((await statusBar()).includes('Paused'), 'single-step keeps paused state');
-await page.getByTitle(/Reset the MCU/).click();
+await page.getByTitle(/^Reset/).click();
 await page.waitForTimeout(400);
 check((await statusBar()).includes('Paused @ 0.0') || (await statusBar()).includes('Paused'), 'reset restarts firmware');
 await page.getByTitle('Stop simulation').click();

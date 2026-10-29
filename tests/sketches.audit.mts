@@ -275,10 +275,10 @@ section('2B. mixed architecture — the C6 must not take the Pico\'s display');
     console.log('   LCD:', JSON.stringify(rows));
     check(rows[0] === 'OWNED BY PICO   ', `the display is driven by the Pico (${JSON.stringify(rows[0])})`);
     check(i2cCount(pico) === 1, `the Pico's bus holds it (${i2cCount(pico)})`);
-    // The C6's engine has no bridged I2C controller, so it does not present a
-    // bus at all — it could not take the display even if the binding tried.
+    // The C6 has an I2C controller of its own now, and the display is not on
+    // its pins, so its bus is empty: the display was not claimed twice.
     check(simulationController.runnerFor(c6) !== undefined, 'the C6 is running');
-    check(i2cCount(c6) === null, `and exposes no I2C bus to attach anything to (${i2cCount(c6)})`);
+    check(i2cCount(c6) === 0, `and its own I2C bus holds nothing (${i2cCount(c6)})`);
   }
 }
 
