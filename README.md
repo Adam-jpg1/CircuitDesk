@@ -42,6 +42,22 @@ Open http://localhost:5173, create the Blink starter project, press **Run** (Ctr
 
 Production: `npm run build && npm start` (serves the built app + API on :3411).
 
+### Where data lives
+
+| Data | Where | Survives a deploy? |
+|---|---|---|
+| Community projects and likes | Postgres (Neon), via `DATABASE_URL` on the backend | Yes. It lives with the database provider, not the server |
+| Your own projects and custom parts | Your browser (IndexedDB) | Yes. They never leave your device |
+| Compile caches | The backend container | Rebuilt as needed |
+
+**Migrations run on deploy.** The backend applies any pending migration from
+`server/db/migrations` when it starts, once each, under a lock. To change the
+schema, edit `server/db/schema.ts`, run `npm run db:generate`, and commit the
+new migration. Migrations only add tables and columns; `tests/db.migrations.mts`
+rejects any that drops or truncates. Locally, without `DATABASE_URL`, the same
+schema runs on an embedded Postgres (PGlite) in `.community-data/`. Details:
+[docs/community.md](docs/community.md#where-posts-are-kept).
+
 ## What's inside
 
 | Area | What actually works |

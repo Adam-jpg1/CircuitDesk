@@ -59,22 +59,47 @@ The test fails if the file is stale.
 
 ## Where posts are kept
 
-There is one JSON file, written atomically, in `COMMUNITY_DATA_DIR` (default
-`.community-data/` in the working directory). Writes are debounced; when the
-server is stopped (a deploy sends SIGTERM) it writes anything pending before it
-exits.
+In Postgres. In production that is a hosted database (Neon) named by
+`DATABASE_URL`; the data lives with the database provider, so a deploy, a
+restart, or the service sleeping on Render's free tier never touches it. The
+backend container holds nothing that has to survive.
 
-**For posts and likes to survive a deploy, that directory must be on a disk
-the deploy does not replace.** `render.yaml` attaches a 1 GB persistent disk
-at `/var/data` and sets `COMMUNITY_DATA_DIR=/var/data/community`; Render
-snapshots it daily. The built-in projects ship with the code and come back
-either way.
+Tables (`server/db/schema.ts`):
 
-To check a deployment, open `/health` (or `/api/community/status`):
-`communityStorage.persistent` is `true` when the data directory is on its own
-mounted volume. At startup in production the server logs a warning when it is
-not. A host whose whole disk persists (so there is no separate mount) can say
-so with `COMMUNITY_DISK_PERSISTENT=1`.
+| Table | What is in it |
+|---|---|
+| `projects` | Every post: title, description, author name, `author_id` (salted hash of the publishing browser's id), `circuit_data` (the whole project as JSON), preview, tags, board, `like_count`, `created_at`, `updated_at`, and the delete-token hash |
+| `likes` | `(user_id, project_id, created_at)`, with `(user_id, project_id)` the primary key, so one browser can like a project once. `user_id` is a salted hash of the browser's anonymous id |
+| `settings` | The salt like hashes are made with |
+
+A like inserts the row and adds 1 to `like_count` in one transaction, and only
+if the row was new (a second like from the same browser is refused by the
+key and changes nothing). An unlike deletes the row and subtracts 1 the same
+way. The count moves with `like_count = like_count + 1`, a row lock in the
+database rather than a read and a write in the server, so likes arriving at
+the same moment all count. `tests/community.api.mts` and
+`tests/community.persistence.mts` check exactly that, the second with real
+server processes redeployed onto empty disks.
+
+**Migrations.** The schema is changed in `server/db/schema.ts`, then
+`npm run db:generate` writes a new SQL migration into `server/db/migrations`,
+which is committed. The server applies pending migrations when it starts
+(under a Postgres advisory lock, so two instances cannot both apply one) and
+records them in `drizzle.__drizzle_migrations`, so each runs once. Migrations
+only add: `tests/db.migrations.mts` fails on any `DROP TABLE`, `DROP COLUMN`,
+`TRUNCATE` or `DELETE FROM`, and nothing in the deploy resets a table.
+
+Without `DATABASE_URL` (local development, tests) the same schema and
+migrations run on PGlite, an embedded Postgres, in
+`COMMUNITY_DATA_DIR/pglite` (default `.community-data/pglite`). In production
+that is not persistent, and the server says so: a startup warning, and
+`persistent: false` on `/health` and `/api/community/status`. A
+`community.json` left from before the database is imported into an empty
+database once.
+
+To check a deployment, open `/api/community/status`: `mode` is `postgres` and
+`persistent` is `true`. (`/health` reports the same, from cached counts, so
+health checks never wake a database that has scaled to zero.)
 
 ### Backups, and moving to another host
 
@@ -106,9 +131,10 @@ Other settings:
 |---|---|
 | `CREATOR_TOKEN` | Secret, at least 16 characters, that grants the Creator badge |
 | `CREATOR_NAME` | Name shown on creator posts |
-| `COMMUNITY_SALT` | Salt for like hashes. Optional; otherwise one is generated and kept in the data file |
+| `DATABASE_URL` | The Postgres connection string. Required in production; a secret, set in the host's dashboard |
+| `COMMUNITY_SALT` | Salt for like hashes. Optional; otherwise one is generated and kept in the `settings` table |
 
 ## Known limits
 
 - **Likes are per browser.** With no accounts, one person with several browsers can like a project more than once. The rate limit bounds how far that goes.
-- **No moderation queue or report button yet.** A post can be removed by its publisher, or by editing the data file.
+- **No moderation queue or report button yet.** A post can be removed by its publisher, or by deleting its row in `projects` (its likes go with it).

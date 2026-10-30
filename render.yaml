@@ -19,17 +19,10 @@ services:
       # badge when publishing; set it in the dashboard, never in this file.
       - key: CREATOR_TOKEN
         sync: false
-      # Where shared projects and likes are kept: on the persistent disk below,
-      # which survives deploys and restarts. /health reports
-      # communityStorage.persistent, so a deploy can be checked.
-      - key: COMMUNITY_DATA_DIR
-        value: /var/data/community
-    # Everything people publish to the community, and every like, lives here.
-    # The container's own filesystem is replaced at each deploy; this disk is
-    # not. Render snapshots it daily. (A service with a disk runs as a single
-    # instance and restarts rather than overlapping during a deploy — the
-    # server writes any pending change on SIGTERM before it stops.)
-    disk:
-      name: community-data
-      mountPath: /var/data
-      sizeGB: 1
+      # Where shared projects and likes are kept: a hosted Postgres (Neon).
+      # Set it in the dashboard (Environment -> DATABASE_URL), never in this
+      # file. The server applies pending migrations when it starts; the data
+      # lives with the database, so deploys, restarts and the service sleeping
+      # never touch it. /health reports communityStorage.persistent.
+      - key: DATABASE_URL
+        sync: false

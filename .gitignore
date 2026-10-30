@@ -6,3 +6,6 @@ dist-server/
 .DS_Store
 artwork-review/
 .community-data
+.env
+.env.local
+.env.*.local

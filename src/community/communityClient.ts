@@ -173,6 +173,8 @@ export async function publishProject(input: {
       board: def?.name ?? '',
       preview: projectPreview(input.project),
       project,
+      // Recorded only as a salted hash: the project's author id.
+      clientId: clientId(),
     }),
   });
   writeTokens({ ...readTokens(), [item.id]: deleteToken });

@@ -90,6 +90,25 @@ try {
   );
   check((await likeAgain.getAttribute('aria-pressed')) === 'false', 'clicking again takes it back');
 
+  // A like the server could not save is not shown as saved.
+  await page.route('**/api/community/projects/*/like', (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: false, error: 'The community is unavailable right now. Please try again in a moment.', errorCode: 'UNAVAILABLE' }),
+    }),
+  );
+  await likeAgain.click();
+  await page.waitForSelector('.toast.error', { timeout: 5000 }).catch(() => null);
+  await page.waitForTimeout(300);
+  const failedText = await page.locator('.toast.error').last().innerText().catch(() => '');
+  check(/unavailable/i.test(failedText), `a failed like says so (${JSON.stringify(failedText)})`);
+  check(
+    (await likeAgain.getAttribute('aria-pressed')) === 'false' && Number(await likeAgain.locator('.like-count').innerText()) === base,
+    'and the heart and count go back to what the server has',
+  );
+  await page.unroute('**/api/community/projects/*/like');
+
   // ------------------------------------------------------ detail + copy
   await page.locator('[data-community-id="cp_night_light"]').first().click();
   await page.waitForSelector('.cm-code');

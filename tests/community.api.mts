@@ -4,11 +4,15 @@
 // so most of this is refusals: oversized, malformed and impersonating posts,
 // likes without an id, deletes without the token, and bursts past the limits.
 // Then the things a person does — publish, find it, like it, unlike it, delete
-// it — and that the file it is kept in survives a restart.
+// it — that likes count correctly when many arrive at once, and that the
+// database keeps everything across a restart.
+//
+// Runs on PGlite by default. With TEST_DATABASE_URL it runs on that Postgres
+// instead — which it EMPTIES first, so point it only at a throwaway database.
 
 import express from 'express';
 import type { AddressInfo } from 'node:net';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -26,7 +30,19 @@ function section(t: string) {
 
 process.env.CREATOR_TOKEN = 'test-creator-token-0123456789';
 const dir = await mkdtemp(path.join(tmpdir(), 'cd-community-'));
-const file = path.join(dir, 'community.json');
+process.env.COMMUNITY_DATA_DIR = dir;
+if (process.env.TEST_DATABASE_URL) {
+  process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+  const pg = (await import('pg')).default;
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+  await client.query('DROP SCHEMA IF EXISTS drizzle CASCADE; DROP TABLE IF EXISTS likes, projects, settings CASCADE;');
+  await client.end();
+  console.log('   on Postgres (TEST_DATABASE_URL)');
+} else {
+  delete process.env.DATABASE_URL;
+  console.log('   on PGlite');
+}
 
 async function serve(store: CommunityStore) {
   const app = express();
@@ -39,7 +55,7 @@ async function serve(store: CommunityStore) {
   return { server, base };
 }
 
-const store = new CommunityStore(file, builtinPosts());
+const store = new CommunityStore({ builtIns: builtinPosts() });
 await store.load();
 const { server, base } = await serve(store);
 const api = async (method: string, url: string, body?: unknown, headers: Record<string, string> = {}, ip = '10.0.0.1') => {
@@ -145,6 +161,28 @@ try {
   const first = builtIns[0];
   r = await api('PUT', `/api/community/projects/${first.id}/like`, { clientId: me });
   check(r.json.item.likes === first.baseLikes + 1, `likes add to a built-in project's base count (${first.baseLikes} + 1)`);
+  r = await api('PUT', `/api/community/projects/cp_doesnotexist00/like`, { clientId: me });
+  check(r.status === 404, 'liking a project that does not exist is a 404, not a phantom like');
+  r = await api('GET', `/api/community/projects/${mine.id}?clientId=${other}`);
+  check(r.json.item.likes === 1 && r.json.item.liked === true, 'reopening shows the server\'s count and this visitor\'s like');
+
+  section('5b. likes arriving at once');
+  const target = (await api('POST', '/api/community/projects', post({ title: 'Popular one' }), {}, '10.5.0.1')).json.item;
+  const crowd = Array.from({ length: 20 }, () => randomUUID());
+  const together = await Promise.all(crowd.map((c, i) => api('PUT', `/api/community/projects/${target.id}/like`, { clientId: c }, {}, `10.6.0.${i + 1}`)));
+  check(together.every((x) => x.status === 200), 'twenty visitors liking at the same moment all succeed');
+  r = await api('GET', `/api/community/projects/${target.id}`);
+  check(r.json.item.likes === 20, `and all twenty count (${r.json.item.likes})`);
+  const one = randomUUID();
+  await Promise.all(Array.from({ length: 10 }, (_, i) => api('PUT', `/api/community/projects/${target.id}/like`, { clientId: one }, {}, `10.7.0.${i + 1}`)));
+  r = await api('GET', `/api/community/projects/${target.id}?clientId=${one}`);
+  check(r.json.item.likes === 21 && r.json.item.liked, `one visitor clicking ten times at once counts once (${r.json.item.likes})`);
+  await Promise.all([
+    ...crowd.slice(0, 10).map((c, i) => api('DELETE', `/api/community/projects/${target.id}/like`, { clientId: c }, {}, `10.8.0.${i + 1}`)),
+    ...crowd.slice(0, 10).map((c, i) => api('DELETE', `/api/community/projects/${target.id}/like`, { clientId: c }, {}, `10.9.0.${i + 1}`)),
+  ]);
+  r = await api('GET', `/api/community/projects/${target.id}`);
+  check(r.json.item.likes === 11, `ten unliking twice each at once takes off exactly ten (${r.json.item.likes})`);
 
   // ======================================================== searching =======
   section('6. searching and sorting');
@@ -175,21 +213,26 @@ try {
 
   // ===================================================== persistence ========
   section('9. it survives a restart');
-  await store.flush();
-  const onDisk = JSON.parse(await readFile(file, 'utf8')) as { posts: { id: string; likers: string[] }[] };
-  check(onDisk.posts.some((p) => p.id === anon.json.item.id), 'published projects are written to the data file');
-  check(!JSON.stringify(onDisk).includes(other), 'and the file holds hashes, not the anonymous ids themselves');
-  const reopened = new CommunityStore(file, builtinPosts());
+  server.close();
+  await store.close();
+  const reopened = new CommunityStore({ builtIns: builtinPosts() });
   await reopened.load();
-  check(reopened.get(anon.json.item.id) !== undefined, 'a fresh process reads them back');
-  const firstAgain = reopened.summary(reopened.get(first.id)!, me);
+  check((await reopened.getProject(anon.json.item.id)) !== undefined, 'a fresh process reads the published projects back');
+  const firstAgain = (await reopened.getProject(first.id, me))!.item;
   check(firstAgain.likes === first.baseLikes + 1 && firstAgain.liked, 'and a like on a built-in project is kept across the restart');
-  const smaller = new CommunityStore(file, builtinPosts().slice(1));
+  const popular = (await reopened.getProject(target.id))!.item;
+  check(popular.likes === 11, `and the counts are what they were (${popular.likes})`);
+  const backup = await reopened.exportData();
+  check(!JSON.stringify(backup).includes(other), 'the database holds hashes, not the anonymous ids themselves');
+  await reopened.close();
+  const smaller = new CommunityStore({ builtIns: builtinPosts().slice(1) });
   await smaller.load();
-  check(smaller.get(first.id) === undefined, 'a built-in project the code no longer ships is dropped, not kept from the file');
-  check(smaller.get(anon.json.item.id) !== undefined, 'while what visitors published stays');
+  check((await smaller.getProject(first.id)) === undefined, 'a built-in project the code no longer ships is dropped');
+  check((await smaller.getProject(anon.json.item.id)) !== undefined, 'while what visitors published stays');
+  await smaller.close();
 } finally {
   server.close();
+  await store.close().catch(() => {});
   await rm(dir, { recursive: true, force: true });
 }
 

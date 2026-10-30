@@ -61,13 +61,15 @@ app.use((req, res, next) => (req.path === COMMUNITY_RESTORE_PATH ? next() : json
 
 // ---- health checks ----
 
-app.get('/health', (_req, res) => {
+app.get('/health', async (_req, res) => {
   // `community` is declared further down; by the time a request arrives it exists.
-  const storage = community.storageStatus();
+  // Cached counts: a health check every few seconds must not keep a
+  // scale-to-zero database awake.
+  const storage = await community.storageStatus();
   res.status(200).json({
     status: 'ok',
     service: 'circuitdesk-compiler',
-    communityStorage: { persistent: storage.persistent, publishedPosts: storage.publishedPosts, lastError: storage.lastError },
+    communityStorage: { mode: storage.mode, persistent: storage.persistent, publishedPosts: storage.publishedPosts, lastError: storage.lastError },
   });
 });
 
@@ -276,42 +278,42 @@ app.post('/api/compiler/validate', compileLimiter, async (req, res) => {
 // ---- community: shared projects and likes; see server/community ----
 const community = await registerCommunityRoutes(app);
 {
-  const storage = community.storageStatus();
+  const storage = await community.storageStatus();
   console.log(
-    `[CircuitDesk] community: ${community.size} project(s), ${storage.publishedPosts} published, ` +
-      `stored ${storage.mode === 'file' ? `in ${storage.directory}` : 'in memory only'}`,
+    `[CircuitDesk] community: ${storage.posts} project(s), ${storage.publishedPosts} published, ` +
+      `stored in ${storage.mode}${storage.location ? ` (${storage.location})` : ''}`,
   );
   if (process.env.NODE_ENV === 'production' && !storage.persistent) {
     console.warn(
-      '[CircuitDesk] WARNING: community data is not on a persistent disk. Everything published, and every like, ' +
-        'will be lost at the next deploy. Attach a persistent disk and point COMMUNITY_DATA_DIR at it (render.yaml ' +
-        'mounts one at /var/data); set COMMUNITY_DISK_PERSISTENT=1 if this host keeps its disk across deploys.',
+      '[CircuitDesk] WARNING: DATABASE_URL is not set, so the community is kept on this container\'s own disk. ' +
+        'Everything published, and every like, will be lost at the next deploy or restart. Set DATABASE_URL to a ' +
+        'hosted Postgres (see the README).',
     );
   }
 }
 
 // What /health reports about the community, so a deploy can be checked from
 // outside: whether published posts will survive the next one.
-app.get('/api/community/status', (_req, res) => {
-  const { persistent, posts, publishedPosts, lastSavedAt, lastError, mode } = community.storageStatus();
-  res.json({ mode, persistent, posts, publishedPosts, lastSavedAt, lastError });
+app.get('/api/community/status', async (_req, res) => {
+  const { mode, location, persistent, posts, publishedPosts, lastError } = await community.storageStatus(true);
+  res.json({ mode, location, persistent, posts, publishedPosts, lastError });
 });
 
-// A deploy stops this process with SIGTERM. Writes are debounced, so the last
-// publish or like may still be waiting: write it before exiting.
+// A deploy stops this process with SIGTERM. Every write is already committed
+// to the database; close the connections cleanly before exiting.
 let stopping = false;
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, () => {
     if (stopping) return;
     stopping = true;
-    console.log(`[CircuitDesk] ${signal}: saving the community before exiting`);
+    console.log(`[CircuitDesk] ${signal}: closing the community database before exiting`);
     const deadline = setTimeout(() => process.exit(1), 10_000);
     deadline.unref();
     community
-      .flush()
+      .close()
       .then(() => process.exit(0))
       .catch((err) => {
-        console.error('[CircuitDesk] could not save the community on exit:', err);
+        console.error('[CircuitDesk] could not close the community database on exit:', err);
         process.exit(1);
       });
   });
