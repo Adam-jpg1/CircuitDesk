@@ -1,4 +1,5 @@
-import type { BoardDefinition, PinDefinition, SupportLevel } from '../types';
+import type { BoardDefinition, PinCapability, PinDefinition, SupportLevel } from '../types';
+import { ARDUINO_DUE } from './dueDefinition';
 import { BOARD_CAPABILITIES } from './capabilities';
 import { deriveBoardSupportLevel } from '../project/support';
 import { ARDUINO_UNO } from './unoDefinition';
@@ -62,6 +63,9 @@ function headerBoard(spec: HeaderBoardSpec): BoardDefinition {
 const g3 = (id: string, label: string, extra: Partial<PinSpec> = {}) =>
   gpio(id, label, ['digital-in', 'digital-out', 'pwm'], 3.3, extra);
 const a3 = (id: string, label: string) => analog(id, label, 3.3);
+/** A Nucleo pad: every one is a GPIO with an EXTI line, plus whatever else it can do. */
+const nuc = (id: string, label: string, aliases: string[], caps: PinCapability[], description?: string) =>
+  gpio(id, label, ['digital-in', 'digital-out', 'interrupt', ...caps], 3.3, { aliases, description, type: caps.includes('analog-in') ? 'analog' : 'digital' });
 
 export const ARDUINO_NANO = headerBoard({
   id: 'board.arduino-nano',
@@ -354,12 +358,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   PRO_MINI,
   XIAO_RP2040,
   ESP32_C3_SUPERMINI,
-  simpleWiringBoard(
-    'board.arduino-due', 'Arduino Due', 'Arduino ARM', 'AT91SAM3X8E', 101.5, 53.3, 3.3,
-    [...seqPins('D', 22, 39, 3.3).slice(0, 16), gnd('GNDL'), p3v3('3V3L')],
-    [...seqPins('D', 40, 53, 3.3), gnd('GNDR'), p5v('5VR'), vin('VINR'), reset('RESET')],
-    'wiring', { color: '#0b3d5e', description: 'Due — 3.3 V logic ARM board. Wiring + validation (3.3 V rules apply). No simulation.' },
-  ),
+  ARDUINO_DUE,
   simpleWiringBoard(
     'board.arduino-uno-r4', 'Arduino Uno R4 Minima', 'Arduino Renesas', 'RA4M1 (Cortex-M4)', 68.6, 53.4, 5,
     [gpio('D0', 'RX0', ['digital-in', 'digital-out', 'uart-rx']), gpio('D1', 'TX1', ['digital-in', 'digital-out', 'uart-tx']), gpio('D2', 'D2'), gpio('D3', 'D3'), gpio('D4', 'D4'), gpio('D5', 'D5'), gpio('D6', 'D6'), gpio('D7', 'D7'), gpio('D8', 'D8'), gpio('D9', 'D9'), gpio('D10', 'D10'), gpio('D11', 'D11'), gpio('D12', 'D12'), gpio('D13', 'D13')],
@@ -513,10 +512,33 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     'visual-only', { usb: 'micro', color: '#1a1a24', description: 'micro:bit edge connector (large pads P0-P2, 3V, GND). Visual reference with pin metadata.' },
   ),
   simpleWiringBoard(
+    // The pins keep their pad names as ids, which is what earlier projects
+    // saved; the Arduino-header names are aliases. D0/D1 are left out of the
+    // aliases on purpose: on a stock Nucleo, PA2/PA3 go to the ST-LINK and
+    // reach the header only when SB62/SB63 are closed.
     'board.stm32-nucleo', 'STM32 Nucleo-64', 'STMicroelectronics', 'STM32F401RE', 70, 82.5, 3.3,
-    [g3('PA0', 'PA0'), g3('PA1', 'PA1'), g3('PA4', 'PA4'), g3('PB0', 'PB0'), g3('PC1', 'PC1'), g3('PC0', 'PC0'), g3('PA5', 'PA5 (LED)'), g3('PA6', 'PA6'), g3('PA7', 'PA7'), g3('PB6', 'PB6'), g3('PC7', 'PC7'), g3('PA9', 'PA9'), g3('PA8', 'PA8'), g3('PB10', 'PB10'), g3('PB4', 'PB4'), g3('PB5', 'PB5'), g3('PB3', 'PB3'), g3('PA10', 'PA10'), g3('PA2', 'PA2 TX'), g3('PA3', 'PA3 RX')],
+    [
+      nuc('PA0', 'A0 PA0', ['A0'], ['analog-in', 'pwm']), nuc('PA1', 'A1 PA1', ['A1'], ['analog-in', 'pwm']),
+      nuc('PA4', 'A2 PA4', ['A2'], ['analog-in']), nuc('PB0', 'A3 PB0', ['A3'], ['analog-in', 'pwm']),
+      nuc('PC1', 'A4 PC1', ['A4'], ['analog-in']), nuc('PC0', 'A5 PC0', ['A5'], ['analog-in']),
+      nuc('PA5', 'D13 PA5', ['D13', 'LED_BUILTIN'], ['pwm', 'spi-sck'], 'D13 / SPI SCK / the green user LED LD2'),
+      nuc('PA6', 'D12 PA6', ['D12'], ['pwm', 'spi-miso', 'analog-in']), nuc('PA7', 'D11 PA7', ['D11'], ['pwm', 'spi-mosi', 'analog-in']),
+      nuc('PB6', 'D10 PB6', ['D10'], ['pwm']), nuc('PC7', 'D9 PC7', ['D9'], ['pwm']), nuc('PA9', 'D8 PA9', ['D8'], ['pwm']),
+      nuc('PA8', 'D7 PA8', ['D7'], ['pwm']), nuc('PB10', 'D6 PB10', ['D6'], ['pwm']), nuc('PB4', 'D5 PB4', ['D5'], ['pwm']),
+      nuc('PB5', 'D4 PB5', ['D4'], ['pwm']), nuc('PB3', 'D3 PB3', ['D3'], ['pwm']), nuc('PA10', 'D2 PA10', ['D2'], ['pwm']),
+      nuc('PA2', 'PA2 TX', ['TX'], ['uart-tx', 'pwm', 'analog-in'], 'USART2 TX: Serial, carried to the ST-LINK virtual COM port'),
+      nuc('PA3', 'PA3 RX', ['RX'], ['uart-rx', 'pwm', 'analog-in'], 'USART2 RX: Serial, from the ST-LINK virtual COM port'),
+      nuc('PB9', 'D14 SDA', ['D14', 'SDA'], ['i2c-sda', 'pwm'], 'Wire data (I2C1, PB9)'),
+      nuc('PB8', 'D15 SCL', ['D15', 'SCL'], ['i2c-scl', 'pwm'], 'Wire clock (I2C1, PB8)'),
+    ],
     [p3v3('3V3'), p5v('5V'), gnd('GND1'), gnd('GND2'), vin('VIN'), reset('NRST'), { id: 'AVDD', label: 'AVDD', type: 'power-3v3' as const, caps: ['power' as const], voltage: 3.3 }],
-    'wiring', { usb: 'mini', color: '#dbe4ea' },
+    'simulated',
+    {
+      usb: 'mini',
+      color: '#dbe4ea',
+      description:
+        "STM32 Nucleo-64 with the STM32F401RE: a Cortex-M4F at 84 MHz with 3.3 V logic. Runs real STM32duino firmware on CircuitDesk's ARMv7-M core and STM32F401 model.",
+    },
   ),
   simpleWiringBoard(
     'board.adafruit-feather', 'Adafruit Feather M0', 'Adafruit', 'SAMD21 (Cortex-M0+)', 22.9, 51, 3.3,

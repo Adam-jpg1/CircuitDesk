@@ -34,7 +34,7 @@ import { TIMER_FUNCTION_E, TIMER_FUNCTION_F } from '../simulation/samd21/timers'
  * family is carried alongside as `boardArchitecture` rather than derived by
  * string matching, so the two vocabularies stay explicitly linked.
  */
-export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21';
+export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4';
 
 export interface PeripheralController {
   /** Controller id as the chip's own documentation names it: `i2c0`, `usart1`. */
@@ -405,6 +405,92 @@ const SAMD21: ProcessorProfile = {
   ],
 };
 
+const SAM3X8E: ProcessorProfile = {
+  id: 'proc.sam3x8e',
+  name: 'AT91SAM3X8E (Cortex-M3)',
+  architecture: 'sam3x',
+  boardArchitecture: 'sam',
+  vendor: 'Microchip',
+  clockHz: 84_000_000,
+  flashBytes: 524_288,
+  ramBytes: 98_304,
+  pads: ['A', 'B', 'C', 'D'].flatMap((port) => Array.from({ length: 32 }, (_, i) => `P${port}${i}`)),
+  adcChannels: {
+    PA2: 0, PA3: 1, PA4: 2, PA6: 3, PA22: 4, PA23: 5, PA24: 6, PA16: 7,
+    PB12: 8, PB13: 9, PB17: 10, PB18: 11, PB19: 12, PB20: 13, PB21: 14,
+  },
+  // TIOA/TIOB and PWML outputs the Due's analogWrite reaches.
+  pwmPads: ['PB25', 'PC28', 'PC26', 'PC25', 'PC24', 'PC23', 'PC22', 'PC21', 'PC29', 'PD7', 'PD8', 'PB27'],
+  uarts: [
+    { id: 'uart', arduinoName: 'Serial', signals: { tx: ['PA9'], rx: ['PA8'] }, defaults: { tx: 'PA9', rx: 'PA8' } },
+    { id: 'usart0', arduinoName: 'Serial1', signals: { tx: ['PA11'], rx: ['PA10'] }, defaults: { tx: 'PA11', rx: 'PA10' } },
+    { id: 'usart1', arduinoName: 'Serial2', signals: { tx: ['PA13'], rx: ['PA12'] }, defaults: { tx: 'PA13', rx: 'PA12' } },
+    { id: 'usart3', arduinoName: 'Serial3', signals: { tx: ['PD4'], rx: ['PD5'] }, defaults: { tx: 'PD4', rx: 'PD5' } },
+  ],
+  i2c: [
+    { id: 'twi1', arduinoName: 'Wire', signals: { sda: ['PB12'], scl: ['PB13'] }, defaults: { sda: 'PB12', scl: 'PB13' } },
+    { id: 'twi0', arduinoName: 'Wire1', signals: { sda: ['PA17'], scl: ['PA18'] }, defaults: { sda: 'PA17', scl: 'PA18' } },
+  ],
+  spi: [
+    { id: 'spi0', arduinoName: 'SPI', signals: { sck: ['PA27'], mosi: ['PA26'], miso: ['PA25'] }, defaults: { sck: 'PA27', mosi: 'PA26', miso: 'PA25' } },
+  ],
+  interruptPads: ['A', 'B', 'C', 'D'].flatMap((port) => Array.from({ length: 32 }, (_, i) => `P${port}${i}`)),
+  logicVolts: 3.3,
+  notModelled: [
+    'the native USB port (SerialUSB), CAN, EMAC, DMA and the HSMCI',
+    "the DAC's analog output onto the canvas (conversion data is modelled)",
+    'timer capture mode and the quadrature decoder',
+    'sleep and backup modes, the RTC and RTT',
+  ],
+};
+
+const stm32Pads = ['A', 'B', 'C', 'D', 'H'].flatMap((port) =>
+  Array.from({ length: port === 'D' ? 3 : port === 'H' ? 2 : 16 }, (_, i) => `P${port}${i}`),
+);
+
+const STM32F401RE: ProcessorProfile = {
+  id: 'proc.stm32f401re',
+  name: 'STM32F401RE (Cortex-M4F)',
+  architecture: 'stm32f4',
+  boardArchitecture: 'stm32',
+  vendor: 'STMicroelectronics',
+  clockHz: 84_000_000,
+  flashBytes: 524_288,
+  ramBytes: 98_304,
+  pads: stm32Pads,
+  adcChannels: {
+    PA0: 0, PA1: 1, PA2: 2, PA3: 3, PA4: 4, PA5: 5, PA6: 6, PA7: 7,
+    PB0: 8, PB1: 9, PC0: 10, PC1: 11, PC2: 12, PC3: 13, PC4: 14, PC5: 15,
+  },
+  // Timer channel outputs, from the core's PeripheralPins.c.
+  pwmPads: ['PA0', 'PA1', 'PA2', 'PA3', 'PA5', 'PA6', 'PA7', 'PA8', 'PA9', 'PA10', 'PA11', 'PA15', 'PB0', 'PB1', 'PB3',
+    'PB4', 'PB5', 'PB6', 'PB7', 'PB8', 'PB9', 'PB10', 'PB13', 'PB14', 'PB15', 'PC6', 'PC7', 'PC8', 'PC9'],
+  uarts: [
+    { id: 'usart2', arduinoName: 'Serial', signals: { tx: ['PA2'], rx: ['PA3'] }, defaults: { tx: 'PA2', rx: 'PA3' } },
+    { id: 'usart1', arduinoName: 'Serial1', signals: { tx: ['PA9', 'PB6'], rx: ['PA10', 'PB7'] }, defaults: { tx: 'PA9', rx: 'PA10' } },
+    { id: 'usart6', arduinoName: 'Serial6', signals: { tx: ['PA11', 'PC6'], rx: ['PA12', 'PC7'] }, defaults: { tx: 'PA11', rx: 'PA12' } },
+  ],
+  i2c: [
+    { id: 'i2c1', arduinoName: 'Wire', signals: { sda: ['PB9', 'PB7'], scl: ['PB8', 'PB6'] }, defaults: { sda: 'PB9', scl: 'PB8' } },
+    { id: 'i2c2', signals: { sda: ['PB3'], scl: ['PB10'] }, defaults: { sda: 'PB3', scl: 'PB10' } },
+    { id: 'i2c3', signals: { sda: ['PB4', 'PC9'], scl: ['PA8'] }, defaults: { sda: 'PC9', scl: 'PA8' } },
+  ],
+  spi: [
+    { id: 'spi1', arduinoName: 'SPI', signals: { sck: ['PA5', 'PB3'], mosi: ['PA7', 'PB5'], miso: ['PA6', 'PB4'] }, defaults: { sck: 'PA5', mosi: 'PA7', miso: 'PA6' } },
+    { id: 'spi2', signals: { sck: ['PB10', 'PB13'], mosi: ['PB15', 'PC3'], miso: ['PB14', 'PC2'] }, defaults: { sck: 'PB13', mosi: 'PB15', miso: 'PB14' } },
+  ],
+  // EXTI takes one pad of each number, from any port.
+  interruptPads: stm32Pads,
+  logicVolts: 3.3,
+  notModelled: [
+    'DMA, the RTC, the watchdogs, SDIO and the USB OTG port',
+    'timer input capture, encoder and one-pulse modes, and timers counting down or centre-aligned',
+    'ADC scan, injected and DMA conversions',
+    'the clock tree: the CPU runs at 84 MHz from reset, the speed the Nucleo variant configures',
+    'sleep and stop modes beyond waiting for an interrupt',
+  ],
+};
+
 export const PROCESSOR_PROFILES: ProcessorProfile[] = [
   ATMEGA328P,
   ATMEGA2560,
@@ -413,6 +499,8 @@ export const PROCESSOR_PROFILES: ProcessorProfile[] = [
   ESP32C3,
   ESP32C6,
   SAMD21,
+  SAM3X8E,
+  STM32F401RE,
 ];
 
 export function processorProfile(id: string): ProcessorProfile | undefined {

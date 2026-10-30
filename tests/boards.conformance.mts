@@ -48,11 +48,13 @@ function ledPin(board: BoardDefinition): PinDefinition | undefined {
 /**
  * What a user writes in pinMode() for the pin labelled `pin`. On AVR, RP2040
  * and ESP boards the Arduino number is the runner's pad index. A SAMD21's pads
- * (PA17 = 17) are not: its variant numbers the pins by their labels, D13 as 13
+ * (PA17 = 17) are not, nor are the Due's: their variants number the pins by their labels, D13 as 13
  * and A2 as the constant A2.
  */
 function sketchPin(board: BoardDefinition, pin: PinDefinition, pad: number): string {
-  if (board.architecture === 'samd') {
+  // STM32duino names every pad as a constant (PC7), which is what these pins' ids are.
+  if (board.architecture === 'stm32') return pin.id;
+  if (board.architecture === 'samd' || board.architecture === 'sam') {
     if (/^A\d+$/.test(pin.id)) return pin.id;
     const d = /^D(\d+)$/.exec(pin.id);
     if (d) return d[1];

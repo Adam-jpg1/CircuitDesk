@@ -9,6 +9,11 @@ import { MM } from '../pinHelpers';
  * points — including the 2x18 double header.
  */
 export const MegaArtwork = memo(function MegaArtwork({ def }: { def: BoardDefinition }) {
+  // The Due is the same board shape with different silicon: it names itself.
+  const title = typeof def.metadata?.artworkTitle === 'string' ? def.metadata.artworkTitle : 'ARDUINO MEGA 2560';
+  const chip = typeof def.metadata?.artworkChip === 'string' ? def.metadata.artworkChip : 'ATmega2560';
+  const chipMark = typeof def.metadata?.artworkChipMark === 'string' ? def.metadata.artworkChipMark : 'ATMEGA|2560';
+  const [mark1, mark2] = chipMark.split('|');
   const W = def.widthMm * MM;
   const H = def.heightMm * MM;
 
@@ -90,10 +95,10 @@ export const MegaArtwork = memo(function MegaArtwork({ def }: { def: BoardDefini
           );
         })}
         <text x={62 * MM} y={30.5 * MM} fontSize="6.5" fill="#8b949e" fontFamily="monospace" textAnchor="middle">
-          ATMEGA
+          {mark1}
         </text>
         <text x={62 * MM} y={33 * MM} fontSize="6.5" fill="#8b949e" fontFamily="monospace" textAnchor="middle">
-          2560
+          {mark2}
         </text>
       </g>
 
@@ -123,10 +128,10 @@ export const MegaArtwork = memo(function MegaArtwork({ def }: { def: BoardDefini
           the manufacturer's own; CircuitDesk's branding belongs in the
           application around the canvas, not on the board on it. */}
       <text x={22 * MM} y={34 * MM} fontSize="10" fontWeight="700" fill="#e8f1f8" fontFamily="sans-serif" letterSpacing="0.5">
-        ARDUINO MEGA 2560
+        {title}
       </text>
       <text x={22 * MM} y={37 * MM} fontSize="6.5" fill="#a9c8dd" fontFamily="sans-serif">
-        ATmega2560
+        {chip}
       </text>
 
       {/* double-header body */}

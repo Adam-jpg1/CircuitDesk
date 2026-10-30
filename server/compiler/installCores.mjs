@@ -26,7 +26,7 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(readFileSync(join(here, 'cores.json'), 'utf8'));
-/** @type {{id:string,version:string,additionalUrl?:string,required?:boolean,keepChips?:string[],targets:string[]}[]} */
+/** @type {{id:string,version:string,additionalUrl?:string,required?:boolean,keepChips?:string[],keepCmsisLibs?:string[],keepStm32Series?:string[],keepMultilibs?:string[],targets:string[]}[]} */
 const CORES = manifest.cores;
 /** @type {{version:string}|undefined} */
 const CLI_PIN = manifest.arduinoCli;
@@ -178,6 +178,65 @@ function pruneArmTools(vendor, keepLibs) {
   return { removed };
 }
 
+/**
+ * Narrows the STM32duino core to the series CircuitDesk builds for. The core
+ * ships the HAL, CMSIS device headers and variants of every STM32 family —
+ * 2.5 GB installed — plus an 800 MB SVD database used only by debuggers, and a
+ * compiler with libraries for every ARM profile. An F401 build reads its own
+ * series' HAL, CMSIS headers and variants, and the compiler's Cortex-M4F
+ * (v7e-m+fp) multilib; the rest is removed. `keepSeries` names directories as
+ * the core spells them (STM32F4xx); `keepMultilibs` names them as the compiler
+ * does (thumb/v7e-m+fp).
+ */
+function pruneStm32(keepSeries, keepMultilibs) {
+  const pkg = join(dataDir(), 'packages', 'STMicroelectronics');
+  const removed = [];
+  const rm = (path) => {
+    rmSync(path, { recursive: true, force: true });
+    removed.push(path.slice(pkg.length + 1));
+  };
+  const keepDir = (name) => keepSeries.some((series) => name === series || name === `${series.replace(/xx$/, '')}xx_HAL_Driver`);
+  const hardware = join(pkg, 'hardware', 'stm32');
+  for (const version of existsSync(hardware) ? readdirSync(hardware) : []) {
+    const root = join(hardware, version);
+    const drivers = join(root, 'system', 'Drivers');
+    for (const entry of existsSync(drivers) ? readdirSync(drivers) : []) {
+      if (entry.endsWith('_HAL_Driver') && !keepDir(entry)) rm(join(drivers, entry));
+    }
+    const devices = join(drivers, 'CMSIS', 'Device', 'ST');
+    for (const entry of existsSync(devices) ? readdirSync(devices) : []) {
+      if (/^STM32\w+$/.test(entry) && !keepDir(entry)) rm(join(devices, entry));
+    }
+    const variants = join(root, 'variants');
+    for (const entry of existsSync(variants) ? readdirSync(variants) : []) {
+      if (!keepDir(entry)) rm(join(variants, entry));
+    }
+    for (const extra of ['CI', 'cmake']) if (existsSync(join(root, extra))) rm(join(root, extra));
+  }
+  const tools = join(pkg, 'tools');
+  if (existsSync(join(tools, 'STM32_SVD'))) rm(join(tools, 'STM32_SVD'));
+  const gcc = join(tools, 'xpack-arm-none-eabi-gcc');
+  for (const version of existsSync(gcc) ? readdirSync(gcc) : []) {
+    const base = join(gcc, version);
+    const keep = new Set(keepMultilibs);
+    // Multilib trees: the C libraries and libgcc, per architecture profile.
+    const trees = [join(base, 'arm-none-eabi', 'lib')];
+    const libgcc = join(base, 'lib', 'gcc', 'arm-none-eabi');
+    for (const v of existsSync(libgcc) ? readdirSync(libgcc) : []) trees.push(join(libgcc, v));
+    for (const tree of trees) {
+      for (const mode of ['thumb', 'arm']) {
+        const dir = join(tree, mode);
+        for (const entry of existsSync(dir) ? readdirSync(dir) : []) {
+          if (!keep.has(`${mode}/${entry}`)) rm(join(dir, entry));
+        }
+      }
+    }
+    const doc = join(base, 'share', 'doc');
+    if (existsSync(doc)) rm(doc);
+  }
+  return { removed };
+}
+
 function install(core) {
   const args = ['core', 'install', `${core.id}@${core.version}`];
   if (core.additionalUrl) args.push('--additional-urls', core.additionalUrl);
@@ -260,6 +319,10 @@ for (const core of CORES) {
   if (core.id === 'esp32:esp32' && core.keepChips) {
     const { removed } = pruneEspToolchains(core.keepChips);
     console.log(`[cores] pruned ${removed.length} unused ESP32 tool bundle(s): ${removed.join(', ') || 'none'}`);
+  }
+  if (core.keepStm32Series) {
+    const { removed } = pruneStm32(core.keepStm32Series, core.keepMultilibs ?? []);
+    console.log(`[cores] pruned ${removed.length} STM32 series, debugger and multilib entr(ies) not built for`);
   }
   if (core.keepCmsisLibs) {
     const vendor = core.id.split(':')[0];

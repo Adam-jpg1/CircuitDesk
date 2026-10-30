@@ -81,9 +81,13 @@ for (const t of onePerCore) {
     env: { ...process.env, ARDUINO_DIRECTORIES_DATA: dir },
   });
   const listed = stdout.split('\n').map((l) => /^([a-z0-9_]+:[a-z0-9_]+)\s+(\S+)/i.exec(l.trim())).filter(Boolean) as RegExpExecArray[];
+  // Only this packager's cores: one, or several where a packager ships more
+  // than one (arduino:avr beside arduino:sam).
   check(
-    listed.length === 1 && listed[0][1] === t.core && listed[0][2] === cli.coreVersions[t.core],
-    `arduino-cli sees exactly ${t.core} ${cli.coreVersions[t.core]} from it (${listed.map((m) => `${m[1]} ${m[2]}`).join(', ')})`,
+    listed.length >= 1 &&
+      listed.every((m) => m[1].startsWith(`${vendor}:`)) &&
+      listed.some((m) => m[1] === t.core && m[2] === cli.coreVersions[t.core]),
+    `arduino-cli sees ${t.core} ${cli.coreVersions[t.core]} and nothing from another packager (${listed.map((m) => `${m[1]} ${m[2]}`).join(', ')})`,
   );
 }
 
@@ -97,14 +101,11 @@ const SKETCH = (tag: string) =>
     'void loop() { digitalWrite(2, HIGH); delay(120); digitalWrite(2, LOW); delay(130); }',
   ].join('\n');
 
-const arch = (core: string): 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' =>
-  core === 'arduino:avr' ? 'avr' : core === 'rp2040:rp2040' ? 'rp2040' : 'esp32c3';
-
 const work = await mkdtemp(path.join(tmpdir(), 'cd-datadirs-'));
 const timings: string[] = [];
 try {
   for (const t of targets) {
-    const a = t.fqbn.endsWith('esp32c6') ? 'esp32c6' : arch(t.core);
+    const a = t.arch;
     // One sketch directory for both builds, so the build path — which ends up
     // in the ELF — is the same, and what is compared is the data directory.
     const sketchDir = path.join(work, t.fqbn.replace(/:/g, '_'), 'cdsketch');
@@ -130,8 +131,12 @@ try {
     }
     if (a === 'avr') {
       check(viaShared.result.hex === viaSplit.result.hex, '  and the Intel HEX is identical');
-    } else if (a === 'rp2040') {
-      check(viaShared.result.binaryBase64 === viaSplit.result.binaryBase64, '  and the UF2 is identical');
+    } else if (a === 'rp2040' || a === 'sam3x' || a === 'samd21') {
+      const same =
+        a === 'samd21'
+          ? viaShared.result.hex === viaSplit.result.hex
+          : viaShared.result.binaryBase64 === viaSplit.result.binaryBase64;
+      check(same, `  and the ${a === 'rp2040' ? 'UF2' : a === 'samd21' ? 'Intel HEX' : 'binary'} is identical`);
     } else {
       const x = Buffer.from(viaShared.result.binaryBase64 ?? '', 'base64');
       const y = Buffer.from(viaSplit.result.binaryBase64 ?? '', 'base64');

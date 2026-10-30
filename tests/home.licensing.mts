@@ -200,6 +200,10 @@ const parsed = parseNotices(NOTICES);
         // The SAMD21 boards, earned in tests/samd21.runtime.mts.
         'board.adafruit-feather',
         'board.adafruit-qtpy',
+        // Simulated on the strength of tests/due.runtime.mts: real compiled
+        // firmware on the ARMv7-M core and SAM3X model — time, analogRead,
+        // digital in and out, PWM, interrupts, Servo, Serial1 and Wire.
+        'board.arduino-due',
         'board.arduino-leonardo',
         'board.arduino-mega2560',
         'board.arduino-nano',
@@ -217,6 +221,11 @@ const parsed = parseNotices(NOTICES);
         'board.raspberry-pi-pico-w',
         'board.seeed-xiao',
         'board.seeed-xiao-rp2040',
+        // Simulated on the strength of tests/stm32.runtime.mts: STM32duino
+        // firmware on the ARMv7-M core and STM32F401 model — time, the FPU,
+        // analogRead, digital in, PWM, interrupts, Servo, tone, a second
+        // UART, EEPROM in flash, and Wire and an LED on the canvas.
+        'board.stm32-nucleo',
       ]),
     `the set of Simulated boards is unchanged (${simulated.join(', ')})`,
   );

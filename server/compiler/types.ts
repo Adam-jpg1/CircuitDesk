@@ -116,7 +116,7 @@ export interface BoardTarget {
   id: string;
   fqbn: string;
   name: string;
-  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21';
+  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4';
   /** arduino-cli core that provides this target. */
   core: string;
   fCpuHz: number;
@@ -258,6 +258,31 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     fCpuHz: 160_000_000,
     flashMaxBytes: 1_310_720,
     ramMaxBytes: 327_680,
+  },
+  // The Arduino Due, built for its programming port so Serial is the UART.
+  {
+    id: 'board.arduino-due',
+    fqbn: 'arduino:sam:arduino_due_x_dbg',
+    name: 'Arduino Due (AT91SAM3X8E)',
+    arch: 'sam3x',
+    core: 'arduino:sam',
+    mcu: 'sam3x8e',
+    fCpuHz: 84_000_000,
+    flashMaxBytes: 524_288,
+    ramMaxBytes: 98_304,
+  },
+  // The Nucleo-64 F401RE, through STM32duino. Serial is USART2, the ST-LINK's
+  // virtual COM port.
+  {
+    id: 'board.stm32-nucleo',
+    fqbn: 'STMicroelectronics:stm32:Nucleo_64:pnum=NUCLEO_F401RE',
+    name: 'STM32 Nucleo-64 (STM32F401RE)',
+    arch: 'stm32f4',
+    core: 'STMicroelectronics:stm32',
+    mcu: 'stm32f401re',
+    fCpuHz: 84_000_000,
+    flashMaxBytes: 524_288,
+    ramMaxBytes: 98_304,
   },
   // SAMD21 boards: Adafruit's core, which links the application at 0x2000,
   // above the boards' 8 KB UF2 bootloader — hence 248 KB of the 256 KB flash.

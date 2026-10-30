@@ -1,3 +1,4 @@
+import type { BoardTarget } from './types.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -198,7 +199,7 @@ export async function cliCompile(
   outputDir: string,
   fqbn: string,
   syntaxOnly: boolean,
-  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' = 'avr',
+  arch: BoardTarget['arch'] = 'avr',
 ): Promise<CliBuildOutput> {
   const jobs = ['--jobs', String(COMPILE_JOBS)];
   const skip = arch === 'esp32c3' || arch === 'esp32c6' ? SKIP_MERGED_IMAGE : [];
@@ -284,6 +285,15 @@ export async function cliCompile(
           if (partitions) {
             binaryRegions.push({ offset: 0x8000, data: (await readFile(path.join(outputDir, partitions))).toString('base64') });
           }
+        }
+      } else if (arch === 'sam3x' || arch === 'stm32f4') {
+        // The ARM cores write a raw binary of flash from its first byte, which
+        // is what the chip model loads; a .hex beside it (where a core makes
+        // one) is the same image in another encoding.
+        const bin = files.find((f) => f.endsWith('.ino.bin'));
+        if (bin) {
+          binaryBase64 = (await readFile(path.join(outputDir, bin))).toString('base64');
+          binaryFormat = 'bin';
         }
       } else {
         const hexFile = files.find((f) => f.endsWith('.hex') && !f.endsWith('.with_bootloader.hex'));

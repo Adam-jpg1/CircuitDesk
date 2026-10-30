@@ -254,6 +254,72 @@ const SAMD21_LIMITATION =
   'DMA, the DAC and sleep are not simulated — sketches using them compile and run, but those peripherals do nothing. ' +
   'The SAMD21 has no EEPROM, so the EEPROM library does not exist for these boards; FlashStorage is the usual stand-in.';
 
+const DUE_SIM_APIS = [
+  'pinMode (INPUT, OUTPUT, INPUT_PULLUP)',
+  'digitalWrite',
+  'digitalRead',
+  'analogRead (A0-A11, 10-bit by default, analogReadResolution up to 12, 3.3 V reference)',
+  'analogWrite (PWM on D2-D13: the PWM controller on D6-D9, the timer counters on the rest, at 1 kHz)',
+  'Wire (I2C master on D20/D21) and Wire1 (on SDA1/SCL1)',
+  'SPI (master, on the SPI header)',
+  'delay/millis/micros',
+  'Serial (the programming port: the UART on D0/D1, both directions)',
+  'Serial1, Serial2 and Serial3 (USART0, USART1, USART3 on D18/19, D16/17, D14/15, both directions)',
+  'attachInterrupt on any digital pin (CHANGE, RISING, FALLING, LOW, HIGH)',
+  "Servo, on the timer counters' interrupts (the Due's core has no tone())",
+];
+
+const DUE_SIM_PERIPHERALS = [
+  'ARMv7-M Cortex-M3 core: Thumb-2, NVIC, SysTick',
+  'PMC clock and PLL ready flags; EEFC flash controller with page programming',
+  'PIOA-D: output, input, open drain, pull-ups, peripheral muxing and pin-change interrupts',
+  'UART and USART0-3, interrupt driven, paced at the programmed baud',
+  'TC0-TC2 (nine channels) in waveform mode, with compare outputs and interrupts',
+  'PWM controller channels (PWML4-7)',
+  'ADC software-triggered conversions; DACC conversion data',
+  'TWI0/TWI1 I2C master and SPI0 master, on the shared device buses',
+];
+
+const DUE_LIMITATION =
+  "Real SAM3X8E firmware on CircuitDesk's ARMv7-M core: startup, setup() and loop(), GPIO, analogRead, analogWrite, Wire, " +
+  "SPI, Serial to Serial3, attachInterrupt and Servo. tone() and the EEPROM library are not part of the Due's core. The native USB port (SerialUSB), CAN, EMAC (Ethernet), " +
+  "DMA and the DAC's analog output onto the canvas are not simulated — sketches using them compile and run, but those " +
+  'peripherals do nothing. The Due has no EEPROM; DueFlashStorage writes to the simulated flash.';
+
+const NUCLEO_SIM_APIS = [
+  'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN, OUTPUT_OPEN_DRAIN)',
+  'digitalWrite',
+  'digitalRead',
+  'analogRead (A0-A5 and every ADC pad, 10-bit by default, analogReadResolution up to 12, 3.3 V reference)',
+  'analogWrite (PWM on the timer pins: D3, D5, D6, D9, D10, D11 and more, at 1 kHz)',
+  'tone() and noTone()',
+  'Wire (I2C1 master on D14/D15, PB9/PB8)',
+  'SPI (SPI1 master on D11-D13)',
+  'delay/millis/micros',
+  "Serial (USART2 on PA2/PA3, which the ST-LINK carries to the monitor, both directions)",
+  'Uart (HardwareSerial) instances on USART1 and USART6, both directions',
+  'attachInterrupt on any pin (CHANGE, RISING, FALLING)',
+  'Servo',
+  'EEPROM (emulated in the last flash sector, as the core does it)',
+  'HardwareTimer: update and compare callbacks',
+];
+
+const NUCLEO_SIM_PERIPHERALS = [
+  'ARMv7-M Cortex-M4 core with the single-precision FPU: Thumb-2, NVIC, SysTick',
+  'RCC oscillator and PLL ready flags; FLASH sector erase and programming',
+  'GPIOA-E and H: output, input, open drain, pulls, alternate functions; EXTI and SYSCFG',
+  'USART1, USART2 and USART6, interrupt driven, paced at the programmed baud',
+  'TIM1-TIM5 and TIM9-TIM11: PWM and output compare, update and compare interrupts',
+  'ADC1 software-triggered conversions, with the internal reference and temperature channels',
+  'I2C1-3 masters (event and error interrupts) and SPI1-4 masters, on the shared device buses',
+];
+
+const NUCLEO_LIMITATION =
+  "Real STM32F401RE firmware from the STM32duino core on CircuitDesk's ARMv7-M core: startup, setup() and loop(), GPIO, " +
+  'analogRead, analogWrite, tone, Wire, SPI, Serial, attachInterrupt, Servo and EEPROM. DMA, USB, the RTC, the watchdogs ' +
+  'and timer input capture are not simulated — sketches using them compile and run, but those peripherals do nothing. ' +
+  'The CPU runs at the 84 MHz the Nucleo variant sets up from the start; the clock tree itself is not modelled.';
+
 const samd21Compiler = (fqbn: string): BoardCompilerInfo => ({
   provider: 'arduino-cli',
   fqbn,
@@ -501,7 +567,26 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     manufacturer: 'Arduino',
     architecture: 'sam',
     aliases: ['arduino-due', 'due'],
-    limitation: 'SAM3X8E toolchain not installed on the compiler service; wiring + 3.3 V validation only.',
+    processorProfileId: 'proc.sam3x8e',
+    compileProfileId: 'compile.sam-arduino',
+    runtimeProfileId: 'runtime.armv7m-sam3x',
+    serverTargetId: 'board.arduino-due',
+    // Every label and the SAM3X pad behind it, from the core's variant.cpp.
+    padMap: { D0: 'PA8', D1: 'PA9', D2: 'PB25', D3: 'PC28', D4: 'PC26', D5: 'PC25', D6: 'PC24', D7: 'PC23', D8: 'PC22', D9: 'PC21', D10: 'PC29', D11: 'PD7', D12: 'PD8', D13: 'PB27', D14: 'PD4', D15: 'PD5', D16: 'PA13', D17: 'PA12', D18: 'PA11', D19: 'PA10', D20: 'PB12', D21: 'PB13', D22: 'PB26', D23: 'PA14', D24: 'PA15', D25: 'PD0', D26: 'PD1', D27: 'PD2', D28: 'PD3', D29: 'PD6', D30: 'PD9', D31: 'PA7', D32: 'PD10', D33: 'PC1', D34: 'PC2', D35: 'PC3', D36: 'PC4', D37: 'PC5', D38: 'PC6', D39: 'PC7', D40: 'PC8', D41: 'PC9', D42: 'PA19', D43: 'PA20', D44: 'PC19', D45: 'PC18', D46: 'PC17', D47: 'PC16', D48: 'PC15', D49: 'PC14', D50: 'PC13', D51: 'PC12', D52: 'PB21', D53: 'PB14', A0: 'PA16', A1: 'PA24', A2: 'PA23', A3: 'PA22', A4: 'PA6', A5: 'PA4', A6: 'PA3', A7: 'PA2', A8: 'PB17', A9: 'PB18', A10: 'PB19', A11: 'PB20', DAC0: 'PB15', DAC1: 'PB16', CANRX: 'PA1', CANTX: 'PA0', SDA1: 'PA17', SCL1: 'PA18', MISO: 'PA25', MOSI: 'PA26', SCK: 'PA27' },
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'arduino:sam:arduino_due_x_dbg',
+      requiredCore: 'arduino:sam',
+      supported: true,
+      note: 'Built with the Arduino SAM core for the programming port, so Serial is the UART on D0/D1.',
+    },
+    simulation: {
+      engine: 'armv7m',
+      supported: true,
+      supportedApis: DUE_SIM_APIS,
+      supportedPeripherals: DUE_SIM_PERIPHERALS,
+    },
+    limitation: DUE_LIMITATION,
   },
   'board.arduino-uno-r4': {
     manufacturer: 'Arduino',
@@ -756,7 +841,24 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       'Nucleo-64 is a board family sharing one pin layout. This entry models that shared layout rather than one part number; the processor field names the variant it is dimensioned for.',
     architecture: 'stm32',
     aliases: ['nucleo-64', 'nucleo-f401re'],
-    limitation: 'STM32 toolchain not installed; wiring only.',
+    processorProfileId: 'proc.stm32f401re',
+    compileProfileId: 'compile.stm32-nucleo',
+    runtimeProfileId: 'runtime.armv7m-stm32f4',
+    serverTargetId: 'board.stm32-nucleo',
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'STMicroelectronics:stm32:Nucleo_64:pnum=NUCLEO_F401RE',
+      requiredCore: 'STMicroelectronics:stm32',
+      supported: true,
+      note: "Built with STMicroelectronics' STM32duino core for the Nucleo-64 F401RE.",
+    },
+    simulation: {
+      engine: 'armv7m',
+      supported: true,
+      supportedApis: NUCLEO_SIM_APIS,
+      supportedPeripherals: NUCLEO_SIM_PERIPHERALS,
+    },
+    limitation: NUCLEO_LIMITATION,
   },
   'board.teensy41': {
     manufacturer: 'PJRC',

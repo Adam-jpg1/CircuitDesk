@@ -528,6 +528,8 @@ export const BOARDS_WITH_UART = new Set([
   'board.adafruit-feather',
   'board.adafruit-qtpy',
   'board.seeed-xiao',
+  'board.arduino-due',
+  'board.stm32-nucleo',
 ]);
 
 /**

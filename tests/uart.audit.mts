@@ -66,6 +66,8 @@ const UART_SUPPORT: Record<string, { tx: boolean; rx: boolean; note: string }> =
   'board.adafruit-feather': { tx: true, rx: true, note: 'SAMD21 SERCOM0 behind Serial1; Serial is native USB' },
   'board.adafruit-qtpy': { tx: true, rx: true, note: 'SAMD21 SERCOM0 behind Serial1; Serial is native USB' },
   'board.seeed-xiao': { tx: true, rx: true, note: 'SAMD21 SERCOM4 behind Serial1; Serial is native USB' },
+  'board.arduino-due': { tx: true, rx: true, note: 'SAM3X UART behind Serial on D0/D1 (the programming port); USART0-2 behind Serial1-3' },
+  'board.stm32-nucleo': { tx: true, rx: true, note: 'STM32F401 USART2 behind Serial on PA2/PA3, shared with the ST-LINK virtual COM port' },
 };
 
 // ==================================== 1. the table matches the shipped boards
@@ -132,7 +134,7 @@ section('4. the boards that do have a UART have both directions');
     check(!(claim.rx && !claim.tx), `${boardId} does not claim receive without transmit`);
   }
   const withUart = Object.entries(UART_SUPPORT).filter(([, c]) => c.tx && c.rx);
-  check(withUart.length === 14, `fourteen boards carry a real UART today (${withUart.length})`);
+  check(withUart.length === 16, `sixteen boards carry a real UART today (${withUart.length})`);
 }
 
 

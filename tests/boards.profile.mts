@@ -85,6 +85,10 @@ function projectWith(boardDefId: string): CircuitProject {
         // reading, each on the pad the board's own label names.
         'board.adafruit-feather',
         'board.adafruit-qtpy',
+        // Simulated on the strength of tests/due.runtime.mts: real compiled
+        // firmware on the ARMv7-M core and SAM3X model — time, analogRead,
+        // digital in and out, PWM, interrupts, Servo, Serial1 and Wire.
+        'board.arduino-due',
         'board.arduino-leonardo',
         'board.arduino-mega2560',
         'board.arduino-nano',
@@ -118,6 +122,11 @@ function projectWith(boardDefId: string): CircuitProject {
         // D0-D10 labels translated to GP pads by its pad map — the test drives
         // pad 26 and checks that the pin labelled D0 is the one that moved.
         'board.seeed-xiao-rp2040',
+        // Simulated on the strength of tests/stm32.runtime.mts: STM32duino
+        // firmware on the ARMv7-M core and STM32F401 model — time, the FPU,
+        // analogRead, digital in, PWM, interrupts, Servo, tone, a second
+        // UART, EEPROM in flash, and Wire and an LED on the canvas.
+        'board.stm32-nucleo',
       ]),
     `only boards with passing runtime tests are Simulated (got: ${simulated.join(', ')})`,
   );

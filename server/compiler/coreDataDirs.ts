@@ -19,6 +19,14 @@
 // the real installation: nothing is copied, nothing is installed twice, and the
 // pinned versions are exactly the ones installCores.mjs put there.
 //
+// It is per packager rather than per core, although one packager can ship
+// several cores (arduino:avr and arduino:sam both live under
+// packages/arduino): arduino-cli resolves the packager link to the real
+// installation, so a build sees the same paths either way and the firmware is
+// byte-for-byte the one the shared directory produces. Linking one level
+// deeper, at hardware/<arch>, leaves those paths unresolved and changes every
+// __FILE__ the core embeds.
+//
 // What is NOT shared is what arduino-cli writes: its tmp, staging and inventory
 // files are created fresh inside each directory, so two directories can never
 // write over one another's state.

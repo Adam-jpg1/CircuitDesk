@@ -31,7 +31,7 @@ export interface FirmwareArtifact {
 }
 
 export interface BoardSimulatorAdapter {
-  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21';
+  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m';
   /**
    * Processor profiles this adapter genuinely executes.
    *
@@ -43,7 +43,7 @@ export interface BoardSimulatorAdapter {
    */
   processorProfileIds: string[];
   /** The artifact format this engine executes. */
-  firmwareFormat: 'intel-hex' | 'uf2' | 'esp-image';
+  firmwareFormat: 'intel-hex' | 'uf2' | 'esp-image' | 'bin';
   /** Lazily loads the engine and creates a runner with the board's own profile. */
   createRunner(firmware: FirmwareArtifact, board: BoardDefinition): Promise<BoardRunner>;
 }
@@ -178,7 +178,69 @@ const samd21Adapter: BoardSimulatorAdapter = {
   },
 };
 
-const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32c3Adapter, esp32c6Adapter, samd21Adapter];
+/**
+ * The ARMv7-M chips: one core, one runner, a chip model per processor.
+ *
+ * The artifact is the raw binary the core's toolchain writes, loaded at the
+ * start of the chip's flash — which is where the image was linked.
+ */
+const armv7mAdapter: BoardSimulatorAdapter = {
+  engine: 'armv7m',
+  processorProfileIds: ['proc.sam3x8e', 'proc.stm32f401re'],
+  firmwareFormat: 'bin',
+  async createRunner(firmware, board) {
+    assertFormat(this, firmware, board);
+    const image = decodeBase64Firmware(firmware.data);
+    if (image.length < 8) throw new FirmwareRejectedError('The firmware image is empty.');
+    const { ArmRunner } = await import('./armv7m/armRunner');
+    const padOf = (cap: string) => {
+      const pin = board.pins.find((p) => p.capabilities.includes(cap as never));
+      return pin ? runnerPinIndex(board, pin.id) : undefined;
+    };
+    const busDefaults = {
+      sda: padOf('i2c-sda'),
+      scl: padOf('i2c-scl'),
+      sck: padOf('spi-sck'),
+      mosi: padOf('spi-mosi'),
+      miso: padOf('spi-miso'),
+    };
+    switch (board.processorProfileId) {
+      case 'proc.sam3x8e': {
+        const { Sam3x } = await import('./sam3x/sam3x');
+        // The vector table's reset handler has to land in flash, or this is not a SAM3X image.
+        const reset = image[4] | (image[5] << 8) | (image[6] << 16) | (image[7] << 24);
+        if (reset >>> 0 < 0x80000 || reset >>> 0 >= 0x100000) {
+          throw new FirmwareRejectedError(
+            `${board.name} runs images linked at 0x80000; this one starts at 0x${(reset >>> 0).toString(16)}. Recompile for this board.`,
+          );
+        }
+        return new ArmRunner(() => {
+          const chip = new Sam3x();
+          chip.load(image);
+          return chip;
+        }, busDefaults);
+      }
+      case 'proc.stm32f401re': {
+        const { Stm32f4 } = await import('./stm32f4/stm32f4');
+        const reset = image[4] | (image[5] << 8) | (image[6] << 16) | (image[7] << 24);
+        if (reset >>> 0 < 0x08000000 || reset >>> 0 >= 0x08080000) {
+          throw new FirmwareRejectedError(
+            `${board.name} runs images linked at 0x08000000; this one starts at 0x${(reset >>> 0).toString(16)}. Recompile for this board.`,
+          );
+        }
+        return new ArmRunner(() => {
+          const chip = new Stm32f4();
+          chip.load(image);
+          return chip;
+        }, busDefaults);
+      }
+      default:
+        throw new Error(`No ARMv7-M chip model for processor ${board.processorProfileId}.`);
+    }
+  },
+};
+
+const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32c3Adapter, esp32c6Adapter, samd21Adapter, armv7mAdapter];
 
 /**
  * The adapter for a board, or null when the board is not genuinely simulated.
@@ -206,6 +268,6 @@ export function runnableProcessorProfileIds(): string[] {
 /** The artifact format a board's engine executes, for the compile pipeline. */
 export function firmwareFormatForBoard(
   board: BoardDefinition | undefined | null,
-): 'intel-hex' | 'uf2' | 'esp-image' | null {
+): 'intel-hex' | 'uf2' | 'esp-image' | 'bin' | null {
   return getSimulatorAdapter(board)?.firmwareFormat ?? null;
 }

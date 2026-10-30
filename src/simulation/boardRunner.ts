@@ -57,7 +57,7 @@ export interface PinSnapshot {
 }
 
 export interface BoardRunner {
-  readonly engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21';
+  readonly engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m';
 
   /** Advances the simulation by a slice of simulated time. Always bounded. */
   runFor(simMs: number): void;
@@ -164,9 +164,24 @@ export function runnerPinIndex(board: BoardDefinition, pinId: string): number | 
   const pad = board.padMap?.[pinId] ?? pinId;
   if (board.architecture === 'rp2040') return rp2040PinIndex(pad);
   if (board.architecture === 'samd') return samdPadIndex(pad);
+  if (board.architecture === 'sam') return portPadIndex(pad, 4, 32);
+  if (board.architecture === 'stm32') return portPadIndex(pad, 8, 16);
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPadIndex(pad, espPads);
   return arduinoPinNumber(board, pinId);
+}
+
+/**
+ * P<port><bit> pads as port * width + bit: PB27 on a SAM3X is 59. The ARM chips
+ * here all name their pads this way, with ports of 32 (SAM3X) or 16 (STM32).
+ */
+export function portPadIndex(pad: string, ports: number, width: number): number | undefined {
+  const match = /^P([A-Z])(\d{1,2})$/.exec(pad);
+  if (!match) return undefined;
+  const port = match[1].charCodeAt(0) - 65;
+  const bit = Number(match[2]);
+  if (port >= ports || bit >= width) return undefined;
+  return port * width + bit;
 }
 
 /**
@@ -279,6 +294,14 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
     const pad = board.padMap?.[pinId] ?? pinId;
     return processorProfile('proc.samd21')?.adcChannels?.[pad];
   }
+  if (board.architecture === 'sam') {
+    const pad = board.padMap?.[pinId] ?? pinId;
+    return processorProfile('proc.sam3x8e')?.adcChannels?.[pad];
+  }
+  if (board.architecture === 'stm32') {
+    const pad = board.padMap?.[pinId] ?? pinId;
+    return processorProfile('proc.stm32f401re')?.adcChannels?.[pad];
+  }
   if (board.architecture === 'rp2040') {
     const index = rp2040PinIndex(board.padMap?.[pinId] ?? pinId);
     if (index === undefined) return undefined;
@@ -293,7 +316,7 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
 
 /** Full-scale ADC reference for a board, in volts. */
 export function boardAdcReference(board: BoardDefinition): number {
-  if (board.architecture === 'rp2040' || board.architecture === 'samd' || isEspRiscv(board)) return 3.3;
+  if (board.architecture === 'rp2040' || board.architecture === 'samd' || board.architecture === 'sam' || board.architecture === 'stm32' || isEspRiscv(board)) return 3.3;
   return 5;
 }
 
@@ -302,6 +325,10 @@ export function runnerPinCount(board: BoardDefinition): number {
   if (board.architecture === 'rp2040') return 30;
   // PA00-PA31 and PB00-PB31, as the SAMD21 runner numbers them.
   if (board.architecture === 'samd') return 64;
+  // PA0-PD31 on the SAM3X.
+  if (board.architecture === 'sam') return 128;
+  // PA0-PH15 on the STM32F4, sixteen to a port.
+  if (board.architecture === 'stm32') return 128;
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPads;
   return avrProfileFor(board)?.pinCount ?? 0;

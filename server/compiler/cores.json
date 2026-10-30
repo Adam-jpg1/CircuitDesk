@@ -42,6 +42,23 @@
       "note": "Arduino-ESP32. CircuitDesk compiles only the two RISC-V parts it can execute, so the Xtensa toolchain and the per-chip libraries for parts it does not support are pruned after install — see installCores.mjs."
     },
     {
+      "id": "arduino:sam",
+      "version": "1.6.12",
+      "targets": ["arduino:sam:arduino_due_x_dbg"],
+      "required": true,
+      "note": "The Arduino SAM core, for the Due. Built for the programming port, so Serial is the UART on D0/D1; emits a raw binary linked at 0x80000."
+    },
+    {
+      "id": "STMicroelectronics:stm32",
+      "version": "3.0.0",
+      "additionalUrl": "https://github.com/stm32duino/BoardManagerFiles/raw/main/package_stmicroelectronics_index.json",
+      "targets": ["STMicroelectronics:stm32:Nucleo_64:pnum=NUCLEO_F401RE"],
+      "required": true,
+      "keepStm32Series": ["STM32F4xx"],
+      "keepMultilibs": ["thumb/v7e-m+fp"],
+      "note": "STM32duino, for the Nucleo-64 F401RE. Serial is USART2, the ST-LINK's virtual COM port; emits a raw binary linked at 0x08000000. Pruned after install to the F4 series and the compiler's Cortex-M4F libraries — see installCores.mjs."
+    },
+    {
       "id": "adafruit:samd",
       "version": "1.7.17",
       "additionalUrl": "https://adafruit.github.io/arduino-board-index/package_adafruit_index.json",

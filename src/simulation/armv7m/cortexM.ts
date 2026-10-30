@@ -12,6 +12,10 @@
 // branches, multiplies and divides — close enough that millis() and delay()
 // keep real time, which is what a sketch can observe.
 //
+// A taken branch costs two cycles: one, and a single-cycle pipeline refill,
+// which is what the Arduino cores' cycle-counted delay loops are calibrated
+// against (three cycles for a subs/bne pair).
+//
 // Not modelled: the MPU (its registers read back what was written and nothing
 // is enforced), caches (their maintenance operations are accepted and do
 // nothing, because a simulated memory is always coherent), debug halting,
@@ -143,6 +147,8 @@ export class CortexM {
   private readonly pending: Uint8Array;
   private readonly active: Uint8Array;
   private readonly enabled: Uint8Array;
+  /** Level of each interrupt line, for sources that stay asserted until serviced. */
+  private readonly irqLine: Uint8Array;
   private readonly priorityMask: number;
   /** Set when anything that could make an exception takeable changes. */
   private recheck = true;
@@ -178,6 +184,7 @@ export class CortexM {
     this.pending = new Uint8Array(this.excCount);
     this.active = new Uint8Array(this.excCount);
     this.enabled = new Uint8Array(this.excCount);
+    this.irqLine = new Uint8Array(this.excCount);
     this.priorityMask = (0xff << (8 - config.priorityBits)) & 0xff;
     this.refreshRegions();
   }
@@ -206,6 +213,7 @@ export class CortexM {
     this.pending.fill(0);
     this.active.fill(0);
     this.enabled.fill(0);
+    this.irqLine.fill(0);
     this.priority.fill(0);
     this.vtor = vtor >>> 0;
     this.stCsr = this.stRvr = 0;
@@ -699,6 +707,20 @@ export class CortexM {
     }
   }
 
+  /**
+   * Drives an interrupt line as a level, which is what every peripheral here
+   * does: asserted while its enabled status flags are set. A rising level
+   * pends the interrupt, and a level still high when its handler returns pends
+   * it again — the NVIC's behaviour for level-sensitive sources.
+   */
+  setIrqLevel(irq: number, high: boolean): void {
+    const exc = 16 + irq;
+    if (exc >= this.excCount) return;
+    const was = this.irqLine[exc];
+    this.irqLine[exc] = high ? 1 : 0;
+    if (high && !was) this.setIrq(irq, true);
+  }
+
   /** Whether an IRQ is pending in the NVIC (for level-sensitive sources that re-pend). */
   irqPending(irq: number): boolean {
     return this.pending[16 + irq] === 1;
@@ -824,6 +846,7 @@ export class CortexM {
   private exceptionReturn(excReturn: number): void {
     const exc = this.ipsr;
     this.active[exc] = 0;
+    if (exc >= 16 && this.irqLine[exc]) this.pending[exc] = 1;
     // Let a handler that re-pends its own source (level interrupts) be seen.
     const toThread = (excReturn & 8) !== 0;
     const usePsp = (excReturn & 4) !== 0;
@@ -1295,13 +1318,13 @@ export class CortexM {
         }
         if (!this.cond(c)) return 1;
         this.branchTo(this.pcOperand + (sx8(op & 0xff) << 1));
-        return 3;
+        return 2;
       }
       case 0xe: {
         if (op & 0x800) this.undefined16(op);
         const imm11 = op & 0x7ff;
         this.branchTo(this.pcOperand + (((imm11 << 21) >> 21) << 1));
-        return 3;
+        return 2;
       }
       default:
         this.undefined16(op);
@@ -1423,7 +1446,7 @@ export class CortexM {
         const nonzero = (op & 0x800) !== 0;
         if ((this.r[rn] !== 0) === nonzero) {
           this.branchTo(this.pcOperand + imm);
-          return 3;
+          return 2;
         }
         return 1;
       }
@@ -1934,7 +1957,7 @@ export class CortexM {
       imm = (imm << 7) >> 7;
       if (op1 & 4) this.r[14] = (this.r[15] | 1) >>> 0;
       this.branchTo(this.pcOperand + imm);
-      return op1 & 4 ? 4 : 3;
+      return op1 & 4 ? 3 : 2;
     }
     if ((op & 0x38) !== 0x38) {
       // B<cond> (T3)
@@ -1946,7 +1969,7 @@ export class CortexM {
       let imm = (s << 20) | (j2 << 19) | (j1 << 18) | ((hw1 & 0x3f) << 12) | ((hw2 & 0x7ff) << 1);
       imm = (imm << 11) >> 11;
       this.branchTo(this.pcOperand + imm);
-      return 3;
+      return 2;
     }
     if ((op & 0x7e) === 0x38) {
       // MSR

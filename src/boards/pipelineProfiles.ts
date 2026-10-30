@@ -84,7 +84,7 @@ export interface RuntimeProfile {
   id: string;
   name: string;
   /** The emulator that executes the artifact. */
-  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'none';
+  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'none';
   /** Processor profiles this runtime can genuinely execute. */
   processorProfileIds: string[];
   /** Formats the engine accepts. An artifact of any other format is refused. */
@@ -103,6 +103,28 @@ export interface RuntimeProfile {
 // -------------------------------------------------------- compile profiles --
 
 export const COMPILE_PROFILES: CompileProfile[] = [
+  {
+    id: 'compile.stm32-nucleo',
+    name: 'STM32duino (STM32F401RE)',
+    adapter: 'arduino-cli',
+    processorProfileIds: ['proc.stm32f401re'],
+    requiredCore: 'STMicroelectronics:stm32',
+    fqbn: 'STMicroelectronics:stm32:Nucleo_64:pnum=NUCLEO_F401RE',
+    serverTargetId: 'board.stm32-nucleo',
+    artifactFormat: 'bin',
+    description: "STMicroelectronics' STM32duino core for the Nucleo-64 F401RE. Emits a raw binary linked at 0x08000000, the start of flash.",
+  },
+  {
+    id: 'compile.sam-arduino',
+    name: 'Arduino SAM (SAM3X8E)',
+    adapter: 'arduino-cli',
+    processorProfileIds: ['proc.sam3x8e'],
+    requiredCore: 'arduino:sam',
+    fqbn: 'arduino:sam:arduino_due_x_dbg',
+    serverTargetId: 'board.arduino-due',
+    artifactFormat: 'bin',
+    description: "The Arduino SAM core for the Due's programming port. Emits a raw binary linked at 0x80000, the start of flash.",
+  },
   {
     id: 'compile.samd21-adafruit',
     name: 'Adafruit SAMD (SAMD21)',
@@ -225,6 +247,36 @@ const AVR_APIS = [
 ];
 
 export const RUNTIME_PROFILES: RuntimeProfile[] = [
+  {
+    id: 'runtime.armv7m-stm32f4',
+    name: 'CircuitDesk ARMv7-M (STM32F401RE)',
+    engine: 'armv7m',
+    processorProfileIds: ['proc.stm32f401re'],
+    acceptsFormats: ['bin'],
+    supportedApis: [
+      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'tone', 'Wire', 'SPI', 'delay/millis/micros',
+      'Serial (USART2)', 'Uart on USART1/USART6', 'attachInterrupt', 'Servo', 'EEPROM', 'HardwareTimer',
+    ],
+    supportedPeripherals: ['GPIO', 'EXTI', 'SysTick', 'USART', 'TIM', 'ADC', 'I2C', 'SPI', 'FLASH'],
+    description:
+      "Executes STM32duino firmware on CircuitDesk's ARMv7-M core with an STM32F401RE model: RCC, GPIO, EXTI, USARTs, " +
+      'timers, ADC, I2C, SPI and flash programming.',
+  },
+  {
+    id: 'runtime.armv7m-sam3x',
+    name: 'CircuitDesk ARMv7-M (SAM3X8E)',
+    engine: 'armv7m',
+    processorProfileIds: ['proc.sam3x8e'],
+    acceptsFormats: ['bin'],
+    supportedApis: [
+      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'Wire', 'Wire1', 'SPI', 'delay/millis/micros',
+      'Serial (UART)', 'Serial1-Serial3 (USART)', 'attachInterrupt', 'Servo',
+    ],
+    supportedPeripherals: ['PIO', 'SysTick', 'UART/USART', 'TC', 'PWM', 'ADC', 'TWI', 'SPI'],
+    description:
+      "Executes Arduino Due firmware on CircuitDesk's ARMv7-M core with a SAM3X8E model: PMC, PIO, UART and USARTs, " +
+      'timer counters, PWM, ADC, TWI and SPI.',
+  },
   {
     id: 'runtime.samd21',
     name: 'CircuitDesk SAMD21',
