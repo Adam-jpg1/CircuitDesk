@@ -116,7 +116,7 @@ export interface BoardTarget {
   id: string;
   fqbn: string;
   name: string;
-  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52833';
+  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52833' | 'nrf52840';
   /** arduino-cli core that provides this target. */
   core: string;
   fCpuHz: number;
@@ -282,6 +282,18 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     fCpuHz: 64_000_000,
     flashMaxBytes: 524_288,
     ramMaxBytes: 131_072,
+  },
+  // The Nano 33 BLE: the Arduino mbed core, linked above its bootloader.
+  {
+    id: 'board.nano-33-ble',
+    fqbn: 'arduino:mbed_nano:nano33ble',
+    name: 'Arduino Nano 33 BLE (nRF52840)',
+    arch: 'nrf52840',
+    core: 'arduino:mbed_nano',
+    mcu: 'nrf52840',
+    fCpuHz: 64_000_000,
+    flashMaxBytes: 983_040,
+    ramMaxBytes: 262_144,
   },
   // The Uno R4 Minima: the Arduino Renesas core, linked above its bootloader.
   {

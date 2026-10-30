@@ -115,6 +115,17 @@ export const COMPILE_PROFILES: CompileProfile[] = [
     description: 'The Arduino nRF5 core for the BBC micro:bit V2. Emits a raw binary linked at 0, the start of flash.',
   },
   {
+    id: 'compile.mbed-nano33ble',
+    name: 'Arduino mbed (nRF52840)',
+    adapter: 'arduino-cli',
+    processorProfileIds: ['proc.nrf52840'],
+    requiredCore: 'arduino:mbed_nano',
+    fqbn: 'arduino:mbed_nano:nano33ble',
+    serverTargetId: 'board.nano-33-ble',
+    artifactFormat: 'bin',
+    description: 'The Arduino mbed core for the Nano 33 BLE. Emits a raw binary linked at 0x10000, above the board\'s bootloader.',
+  },
+  {
     id: 'compile.renesas-uno',
     name: 'Arduino Renesas (RA4M1)',
     adapter: 'arduino-cli',
@@ -273,16 +284,16 @@ export const RUNTIME_PROFILES: RuntimeProfile[] = [
     id: 'runtime.armv7m-nrf52',
     name: 'CircuitDesk ARMv7-M (nRF52)',
     engine: 'armv7m',
-    processorProfileIds: ['proc.nrf52833'],
+    processorProfileIds: ['proc.nrf52833', 'proc.nrf52840'],
     acceptsFormats: ['bin'],
     supportedApis: [
       'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'Wire', 'SPI', 'delay/millis/micros',
-      'Serial (UART)', 'attachInterrupt', 'LED matrix', 'buttons A/B',
+      'Serial (UART)', 'Serial (USB CDC, nRF52840)', 'attachInterrupt', 'LED matrix', 'buttons A/B',
     ],
-    supportedPeripherals: ['GPIO', 'GPIOTE', 'RTC', 'TIMER', 'UART', 'SAADC', 'PWM', 'TWI', 'SPI'],
+    supportedPeripherals: ['GPIO', 'GPIOTE', 'RTC', 'TIMER', 'UART', 'SAADC', 'PWM', 'TWI', 'SPI', 'USBD (nRF52840)'],
     description:
-      "Executes nRF52 firmware on CircuitDesk's ARMv7-M core with an nRF52833 model: clocks, RTC, timers, GPIO and " +
-      'GPIOTE, UART, SAADC, PWM, TWI and SPI.',
+      "Executes nRF52 firmware on CircuitDesk's ARMv7-M core with an nRF52833 or nRF52840 model: clocks, RTC, timers, GPIO and " +
+      'GPIOTE, UART, SAADC, PWM, TWI and SPI, and on the nRF52840 the USB device controller.',
   },
   {
     id: 'runtime.armv7m-ra4m1',

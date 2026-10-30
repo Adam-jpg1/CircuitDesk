@@ -28,6 +28,7 @@ import { CortexM } from '../armv7m/cortexM';
 import type { MemoryRegion } from '../armv7m/bus';
 import type { ArmMcu, I2cMasterHooks, McuSerial } from '../armv7m/armRunner';
 import { EventQueue, Pads, Periph, PeriphBus, NOT_DRIVEN } from '../armv7m/peripherals';
+import { NrfUsbd } from './usbd';
 
 export const NRF52_HZ = 64_000_000;
 export const NRF52_PAD_COUNT = 48;
@@ -59,6 +60,16 @@ export class Nrf52 implements ArmMcu {
   readonly events: EventQueue;
   readonly adcVolts = new Float64Array(8);
   readonly serials: McuSerial[] = [];
+  /** GPIO LATCH and DETECTMODE per port, for the SENSE mechanism. */
+  private readonly latch = new Uint32Array(2);
+  private readonly detectMode = new Uint32Array(2);
+  private detectHigh = false;
+  /** GPIOTE's PORT event, raised on each rising edge of the combined DETECT signal. */
+  onPortDetect: (() => void) | null = null;
+  /** Programmable peripheral interconnect: events wired to tasks. */
+  ppi!: NrfPpi;
+  /** The nRF52840's USB device controller, which the Nano 33 BLE's Serial is. */
+  usb?: NrfUsbd;
   i2c: I2cMasterHooks | null = null;
   spiTransfer: ((mosi: number, mode: 0 | 1 | 2 | 3) => number) | null = null;
 
@@ -210,6 +221,7 @@ export class Nrf52 implements ArmMcu {
     }
     this.core.onSystemReset = () => this.reset();
 
+    this.ppi = new NrfPpi(this);
     const clock = new NrfPeriph(this, 'CLOCK', 0x40000000, 0);
     clock.task(0x000, () => clock.fire(0x100)); // HFCLKSTART -> HFCLKSTARTED
     clock.task(0x008, () => clock.fire(0x104)); // LFCLKSTART -> LFCLKSTARTED
@@ -217,6 +229,29 @@ export class Nrf52 implements ArmMcu {
     clock.p.reg(0x40c, () => 0x00010001); // HFCLKSTAT: running, from the crystal
     clock.p.reg(0x418, () => 0x00010000 | (clock.p.peek(0x518) & 3)); // LFCLKSTAT
     clock.p.init(0x400, 0x1); // POWER.RESETREAS: reset pin
+    if (this.variant === '52840') {
+      // A USB cable is in, so VBUS is detected; the USB regulator settles a
+      // little after the USBD is enabled, which mbed waits for (USBPWRRDY).
+      let regulatorReady = false;
+      clock.p.reg(0x438, () => (regulatorReady ? 0x3 : 0x1)); // POWER.USBREGSTATUS
+      const usbd = new NrfPeriph(this, 'USBD', 0x40027000, 39);
+      this.usb = new NrfUsbd({
+        p: usbd.p,
+        task: (offset, fn) => usbd.task(offset, fn),
+        fire: (offset) => usbd.fire(offset),
+        link: (bit, from, to) => usbd.link(bit, from, to),
+        afterUs: (us, fn) => this.events.schedule(Math.max(1, Math.round(us * (NRF52_HZ / 1e6))), fn),
+        dmaRead: (a) => this.dmaRead(a),
+        dmaWrite: (a, v) => this.dmaWrite(a, v),
+        enabled: () => {
+          if (regulatorReady) return;
+          this.events.schedule(NRF52_HZ / 10_000, () => {
+            regulatorReady = true;
+            clock.fire(0x124); // POWER.USBPWRRDY
+          });
+        },
+      });
+    }
 
 
     for (const [name, base, irq] of [['RTC0', 0x4000b000, 11], ['RTC1', 0x40011000, 17], ['RTC2', 0x40024000, 36]] as const) {
@@ -248,7 +283,7 @@ export class Nrf52 implements ArmMcu {
     for (const [name, base] of [
       ['RADIO', 0x40001000], ['NFCT', 0x40005000], ['TEMP', 0x4000c000], ['ECB', 0x4000e000], ['CCM', 0x4000f000],
       ['WDT', 0x40010000], ['QDEC', 0x40012000], ['COMP', 0x40013000], ['EGU', 0x40014000], ['PDM', 0x4001d000],
-      ['PPI', 0x4001f000], ['MWU', 0x40020000], ['I2S', 0x40025000], ['FPU', 0x40026000], ['USBD', 0x40027000],
+      ['MWU', 0x40020000], ['I2S', 0x40025000], ['FPU', 0x40026000], ['USBD', 0x40027000],
       ['QSPI', 0x40029000], ['CC_HOST', 0x5002a000], ['ACL', 0x4001e000 + 0x800],
     ] as const) {
       if (!bus.find(base)) bus.add(new Periph(name, base, 0x1000));
@@ -265,6 +300,32 @@ export class Nrf52 implements ArmMcu {
    * P1's at 0x50000804, each with OUT, OUTSET, OUTCLR, IN, DIR, DIRSET,
    * DIRCLR and then PIN_CNF[n] from +0x700.
    */
+  /**
+   * SENSE: a pin configured to sense high or low meets its condition, which
+   * sets its LATCH bit and raises the port's DETECT signal — the OR of the
+   * pins meeting it, or in LDETECT mode, whether any LATCH bit is set. GPIOTE
+   * sees the ports' DETECT combined, as its PORT event.
+   */
+  private updateDetect(): void {
+    let detect = false;
+    for (let port = 0; port < 2; port++) {
+      let met = 0;
+      const count = port === 0 ? 32 : this.variant === '52840' ? 16 : 10;
+      for (let b = 0; b < count; b++) {
+        const sense = (this.pinCnf[port * 32 + b] >>> 16) & 3;
+        if (sense < 2) continue;
+        const high = this.pads.level(port * 32 + b);
+        if (sense === 2 ? high : !high) met |= 1 << b;
+      }
+      this.latch[port] = (this.latch[port] | met) >>> 0;
+      if (this.detectMode[port] ? this.latch[port] !== 0 : met !== 0) detect = true;
+    }
+    if (detect && !this.detectHigh) {
+      this.detectHigh = true;
+      this.onPortDetect?.();
+    } else if (!detect) this.detectHigh = false;
+  }
+
   private buildGpio(): void {
     const chip = this;
     const pinsOf = (port: number) => (port === 0 ? 32 : this.variant === '52840' ? 16 : 10);
@@ -299,6 +360,10 @@ export class Nrf52 implements ArmMcu {
         }
         case 0x514: case 0x518: case 0x51c:
           return this.dir[port];
+        case 0x520:
+          return this.latch[port];
+        case 0x524:
+          return this.detectMode[port];
         default:
           if (rel >= 0x700 && rel < 0x780) {
             const pin = (rel - 0x700) >> 2;
@@ -315,6 +380,12 @@ export class Nrf52 implements ArmMcu {
         case 0x514: return setDir(port, v);
         case 0x518: return setDir(port, this.dir[port] | v);
         case 0x51c: return setDir(port, this.dir[port] & ~v);
+        case 0x520:
+          this.latch[port] &= ~v;
+          return this.updateDetect();
+        case 0x524:
+          this.detectMode[port] = v & 1;
+          return this.updateDetect();
         default:
           if (rel >= 0x700 && rel < 0x780) {
             const pin = (rel - 0x700) >> 2;
@@ -325,9 +396,11 @@ export class Nrf52 implements ArmMcu {
             if (v & 1) this.dir[port] |= 1 << pin;
             else this.dir[port] &= ~(1 << pin);
             this.refreshPad(pad);
+            this.updateDetect();
           }
       }
     };
+    this.onPadChange(() => this.updateDetect());
     this.bus.add(
       new (class extends Periph {
         override read(offset: number): number {
@@ -408,6 +481,7 @@ class NrfPeriph {
     this.update();
     const shorts = this.p.peek(0x200);
     for (const [bit, fn] of this.shortsFn) if (shorts & (1 << bit) && this.shortFrom.get(bit) === offset) fn();
+    this.chip.ppi.event(this.p.base + offset);
   }
 
   private readonly shortFrom = new Map<number, number>();
@@ -430,6 +504,69 @@ class NrfPeriph {
 
   get cpu(): CortexM {
     return this.chip.core;
+  }
+}
+
+/**
+ * PPI: channel n runs the task at TEP[n] (and FORK[n]) whenever the event at
+ * EEP[n] fires, while the channel is enabled in CHEN. Channel groups are
+ * enabled and disabled by their tasks. The fixed channels 20-31 serve the
+ * radio and timers for Bluetooth, which is not simulated.
+ */
+class NrfPpi {
+  private readonly p: Periph;
+  private byEvent = new Map<number, number[]>();
+
+  constructor(private readonly chip: Nrf52) {
+    const p = (this.p = chip.bus.add(new Periph('PPI', 0x4001f000, 0x1000)));
+    const rebuild = () => this.rebuild();
+    p.reg(0x500, undefined, rebuild); // CHEN
+    p.reg(0x504, () => p.peek(0x500), (v) => {
+      p.poke(0x500, p.peek(0x500) | v);
+      rebuild();
+    }); // CHENSET
+    p.reg(0x508, () => p.peek(0x500), (v) => {
+      p.poke(0x500, p.peek(0x500) & ~v);
+      rebuild();
+    }); // CHENCLR
+    for (let i = 0; i < 20; i++) p.reg(0x510 + i * 8, undefined, rebuild); // CH[i].EEP
+    for (let g = 0; g < 6; g++) {
+      p.reg(g * 8, () => 0, (v) => {
+        if (!(v & 1)) return;
+        p.poke(0x500, p.peek(0x500) | p.peek(0x800 + g * 4));
+        rebuild();
+      }); // TASKS_CHG[g].EN
+      p.reg(g * 8 + 4, () => 0, (v) => {
+        if (!(v & 1)) return;
+        p.poke(0x500, p.peek(0x500) & ~p.peek(0x800 + g * 4));
+        rebuild();
+      }); // TASKS_CHG[g].DIS
+    }
+  }
+
+  private rebuild(): void {
+    const map = new Map<number, number[]>();
+    const chen = this.p.peek(0x500);
+    for (let i = 0; i < 20; i++) {
+      if (!(chen & (1 << i))) continue;
+      const eep = this.p.peek(0x510 + i * 8) >>> 0;
+      if (!eep) continue;
+      const list = map.get(eep) ?? [];
+      list.push(i);
+      map.set(eep, list);
+    }
+    this.byEvent = map;
+  }
+
+  /** An event fired at this address. */
+  event(address: number): void {
+    const channels = this.byEvent.get(address >>> 0);
+    if (!channels) return;
+    for (const i of channels) {
+      for (const tep of [this.p.peek(0x514 + i * 8), this.p.peek(0x910 + i * 4)]) {
+        if (tep) this.chip.write(tep >>> 0, 1, 4);
+      }
+    }
   }
 }
 
@@ -467,8 +604,8 @@ class NrfRtc {
     });
     n.p.reg(0x504, () => this.count());
     for (let i = 0; i < 4; i++) n.p.reg(0x540 + i * 4, undefined, () => this.reschedule());
-    n.p.reg(0x304, undefined, () => this.reschedule());
-    n.p.reg(0x344, undefined, () => this.reschedule()); // EVTENSET
+    // INTENSET is NrfPeriph's; hooking it here would replace that handler and
+    // leave the RTC's interrupts permanently disabled.
   }
 
   private cyclesPerTick(): number {
@@ -527,6 +664,7 @@ class NrfGpiote {
         if ((pol === 1 && high) || (pol === 2 && !high) || pol === 3) n.fire(0x100 + i * 4);
       }
     });
+    chip.onPortDetect = () => n.fire(0x17c); // PORT
   }
 }
 
@@ -536,29 +674,33 @@ class NrfUart implements McuSerial {
   private readonly rxQueue: number[] = [];
   private rxScheduled = false;
   private rxStarted = false;
-  private txBusy = false;
+  /** UARTE: the receive buffer EasyDMA is filling. */
+  private rxDma: { ptr: number; max: number; n: number } | null = null;
+  private txCancel: (() => void) | null = null;
 
   constructor(
     private readonly chip: Nrf52,
     private readonly n: NrfPeriph,
     readonly name: string,
   ) {
-    n.task(0x000, () => {
-      this.rxStarted = true;
-      this.pump();
-    }); // STARTRX
-    n.task(0x004, () => (this.rxStarted = false)); // STOPRX
+    n.task(0x000, () => this.startRx()); // STARTRX
+    n.task(0x004, () => this.stopRx()); // STOPRX
     n.task(0x008, () => this.startTx()); // STARTTX
-    n.task(0x00c, () => n.fire(0x158)); // STOPTX -> TXSTOPPED
-    n.p.reg(0x51c, undefined, (v) => this.transmit(v & 0xff)); // TXD
+    n.task(0x00c, () => {
+      this.txCancel?.();
+      this.txCancel = null;
+      n.fire(0x158); // TXSTOPPED
+    }); // STOPTX
+    // UARTE SHORTS: ENDRX_STARTRX and ENDRX_STOPRX.
+    n.link(5, 0x110, 0x000);
+    n.link(6, 0x110, 0x004);
+    n.p.reg(0x51c, undefined, (v) => this.transmit(v & 0xff)); // TXD (UART)
     n.p.reg(0x518, () => {
       const v = this.rxd;
       this.pump();
       return v;
-    }); // RXD
-    for (const off of [0x50c, 0x514]) n.p.reg(off, undefined, () => this.claim()); // PSEL.TXD / RXD (legacy)
-    n.p.reg(0x500, undefined, () => this.claim());
-    n.p.reg(0x50c - 0x0, undefined, () => this.claim());
+    }); // RXD (UART)
+    for (const off of [0x500, 0x50c, 0x514]) n.p.reg(off, undefined, () => this.claim()); // ENABLE, PSEL.TXD, PSEL.RXD
   }
 
   private rxd = 0;
@@ -569,6 +711,11 @@ class NrfUart implements McuSerial {
 
   get txPad(): number {
     return Nrf52.psel(this.n.p.peek(0x50c));
+  }
+
+  /** ENABLE 8 is the UARTE (EasyDMA); 4 is the legacy UART. */
+  private dma(): boolean {
+    return this.n.p.peek(0x500) === 8;
   }
 
   private claim(): void {
@@ -585,25 +732,62 @@ class NrfUart implements McuSerial {
     return Math.max(16, Math.round((NRF52_HZ * 10) / (this.baud() ?? 115200)));
   }
 
+  /** A byte leaves on the TX pad — if one is connected. */
+  private emit(byte: number): void {
+    if (this.txPad >= 0) this.onTransmit?.(byte);
+  }
+
   private startTx(): void {
-    // UARTE: a DMA transmit of TXD.MAXCNT bytes from TXD.PTR.
-    if (this.n.p.peek(0x500) === 8) {
-      const ptr = this.n.p.peek(0x544);
-      const count = this.n.p.peek(0x548) & 0xffff;
-      for (let i = 0; i < count; i++) this.onTransmit?.(this.chip.dmaRead(ptr + i));
-      this.n.p.poke(0x54c, count); // TXD.AMOUNT
-      this.n.fire(0x150); // TXSTARTED
-      this.chip.events.schedule(this.charCycles() * Math.max(1, count), () => this.n.fire(0x120)); // ENDTX
-    }
+    if (!this.dma()) return;
+    // UARTE: TXD.MAXCNT bytes from TXD.PTR, a TXDRDY as each one goes, ENDTX after the last.
+    this.txCancel?.();
+    const ptr = this.n.p.peek(0x544);
+    const count = this.n.p.peek(0x548) & 0xffff;
+    const bytes = Array.from({ length: count }, (_, i) => this.chip.dmaRead(ptr + i));
+    this.n.p.poke(0x54c, 0); // TXD.AMOUNT
+    this.n.fire(0x150); // TXSTARTED
+    let sent = 0;
+    const next = () => {
+      if (sent >= bytes.length) {
+        this.txCancel = null;
+        this.n.fire(0x120); // ENDTX
+        return;
+      }
+      this.txCancel = this.chip.events.schedule(this.charCycles(), () => {
+        this.emit(bytes[sent++]);
+        this.n.p.poke(0x54c, sent);
+        this.n.fire(0x11c); // TXDRDY
+        next();
+      });
+    };
+    next();
   }
 
   private transmit(byte: number): void {
-    this.onTransmit?.(byte);
-    this.txBusy = true;
-    this.chip.events.schedule(this.charCycles(), () => {
-      this.txBusy = false;
-      this.n.fire(0x11c); // TXDRDY
-    });
+    this.emit(byte);
+    this.chip.events.schedule(this.charCycles(), () => this.n.fire(0x11c)); // TXDRDY
+  }
+
+  private startRx(): void {
+    this.rxStarted = true;
+    if (this.dma()) {
+      this.rxDma = { ptr: this.n.p.peek(0x534), max: this.n.p.peek(0x538) & 0xffff, n: 0 };
+      this.n.fire(0x14c); // RXSTARTED
+    }
+    this.pump();
+  }
+
+  private stopRx(): void {
+    this.rxStarted = false;
+    if (this.rxDma) this.endRx();
+    this.n.fire(0x144); // RXTO: the receiver has stopped
+  }
+
+  private endRx(): void {
+    const dma = this.rxDma!;
+    this.rxDma = null;
+    this.n.p.poke(0x53c, dma.n); // RXD.AMOUNT
+    this.n.fire(0x110); // ENDRX (whose shorts may start the next buffer)
   }
 
   receive(byte: number): void {
@@ -612,10 +796,21 @@ class NrfUart implements McuSerial {
   }
 
   private pump(): void {
-    if (!this.rxStarted || this.rxScheduled || !this.rxQueue.length || this.n.event(0x108)) return;
+    if (!this.rxStarted || this.rxScheduled || !this.rxQueue.length) return;
+    if (this.dma() ? !this.rxDma : this.n.event(0x108)) return;
     this.rxScheduled = true;
     this.chip.events.schedule(this.charCycles(), () => {
       this.rxScheduled = false;
+      if (this.dma()) {
+        const dma = this.rxDma;
+        // Between buffers the byte waits in the receiver, as in the hardware FIFO.
+        if (!dma) return;
+        this.chip.dmaWrite(dma.ptr + dma.n, this.rxQueue.shift()!);
+        dma.n++;
+        this.n.fire(0x108); // RXDRDY
+        if (dma.n >= dma.max) this.endRx();
+        return this.pump();
+      }
       if (this.n.event(0x108)) return this.pump();
       this.rxd = this.rxQueue.shift()!;
       this.n.fire(0x108); // RXDRDY
@@ -676,7 +871,10 @@ class NrfSerialBox {
     n.task(0x000, () => this.startRx()); // STARTRX (TWI/TWIM)
     n.task(0x008, () => this.startTx()); // STARTTX
     n.task(0x014, () => this.stop()); // STOP
-    n.task(0x01c, () => n.fire(0x148)); // SUSPEND -> SUSPENDED
+    n.task(0x01c, () => {
+      this.suspended = true;
+      n.fire(0x148);
+    }); // SUSPEND -> SUSPENDED
     n.task(0x020, () => this.resume()); // RESUME
     n.task(0x010, () => this.spimStart()); // SPIM START
     p.reg(0x51c, undefined, (v) => this.txd(v & 0xff)); // TXD
@@ -721,33 +919,55 @@ class NrfSerialBox {
   }
 
   // ---- TWI (legacy)
+  //
+  // STARTTX/STARTRX send START and the address at once (an address NACK is
+  // ERRORSRC.ANACK). Writing: each TXD byte goes out as it is written, then
+  // TXDSENT. Reading: a byte arrives, RXDREADY, then BB; SHORTS BB_SUSPEND
+  // holds the bus there until RESUME, BB_STOP makes the byte just received the
+  // last (NACKed, then STOP). Without either, the next byte starts when RXD is
+  // read, as the real part stretches the clock until it is.
+
+  private inTransaction = false;
+  private pendingTxd: number | null = null;
+  private suspended = false;
+  private awaitingRxdRead = false;
 
   private startTx(): void {
     const m = this.mode();
     if (m === 6) return this.twimTransfer(true);
     if (m !== 5) return;
-    this.bus()?.start(false);
+    this.bus()?.start(this.inTransaction);
+    this.inTransaction = true;
     this.txAddressed = false;
     this.reading = false;
+    this.pendingTxd = null;
+    this.chip.events.schedule(this.byteCycles(), () => {
+      const ack = this.bus() ? this.bus()!.connect(this.address(), true) : false;
+      if (!ack) {
+        this.n.p.poke(0x4c4, this.n.p.peek(0x4c4) | 2); // ERRORSRC.ANACK
+        this.n.fire(0x124); // ERROR
+        return;
+      }
+      this.txAddressed = true;
+      const pending = this.pendingTxd;
+      this.pendingTxd = null;
+      if (pending !== null) this.sendByte(pending);
+    });
   }
 
   private txd(byte: number): void {
     const m = this.mode();
     if (m === 1) return this.spiByte(byte);
     if (m !== 5) return;
+    if (!this.txAddressed) this.pendingTxd = byte;
+    else this.sendByte(byte);
+  }
+
+  private sendByte(byte: number): void {
     this.chip.events.schedule(this.byteCycles(), () => {
-      if (!this.txAddressed) {
-        this.txAddressed = true;
-        const ack = this.bus() ? this.bus()!.connect(this.address(), true) : false;
-        if (!ack) {
-          this.n.p.poke(0x4c4, this.n.p.peek(0x4c4) | 2); // ERRORSRC.ANACK
-          this.n.fire(0x124); // ERROR
-          return;
-        }
-      }
       const ack = this.bus() ? this.bus()!.writeByte(byte) : false;
       if (!ack) {
-        this.n.p.poke(0x4c4, this.n.p.peek(0x4c4) | 4); // DNACK
+        this.n.p.poke(0x4c4, this.n.p.peek(0x4c4) | 4); // ERRORSRC.DNACK
         this.n.fire(0x124);
         return;
       }
@@ -759,45 +979,48 @@ class NrfSerialBox {
     const m = this.mode();
     if (m === 6) return this.twimTransfer(false);
     if (m !== 5) return;
-    this.bus()?.start(this.txAddressed);
+    this.bus()?.start(this.inTransaction);
+    this.inTransaction = true;
     this.reading = true;
-    const ack = this.bus() ? this.bus()!.connect(this.address(), false) : false;
-    if (!ack) {
-      this.n.p.poke(0x4c4, this.n.p.peek(0x4c4) | 2);
-      this.n.fire(0x124);
-      return;
-    }
-    this.nextRead();
+    this.suspended = false;
+    this.awaitingRxdRead = false;
+    this.chip.events.schedule(this.byteCycles(), () => {
+      const ack = this.bus() ? this.bus()!.connect(this.address(), false) : false;
+      if (!ack) {
+        this.n.p.poke(0x4c4, this.n.p.peek(0x4c4) | 2);
+        this.n.fire(0x124);
+        return;
+      }
+      this.readByte();
+    });
   }
 
+  /** RXD was read: without a suspend, the next byte follows. */
   private nextRead(): void {
-    // SHORTS BB_SUSPEND (bit 0) holds the bus after each byte; BB_STOP (bit 1)
-    // makes this byte the last.
-    const shorts = this.n.p.peek(0x200);
-    if (shorts & 1) {
-      this.pendingRead = true;
-      this.n.fire(0x138); // BB
-      this.n.fire(0x148); // SUSPENDED
-      return;
-    }
-    this.readNow(!(shorts & 2));
+    if (!this.awaitingRxdRead) return;
+    this.awaitingRxdRead = false;
+    this.readByte();
   }
-
-  private pendingRead = false;
 
   private resume(): void {
-    if (this.pendingRead) {
-      this.pendingRead = false;
-      const shorts = this.n.p.peek(0x200);
-      this.readNow(!(shorts & 2));
-    }
+    if (this.mode() !== 5 || !this.suspended) return;
+    this.suspended = false;
+    if (this.reading) this.readByte();
   }
 
-  private readNow(ack: boolean): void {
+  private readByte(): void {
     this.chip.events.schedule(this.byteCycles(), () => {
-      this.rxd = this.bus() ? this.bus()!.readByte(ack) : 0xff;
+      if (!this.reading) return;
+      const shorts = this.n.p.peek(0x200);
+      const last = (shorts & 2) !== 0; // BB_STOP
+      this.rxd = this.bus() ? this.bus()!.readByte(!last) : 0xff;
       this.n.fire(0x108); // RXDREADY
-      if (!ack) this.stop();
+      this.n.fire(0x138); // BB
+      if (last) this.stop();
+      else if (shorts & 1) {
+        this.suspended = true; // BB_SUSPEND
+        this.n.fire(0x148); // SUSPENDED
+      } else this.awaitingRxdRead = true;
     });
   }
 
@@ -805,6 +1028,9 @@ class NrfSerialBox {
     if (this.mode() !== 5 && this.mode() !== 6) return;
     this.bus()?.stop();
     this.reading = false;
+    this.suspended = false;
+    this.awaitingRxdRead = false;
+    this.inTransaction = false;
     // A read after a STOP begins with a fresh START, not a repeated one.
     this.txAddressed = false;
     this.chip.events.schedule(64 * 10, () => this.n.fire(0x104)); // STOPPED
@@ -1015,6 +1241,7 @@ class NrfTimer {
       this.running = false;
       this.reschedule();
     }); // SHUTDOWN
+    n.task(0x008, () => this.countOne()); // COUNT, in counter mode
     for (let i = 0; i < ccCount; i++) {
       n.task(0x040 + i * 4, () => n.p.poke(0x540 + i * 4, this.count())); // CAPTURE[i]
       n.p.reg(0x540 + i * 4, undefined, () => this.reschedule());
@@ -1030,21 +1257,41 @@ class NrfTimer {
     return (NRF52_HZ / 16_000_000) * 2 ** (this.n.p.peek(0x510) & 0xf);
   }
 
+  /** MODE 1 or 2: counting COUNT tasks (often from the PPI) rather than time. */
+  private counter(): boolean {
+    return (this.n.p.peek(0x504) & 3) !== 0;
+  }
+
+  private countOne(): void {
+    if (!this.running || !this.counter()) return;
+    const mask = this.mask();
+    const c = ((this.anchorCount + 1) & mask) >>> 0;
+    this.anchorCount = c;
+    const shorts = this.n.p.peek(0x200);
+    for (let i = 0; i < this.ccCount; i++) {
+      if ((this.n.p.peek(0x540 + i * 4) & mask) >>> 0 !== c) continue;
+      this.n.fire(0x140 + i * 4); // COMPARE[i]
+      if (shorts & (1 << i)) this.anchorCount = 0; // COMPARE_CLEAR
+      if (shorts & (1 << (i + 8))) this.running = false; // COMPARE_STOP
+    }
+  }
+
   private count(): number {
-    if (!this.running) return this.anchorCount;
+    if (!this.running || this.counter()) return this.anchorCount;
     return ((this.anchorCount + Math.floor((this.chip.core.cycles - this.anchorCycle) / this.cyclesPerTick())) & this.mask()) >>> 0;
   }
 
   private reschedule(): void {
     this.cancel?.();
     this.cancel = null;
-    if (!this.running) return;
+    if (!this.running || this.counter()) return;
     const now = this.count();
     const mask = this.mask();
     let best = Infinity;
     for (let i = 0; i < this.ccCount; i++) {
-      const cc = this.n.p.peek(0x540 + i * 4) & mask;
-      let d = (cc - now) & mask;
+      // Unsigned throughout: in 32-bit mode a plain & would go negative.
+      const cc = (this.n.p.peek(0x540 + i * 4) & mask) >>> 0;
+      let d = ((cc - now) & mask) >>> 0;
       if (d === 0) d = mask + 1;
       if (d < best) best = d;
     }
@@ -1057,7 +1304,7 @@ class NrfTimer {
       const shorts = this.n.p.peek(0x200);
       let cleared = false;
       for (let i = 0; i < this.ccCount; i++) {
-        if ((this.n.p.peek(0x540 + i * 4) & mask) !== c) continue;
+        if ((this.n.p.peek(0x540 + i * 4) & mask) >>> 0 !== c) continue;
         this.n.fire(0x140 + i * 4); // COMPARE[i]
         if (shorts & (1 << i)) cleared = true; // COMPARE_CLEAR
         if (shorts & (1 << (i + 8))) this.running = false; // COMPARE_STOP

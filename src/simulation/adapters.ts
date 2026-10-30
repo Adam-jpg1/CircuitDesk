@@ -186,7 +186,7 @@ const samd21Adapter: BoardSimulatorAdapter = {
  */
 const armv7mAdapter: BoardSimulatorAdapter = {
   engine: 'armv7m',
-  processorProfileIds: ['proc.sam3x8e', 'proc.stm32f401re', 'proc.ra4m1', 'proc.nrf52833'],
+  processorProfileIds: ['proc.sam3x8e', 'proc.stm32f401re', 'proc.ra4m1', 'proc.nrf52833', 'proc.nrf52840'],
   firmwareFormat: 'bin',
   async createRunner(firmware, board) {
     assertFormat(this, firmware, board);
@@ -260,6 +260,22 @@ const armv7mAdapter: BoardSimulatorAdapter = {
         return new ArmRunner(() => {
           const chip = new Nrf52('52833');
           chip.load(image);
+          return chip;
+        }, busDefaults);
+      }
+      case 'proc.nrf52840': {
+        // The Nano 33 BLE's bootloader owns the first 64 KB; sketches are
+        // linked at 0x10000 and the reset vector must point into them.
+        const { Nrf52 } = await import('./nrf52/nrf52');
+        const reset = image[4] | (image[5] << 8) | (image[6] << 16) | (image[7] << 24);
+        if (reset >>> 0 < 0x10000 || reset >>> 0 >= 0x100000) {
+          throw new FirmwareRejectedError(
+            `${board.name} runs images linked at 0x10000, above its bootloader; this one starts at 0x${(reset >>> 0).toString(16)}. Recompile for this board.`,
+          );
+        }
+        return new ArmRunner(() => {
+          const chip = new Nrf52('52840');
+          chip.load(image, 0x10000);
           return chip;
         }, busDefaults);
       }

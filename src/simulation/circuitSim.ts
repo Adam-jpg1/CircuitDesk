@@ -538,6 +538,7 @@ export const BOARDS_WITH_UART = new Set([
   'board.arduino-due',
   'board.stm32-nucleo',
   'board.arduino-uno-r4',
+  'board.nano-33-ble',
 ]);
 
 /**

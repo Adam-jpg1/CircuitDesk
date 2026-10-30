@@ -41,6 +41,7 @@ function wire(p: CircuitProject, a: string, ap: string, b: string, bp: string) {
 const USB_CONSOLE = new Set([
   'board.arduino-leonardo',
   'board.arduino-uno-r4',
+  'board.nano-33-ble',
   'board.raspberry-pi-pico',
   'board.raspberry-pi-pico-w',
   'board.seeed-xiao-rp2040',

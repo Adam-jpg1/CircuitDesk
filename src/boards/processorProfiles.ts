@@ -474,6 +474,25 @@ const NRF52833: ProcessorProfile = {
   ],
 };
 
+const NRF52840: ProcessorProfile = {
+  ...NRF52833,
+  id: 'proc.nrf52840',
+  name: 'Nordic nRF52840 (Cortex-M4F)',
+  flashBytes: 1_048_576,
+  ramBytes: 262_144,
+  pads: nrfPads(16),
+  pwmPads: nrfPads(16),
+  // As the Arduino mbed core's Nano 33 BLE variant assigns them.
+  uarts: [{ id: 'uarte0', arduinoName: 'Serial1', signals: { tx: nrfPads(16), rx: nrfPads(16) }, defaults: { tx: 'P1.03', rx: 'P1.10' } }],
+  i2c: [{ id: 'twim0', arduinoName: 'Wire', signals: { sda: nrfPads(16), scl: nrfPads(16) }, defaults: { sda: 'P0.31', scl: 'P0.02' } }],
+  spi: [{ id: 'spim2', arduinoName: 'SPI', signals: { sck: nrfPads(16), mosi: nrfPads(16), miso: nrfPads(16) }, defaults: { sck: 'P0.13', mosi: 'P1.01', miso: 'P1.08' } }],
+  interruptPads: nrfPads(16),
+  notModelled: [
+    ...NRF52833.notModelled,
+    'USB beyond a CDC serial port: suspend, resume and isochronous endpoints',
+  ],
+};
+
 const ra4m1Pads = [
   ...['P000', 'P001', 'P002', 'P003', 'P004', 'P010', 'P011', 'P012', 'P013', 'P014', 'P015'],
   ...Array.from({ length: 13 }, (_, i) => `P1${String(i).padStart(2, '0')}`),
@@ -574,6 +593,7 @@ export const PROCESSOR_PROFILES: ProcessorProfile[] = [
   STM32F401RE,
   RA4M1,
   NRF52833,
+  NRF52840,
 ];
 
 export function processorProfile(id: string): ProcessorProfile | undefined {

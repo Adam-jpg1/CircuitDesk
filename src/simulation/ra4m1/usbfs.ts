@@ -16,6 +16,7 @@
 // complete), no suspend/resume, no isochronous pipes, strings not requested.
 
 import type { McuUsbSerial } from '../armv7m/armRunner';
+import { enumerateCdc } from '../armv7m/usbCdcHost';
 
 export interface UsbChip {
   /** Schedules on the chip's clock, in microseconds. */
@@ -44,10 +45,6 @@ interface Control {
   done: (data: number[]) => void;
 }
 
-const setupPacket = (type: number, request: number, value: number, index: number, length: number) => [
-  type, request, value & 0xff, value >> 8, index & 0xff, index >> 8, length & 0xff, length >> 8,
-];
-
 export class RaUsbFs implements McuUsbSerial {
   onSerialData: ((byte: number) => void) | null = null;
   private readonly regs = new Map<number, number>();
@@ -64,7 +61,6 @@ export class RaUsbFs implements McuUsbSerial {
   private readonly controls: Control[] = [];
   private dataIn = -1;
   private dataOut = -1;
-  private cdcInterface = 0;
   private readonly outgoing: number[] = [];
   private level = false;
   /** True once the host has opened the port (DTR set). */
@@ -299,58 +295,26 @@ export class RaUsbFs implements McuUsbSerial {
 
   /** Enumeration, one step after another, each started by the previous one's completion. */
   private enumerate(): void {
-    const steps: ((next: (data: number[]) => void, last: number[]) => void)[] = [
-      (next) => this.request(setupPacket(0x80, 6, 0x0100, 0, 64), undefined, next),
-      (next) => {
+    enumerateCdc({
+      request: (setup, out, done) => this.request(setup, out, done),
+      setAddress: (address, done) => {
         // SET_ADDRESS is handled by the hardware and reported as a state change.
-        this.set(0x50, 5);
+        this.set(0x50, address);
         this.dvsq = 2;
         this.intsts0 |= INTSTS0.DVST;
         this.update();
-        this.chip.afterUs(2_000, () => next([]));
+        this.chip.afterUs(2_000, done);
       },
-      (next) => this.request(setupPacket(0x80, 6, 0x0100, 0, 18), undefined, next),
-      (next) => this.request(setupPacket(0x80, 6, 0x0200, 0, 9), undefined, next),
-      (next, head) => {
-        const total = head.length >= 4 ? head[2] | (head[3] << 8) : 9;
-        this.request(setupPacket(0x80, 6, 0x0200, 0, total), undefined, next);
-      },
-      (next, config) => {
-        this.findCdc(config);
+      configuring: (cdc) => {
+        this.dataIn = cdc.dataIn;
+        this.dataOut = cdc.dataOut;
         this.dvsq = 3;
-        this.request(setupPacket(0x00, 9, config[5] ?? 1, 0, 0), undefined, next);
       },
-      (next) => this.request(setupPacket(0x21, 0x20, 0, this.cdcInterface, 7), [0x00, 0xc2, 0x01, 0x00, 0, 0, 8], next),
-      (next) => this.request(setupPacket(0x21, 0x22, 3, this.cdcInterface, 0), undefined, next),
-      () => {
+      opened: () => {
         this.portOpen = true;
         this.pumpOut();
       },
-    ];
-    const run = (i: number, last: number[]) => {
-      if (i < steps.length) steps[i]((data) => run(i + 1, data), last);
-    };
-    run(0, []);
-  }
-
-  /** The CDC data interface's bulk endpoints, from the configuration descriptor. */
-  private findCdc(config: number[]): void {
-    let iface = -1;
-    let cls = -1;
-    for (let i = 0; i + 1 < config.length && config[i] > 0; i += config[i]) {
-      const type = config[i + 1];
-      if (type === 4) {
-        iface = config[i + 2];
-        cls = config[i + 5];
-        if (cls === 0x02) this.cdcInterface = iface;
-      } else if (type === 5 && cls === 0x0a) {
-        const addr = config[i + 2];
-        const kind = config[i + 3] & 3;
-        if (kind !== 2) continue;
-        if (addr & 0x80) this.dataIn = addr & 0xf;
-        else this.dataOut = addr & 0xf;
-      }
-    }
+    });
   }
 
   private nextControl(): void {

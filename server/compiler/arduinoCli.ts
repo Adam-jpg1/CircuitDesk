@@ -311,7 +311,7 @@ export async function cliCompile(
             binaryRegions.push({ offset: 0x8000, data: (await readFile(path.join(outputDir, partitions))).toString('base64') });
           }
         }
-      } else if (arch === 'sam3x' || arch === 'stm32f4' || arch === 'ra4m1' || arch === 'nrf52833') {
+      } else if (arch === 'sam3x' || arch === 'stm32f4' || arch === 'ra4m1' || arch === 'nrf52833' || arch === 'nrf52840') {
         // The ARM cores write a raw binary of flash from its first byte, which
         // is what the chip model loads; a .hex beside it (where a core makes
         // one) is the same image in another encoding.

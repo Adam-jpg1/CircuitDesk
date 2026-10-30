@@ -123,6 +123,11 @@ function projectWith(boardDefId: string): CircuitProject {
         // analogRead, digital in, PWM, interrupts, the LED matrix, buttons A
         // and B, and Wire on the canvas.
         'board.microbit',
+        // Simulated on the strength of tests/nano33ble.runtime.mts: Arduino mbed
+        // core firmware (mbed OS) on the ARMv7-M core and nRF52840 model, with
+        // Serial over a simulated USB host, Serial1, analogRead, PWM,
+        // interrupts, Wire and SPI.
+        'board.nano-33-ble',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
         'board.seeed-xiao',

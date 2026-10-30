@@ -56,6 +56,13 @@
       "note": "The Arduino Renesas core, for the Uno R4 Minima. Serial is native USB (TinyUSB); emits a raw binary linked at 0x4000, above the board's bootloader."
     },
     {
+      "id": "arduino:mbed_nano",
+      "version": "4.6.0",
+      "targets": ["arduino:mbed_nano:nano33ble"],
+      "required": true,
+      "note": "The Arduino mbed core, for the Nano 33 BLE. Serial is native USB (mbed's USBCDC); emits a raw binary linked at 0x10000, above the board's bootloader. Shares the Renesas core's GCC 7."
+    },
+    {
       "id": "sandeepmistry:nRF5",
       "version": "0.8.0",
       "additionalUrl": "https://sandeepmistry.github.io/arduino-nRF5/package_nRF5_boards_index.json",

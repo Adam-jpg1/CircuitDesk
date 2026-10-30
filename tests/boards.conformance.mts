@@ -55,8 +55,8 @@ function sketchPin(board: BoardDefinition, pin: PinDefinition, pad: number): str
   // STM32duino names every pad as a constant (PC7), which is what these pins' ids are.
   if (board.architecture === 'stm32') return pin.id;
   // The micro:bit numbers its pins by the edge connector: P13 is 13.
-  if (board.architecture === 'nrf52') return pin.id.replace(/^P/, '');
-  if (board.architecture === 'samd' || board.architecture === 'sam' || board.architecture === 'renesas') {
+  if (board.architecture === 'nrf52' && /^P\d+$/.test(pin.id)) return pin.id.slice(1);
+  if (board.architecture === 'samd' || board.architecture === 'sam' || board.architecture === 'renesas' || board.architecture === 'nrf52') {
     if (/^A\d+$/.test(pin.id)) return pin.id;
     const d = /^D(\d+)$/.exec(pin.id);
     if (d) return d[1];

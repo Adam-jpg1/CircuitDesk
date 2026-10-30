@@ -119,6 +119,67 @@ export const ARDUINO_NANO = headerBoard({
   ],
 });
 
+// Arduino Nano 33 BLE: the Nano footprint around an nRF52840 (u-blox NINA-B306)
+// at 64 MHz with 3.3 V logic — and not 5 V tolerant. The pin ids are the ones
+// earlier projects saved (TX1/RX0 for D1/D0, GND1/GND2, RST1/RST2). In the
+// Arduino mbed core D0 is the TX pad (P1.03) and D1 the RX pad (P1.10), which
+// is Serial1; Serial is native USB. Every GPIO can do PWM and interrupts.
+const nb = (id: string, label: string, extra: PinCapability[] = [], description?: string) =>
+  gpio(id, label, ['digital-in', 'digital-out', 'pwm', 'interrupt', ...extra], 3.3, description ? { description } : {});
+const na = (id: string, extra: PinCapability[] = []) =>
+  analog(id, id, 3.3, { caps: ['analog-in', 'digital-in', 'digital-out', 'pwm', 'interrupt', ...extra] });
+
+export const NANO_33_BLE = headerBoard({
+  id: 'board.nano-33-ble',
+  name: 'Arduino Nano 33 BLE',
+  family: 'Arduino mbed',
+  processor: 'nRF52840 (Cortex-M4F)',
+  widthMm: 18,
+  heightMm: 45,
+  supportLevel: 'simulated',
+  logicVoltage: 3.3,
+  color: '#0b3d2e',
+  usb: 'micro',
+  description:
+    "Arduino Nano 33 BLE: an nRF52840 Cortex-M4F at 64 MHz with 3.3 V logic. Simulated on CircuitDesk's ARMv7-M core " +
+    'and nRF52 model running the Arduino mbed core (mbed OS): Serial over native USB, Serial1 on TX1/RX0, digital I/O, ' +
+    'PWM, interrupts, analogRead on A0-A7, Wire on A4/A5 and SPI on D11-D13. Bluetooth and the onboard sensors are not simulated.',
+  metadata: { i2cPins: ['A4', 'A5'], spiPins: ['D11', 'D12', 'D13'] },
+  left: [
+    nb('TX1', 'TX1', ['uart-tx'], 'D0 in the mbed core: Serial1 TX (P1.03)'),
+    nb('RX0', 'RX0', ['uart-rx'], 'D1 in the mbed core: Serial1 RX (P1.10)'),
+    reset('RST1', 'RST'),
+    gnd('GND1'),
+    nb('D2', 'D2'),
+    nb('D3', 'D3'),
+    nb('D4', 'D4'),
+    nb('D5', 'D5'),
+    nb('D6', 'D6'),
+    nb('D7', 'D7'),
+    nb('D8', 'D8'),
+    nb('D9', 'D9'),
+    nb('D10', 'D10', ['spi-ss']),
+    nb('D11', 'D11', ['spi-mosi']),
+    nb('D12', 'D12', ['spi-miso']),
+  ],
+  right: [
+    vin('VIN'),
+    gnd('GND2'),
+    reset('RST2', 'RST'),
+    p3v3('3V3'),
+    na('A7'),
+    na('A6'),
+    na('A5', ['i2c-scl']),
+    na('A4', ['i2c-sda']),
+    na('A3'),
+    na('A2'),
+    na('A1'),
+    na('A0'),
+    { id: 'AREF', label: 'AREF', type: 'aref' as const, caps: [] },
+    nb('D13', 'D13', ['spi-sck'], 'D13: SPI SCK and the built-in LED (P0.13)'),
+  ],
+});
+
 export const ESP32_DEVKIT = headerBoard({
   id: 'board.esp32-devkit',
   name: 'ESP32 DevKit V1',
@@ -362,12 +423,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   ESP32_C3_SUPERMINI,
   ARDUINO_DUE,
   ARDUINO_UNO_R4_MINIMA,
-  simpleWiringBoard(
-    'board.nano-33-ble', 'Arduino Nano 33 BLE', 'Arduino mbed', 'nRF52840', 18, 45, 3.3,
-    [g3('TX1', 'TX1', { caps: ['digital-in', 'digital-out', 'uart-tx'] }), g3('RX0', 'RX0', { caps: ['digital-in', 'digital-out', 'uart-rx'] }), reset('RST1', 'RST'), gnd('GND1'), g3('D2', 'D2'), g3('D3', 'D3'), g3('D4', 'D4'), g3('D5', 'D5'), g3('D6', 'D6'), g3('D7', 'D7'), g3('D8', 'D8'), g3('D9', 'D9'), g3('D10', 'D10'), g3('D11', 'D11'), g3('D12', 'D12')],
-    [vin('VIN'), gnd('GND2'), reset('RST2', 'RST'), p3v3('3V3'), a3('A7', 'A7'), a3('A6', 'A6'), a3('A5', 'A5'), a3('A4', 'A4'), a3('A3', 'A3'), a3('A2', 'A2'), a3('A1', 'A1'), a3('A0', 'A0'), { id: 'AREF', label: 'AREF', type: 'aref' as const, caps: [] }, g3('D13', 'D13')],
-    'wiring', { color: '#0b3d2e', usb: 'micro' },
-  ),
+  NANO_33_BLE,
   ESP32_DEVKIT,
   simpleWiringBoard(
     'board.esp32-s3', 'ESP32-S3-DevKitC-1', 'Espressif', 'ESP32-S3', 25.5, 63, 3.3,

@@ -377,6 +377,31 @@ const MICROBIT_LIMITATION =
   'pins, the LED matrix, buttons A and B, analogRead, analogWrite, Serial, Wire, SPI and attachInterrupt. The radio ' +
   '(Bluetooth), the microphone, the speaker, the touch logo, the motion sensor and NFC are not simulated.';
 
+const NANO33_SIM_APIS = [
+  'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
+  'digitalWrite / digitalRead',
+  'analogRead (A0-A7; 10-bit by default, analogReadResolution up to 12)',
+  'analogWrite (PWM on any pin)',
+  'delay/millis/micros, on mbed OS',
+  'Serial (native USB CDC, both directions)',
+  'Serial1 (UARTE on TX1/RX0, both directions)',
+  'attachInterrupt',
+  'Wire (A4/A5)',
+  'SPI (D11-D13)',
+];
+
+const NANO33_SIM_PERIPHERALS = [
+  ...NRF52_SIM_PERIPHERALS,
+  'USBD (EasyDMA endpoints, control transfers, a simulated host that opens the CDC port)',
+  'NVMC/UICR programming and the system reset mbed asks for on first boot',
+];
+
+const NANO33_LIMITATION =
+  "Real nRF52840 firmware from the Arduino mbed core (mbed OS and its RTOS) on CircuitDesk's ARMv7-M core: startup, " +
+  'setup() and loop(), GPIO, analogRead, analogWrite, Serial over USB, Serial1, Wire, SPI and attachInterrupt. Bluetooth ' +
+  "(the ArduinoBLE library), the onboard IMU, and the board's own LEDs other than the one on D13 are not simulated. " +
+  "The board's bootloader is not run: the sketch starts directly, as it does after the bootloader hands over.";
+
 const samd21Compiler = (fqbn: string): BoardCompilerInfo => ({
   provider: 'arduino-cli',
   fqbn,
@@ -678,7 +703,30 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     manufacturer: 'Arduino',
     architecture: 'nrf52',
     aliases: ['nano-33-ble', 'nano33ble'],
-    limitation: 'nRF52840 toolchain not installed; wiring + validation only.',
+    processorProfileId: 'proc.nrf52840',
+    compileProfileId: 'compile.mbed-nano33ble',
+    runtimeProfileId: 'runtime.armv7m-nrf52',
+    serverTargetId: 'board.nano-33-ble',
+    // The header pins and the nRF pads behind them, from the mbed core's variant.
+    padMap: {
+      TX1: 'P1.03', RX0: 'P1.10', D2: 'P1.11', D3: 'P1.12', D4: 'P1.15', D5: 'P1.13', D6: 'P1.14', D7: 'P0.23',
+      D8: 'P0.21', D9: 'P0.27', D10: 'P1.02', D11: 'P1.01', D12: 'P1.08', D13: 'P0.13',
+      A0: 'P0.04', A1: 'P0.05', A2: 'P0.30', A3: 'P0.29', A4: 'P0.31', A5: 'P0.02', A6: 'P0.28', A7: 'P0.03',
+    },
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'arduino:mbed_nano:nano33ble',
+      requiredCore: 'arduino:mbed_nano',
+      supported: true,
+      note: 'Built with the Arduino mbed core for the Nano 33 BLE; linked at 0x10000, above the bootloader.',
+    },
+    simulation: {
+      engine: 'armv7m',
+      supported: true,
+      supportedApis: NANO33_SIM_APIS,
+      supportedPeripherals: NANO33_SIM_PERIPHERALS,
+    },
+    limitation: NANO33_LIMITATION,
   },
   'board.adafruit-feather': {
     manufacturer: 'Adafruit',
