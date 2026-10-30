@@ -61,6 +61,9 @@ app.use((req, res, next) => (req.path === COMMUNITY_RESTORE_PATH ? next() : json
 
 // ---- health checks ----
 
+/** A database error for public endpoints: that there is one, not its text (which can name the host). */
+const publicError = (err: string | null) => (err ? 'The community database could not be reached; see the server log.' : null);
+
 app.get('/health', async (_req, res) => {
   // `community` is declared further down; by the time a request arrives it exists.
   // Cached counts: a health check every few seconds must not keep a
@@ -69,7 +72,7 @@ app.get('/health', async (_req, res) => {
   res.status(200).json({
     status: 'ok',
     service: 'circuitdesk-compiler',
-    communityStorage: { mode: storage.mode, persistent: storage.persistent, publishedPosts: storage.publishedPosts, lastError: storage.lastError },
+    communityStorage: { mode: storage.mode, persistent: storage.persistent, publishedPosts: storage.publishedPosts, lastError: publicError(storage.lastError) },
   });
 });
 
@@ -295,8 +298,9 @@ const community = await registerCommunityRoutes(app);
 // What /health reports about the community, so a deploy can be checked from
 // outside: whether published posts will survive the next one.
 app.get('/api/community/status', async (_req, res) => {
-  const { mode, location, persistent, posts, publishedPosts, lastError } = await community.storageStatus(true);
-  res.json({ mode, location, persistent, posts, publishedPosts, lastError });
+  // No location: the database host is in the startup log, not on a public endpoint.
+  const { mode, persistent, posts, publishedPosts, lastError } = await community.storageStatus(true);
+  res.json({ mode, persistent, posts, publishedPosts, lastError: publicError(lastError) });
 });
 
 // A deploy stops this process with SIGTERM. Every write is already committed

@@ -14,7 +14,9 @@
 //   4. the creator can back up and restore into a different database;
 //   5. an old JSON file from before the database is imported once;
 //   6. in production without DATABASE_URL the server says, loudly, that
-//      nothing will survive.
+//      nothing will survive;
+//   7. a database it cannot reach gives 503s and a generic error, never its
+//      address or credentials.
 //
 // Runs on the Postgres in TEST_DATABASE_URL, which it EMPTIES first — point it
 // only at a throwaway database. Without one, it runs on PGlite in a shared
@@ -186,6 +188,7 @@ try {
   if (DATABASE_URL) {
     check(status.mode === 'postgres' && status.persistent === true, `status says Postgres, persistent (${status.mode}, ${status.persistent})`);
     check(!JSON.stringify(status).includes('@'), 'and does not show the connection string');
+    check(!('location' in status) && !JSON.stringify(status).includes('127.0.0.1'), 'nor the database host');
   }
   const health = (await api(third.base, 'GET', '/health')).json;
   check(health.communityStorage?.publishedPosts === 2, '/health reports it too, for checking a deploy from outside');
@@ -234,6 +237,19 @@ try {
   const bareStatus = (await api(bare.base, 'GET', '/api/community/status')).json;
   check(bareStatus.persistent === false, `status says it is not persistent (${bareStatus.mode})`);
   check(/DATABASE_URL is not set/.test(bare.log()), 'and the startup log says everything will be lost at the next deploy');
+
+  // ===================================== 7. the database cannot be reached
+  section('7. an unreachable database is reported, without its address');
+  const down = await up({ DATABASE_URL: 'postgresql://user:secret@db-unreachable.invalid:5432/nope?connect_timeout=2' });
+  const healthDown = await api(down.base, 'GET', '/health');
+  check(healthDown.status === 200, 'the server still starts and /health answers (the compiler does not need the database)');
+  const listDown = await api(down.base, 'GET', '/api/community/projects');
+  check(listDown.status === 503, `a community request gets 503, not a pretend success (${listDown.status})`);
+  const statusDown = (await api(down.base, 'GET', '/api/community/status')).json;
+  const shown = JSON.stringify([healthDown.json, listDown.json, statusDown]);
+  check(typeof statusDown.lastError === 'string', 'status says there is a database error');
+  check(!/db-unreachable|secret|5432/.test(shown), 'and no public response names the host or the credentials');
+  check(/db-unreachable|ENOTFOUND|EAI_AGAIN/.test(down.log()), 'the detail is in the server log instead');
 } finally {
   for (const s of servers) {
     if (s.child.exitCode === null && s.child.signalCode === null) s.child.kill('SIGTERM');

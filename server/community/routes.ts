@@ -175,7 +175,8 @@ export async function registerCommunityRoutes(app: Express, store?: CommunitySto
     if (!isCreatorRequest(req)) return fail(res, 403, 'Only the creator can restore a backup.', 'FORBIDDEN');
     try {
       const outcome = await community.importData(req.body, CREATOR_NAME);
-      res.json({ success: true, ...outcome, storage: await community.storageStatus() });
+      const { mode, persistent, posts, publishedPosts } = await community.storageStatus();
+      res.json({ success: true, ...outcome, storage: { mode, persistent, posts, publishedPosts } });
     } catch (err) {
       if (err instanceof CommunityInputError) return fail(res, 400, err.message, 'INVALID');
       if (err instanceof Error && err.message === 'COMMUNITY_FULL') {
