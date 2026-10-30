@@ -152,6 +152,13 @@ export interface DisplayVisual {
 }
 
 export interface ComponentVisualState {
+  /**
+   * A board's own LED matrix, row by row, each 0..1: the share of the last
+   * frame its LED was lit, scaled by the rows a multiplexed display scans.
+   */
+  matrix?: number[];
+  /** A board's own buttons currently held, by key. */
+  boardButtons?: string[];
   /** Populated for display devices driven by real bus traffic. */
   display?: DisplayVisual;
   /** Live text lines read out of a simulated device model, drawn on the part. */
@@ -530,6 +537,7 @@ export const BOARDS_WITH_UART = new Set([
   'board.seeed-xiao',
   'board.arduino-due',
   'board.stm32-nucleo',
+  'board.arduino-uno-r4',
 ]);
 
 /**
@@ -845,6 +853,13 @@ export class CircuitBinding {
   private runners = new Map<string, BoardRunner>();
 
   /**
+   * Boards with things of their own to press and look at: the micro:bit's
+   * buttons and LED matrix. Declared by the board definition, so any board
+   * that has them gets them.
+   */
+  private onboard = new Map<string, OnboardState>();
+
+  /**
    * Nets where two outputs disagreed on the last update.
    *
    * Reported rather than resolved. Two pins driving one wire in opposite
@@ -920,6 +935,7 @@ export class CircuitBinding {
     if (runnersByInstance) for (const [id, r] of runnersByInstance) this.runners.set(id, r);
     else if (runner && this.boardInstance) this.runners.set(this.boardInstance.id, runner);
 
+    this.setupOnboard();
     this.indexNets();
     this.buildEdges();
     this.setupLogicDevices();
@@ -3424,6 +3440,86 @@ export class CircuitBinding {
   private controlsRef: SimControls | null = null;
 
   /** Solves net levels, feeds inputs to the emulator, returns per-component visuals. */
+  private setupOnboard(): void {
+    for (const [instanceId, runner] of this.runners) {
+      const def = this.graph.definitions.get(instanceId);
+      if (!def?.isBoard) continue;
+      const meta = def.metadata as { onboardButtons?: OnboardButtonSpec[]; ledMatrix?: LedMatrixSpec };
+      if (!meta.onboardButtons && !meta.ledMatrix) continue;
+      const pinOf = (pad: string) => runnerPinIndex(def, pad);
+      const state: OnboardState = {
+        runner,
+        buttons: (meta.onboardButtons ?? [])
+          .map((b) => ({ key: b.key, pin: pinOf(b.pad) }))
+          .filter((b): b is { key: string; pin: number } => b.pin !== undefined),
+      };
+      const m = meta.ledMatrix;
+      if (m) {
+        const rows = m.rows.map(pinOf);
+        const cols = m.cols.map(pinOf);
+        if (rows.every((r) => r !== undefined) && cols.every((c) => c !== undefined)) {
+          const matrix: MatrixTracker = {
+            rows: rows as number[],
+            cols: cols as number[],
+            onMs: new Float64Array(rows.length * cols.length),
+            lastMs: runner.timeMs,
+            startMs: runner.timeMs,
+            high: new Map([...(rows as number[]), ...(cols as number[])].map((p) => [p, runner.digitalPinLevel(p) === 'high'])),
+          };
+          state.matrix = matrix;
+          // The listener hears of a change after the pad has moved, so the time
+          // up to it is credited to the levels as they were before it.
+          state.unsubscribe = runner.addPinListener((pin, high) => {
+            if (!matrix.high.has(pin)) return;
+            this.accumulateMatrix(state);
+            matrix.high.set(pin, high);
+          });
+        }
+      }
+      this.onboard.set(instanceId, state);
+    }
+  }
+
+  /** Adds the time since the last change to every LED that was lit through it. */
+  private accumulateMatrix(state: OnboardState): void {
+    const m = state.matrix;
+    if (!m) return;
+    const now = state.runner.timeMs;
+    const dt = now - m.lastMs;
+    if (dt > 0) {
+      for (let i = 0; i < m.rows.length; i++) {
+        if (!m.high.get(m.rows[i])) continue;
+        for (let j = 0; j < m.cols.length; j++) {
+          if (!m.high.get(m.cols[j])) m.onMs[i * m.cols.length + j] += dt;
+        }
+      }
+    }
+    m.lastMs = now;
+  }
+
+  /** The board's buttons onto its pads; the matrix's last frame as brightness. */
+  private onboardVisuals(controls: SimControls, visuals: Map<string, ComponentVisualState>): void {
+    for (const [instanceId, state] of this.onboard) {
+      const held: string[] = [];
+      for (const b of state.buttons) {
+        const pressed = controls.pressedButtons.has(contactStateKey(instanceId, b.key));
+        if (pressed) held.push(b.key);
+        // Active low, with the board's own pull-up holding it high otherwise.
+        state.runner.setDigitalInput(b.pin, !pressed);
+      }
+      const visual: ComponentVisualState = { ...(visuals.get(instanceId) ?? {}), boardButtons: held };
+      const m = state.matrix;
+      if (m) {
+        this.accumulateMatrix(state);
+        const window = m.lastMs - m.startMs;
+        visual.matrix = Array.from(m.onMs, (on) => (window > 0 ? Math.min(1, (on / window) * m.rows.length) : 0));
+        m.onMs.fill(0);
+        m.startMs = m.lastMs;
+      }
+      visuals.set(instanceId, visual);
+    }
+  }
+
   update(controls: SimControls): {
     visuals: Map<string, ComponentVisualState>;
     netLevels: Map<string, NetLevel>;
@@ -4870,6 +4966,34 @@ export class CircuitBinding {
       }
     }
 
+    this.onboardVisuals(controls, visuals);
     return { visuals, netLevels: levels };
   }
+}
+
+interface OnboardButtonSpec {
+  key: string;
+  pad: string;
+}
+
+interface LedMatrixSpec {
+  rows: string[];
+  cols: string[];
+}
+
+interface MatrixTracker {
+  rows: number[];
+  cols: number[];
+  onMs: Float64Array;
+  lastMs: number;
+  startMs: number;
+  /** Each row and column pad's level as of the last change heard. */
+  high: Map<number, boolean>;
+}
+
+interface OnboardState {
+  runner: BoardRunner;
+  buttons: { key: string; pin: number }[];
+  matrix?: MatrixTracker;
+  unsubscribe?: () => void;
 }

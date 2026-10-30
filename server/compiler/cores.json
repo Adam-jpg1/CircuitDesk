@@ -49,6 +49,22 @@
       "note": "The Arduino SAM core, for the Due. Built for the programming port, so Serial is the UART on D0/D1; emits a raw binary linked at 0x80000."
     },
     {
+      "id": "arduino:renesas_uno",
+      "version": "1.6.0",
+      "targets": ["arduino:renesas_uno:minima"],
+      "required": true,
+      "note": "The Arduino Renesas core, for the Uno R4 Minima. Serial is native USB (TinyUSB); emits a raw binary linked at 0x4000, above the board's bootloader."
+    },
+    {
+      "id": "sandeepmistry:nRF5",
+      "version": "0.8.0",
+      "additionalUrl": "https://sandeepmistry.github.io/arduino-nRF5/package_nRF5_boards_index.json",
+      "targets": ["sandeepmistry:nRF5:BBCmicrobitV2"],
+      "required": true,
+      "removeTools": ["gcc-arm-none-eabi"],
+      "note": "The Arduino nRF5 core, for the BBC micro:bit V2. Its own GCC 5.2 is a 32-bit x86 binary this image cannot run, so it is removed after install and builds use the 64-bit GCC 7 the Renesas core installs (arduinoCli.ts TOOLCHAIN_OVERRIDES). Must stay after arduino:renesas_uno."
+    },
+    {
       "id": "STMicroelectronics:stm32",
       "version": "3.0.0",
       "additionalUrl": "https://github.com/stm32duino/BoardManagerFiles/raw/main/package_stmicroelectronics_index.json",

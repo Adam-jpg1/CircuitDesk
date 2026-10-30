@@ -26,7 +26,7 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(readFileSync(join(here, 'cores.json'), 'utf8'));
-/** @type {{id:string,version:string,additionalUrl?:string,required?:boolean,keepChips?:string[],keepCmsisLibs?:string[],keepStm32Series?:string[],keepMultilibs?:string[],targets:string[]}[]} */
+/** @type {{id:string,version:string,additionalUrl?:string,required?:boolean,keepChips?:string[],keepCmsisLibs?:string[],keepStm32Series?:string[],keepMultilibs?:string[],removeTools?:string[],targets:string[]}[]} */
 const CORES = manifest.cores;
 /** @type {{version:string}|undefined} */
 const CLI_PIN = manifest.arduinoCli;
@@ -319,6 +319,16 @@ for (const core of CORES) {
   if (core.id === 'esp32:esp32' && core.keepChips) {
     const { removed } = pruneEspToolchains(core.keepChips);
     console.log(`[cores] pruned ${removed.length} unused ESP32 tool bundle(s): ${removed.join(', ') || 'none'}`);
+  }
+  if (core.removeTools) {
+    const vendor = core.id.split(':')[0];
+    for (const tool of core.removeTools) {
+      const dir = join(dataDir(), 'packages', vendor, 'tools', tool);
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+        console.log(`[cores] removed ${vendor}'s ${tool}: it is replaced by another installed toolchain`);
+      }
+    }
   }
   if (core.keepStm32Series) {
     const { removed } = pruneStm32(core.keepStm32Series, core.keepMultilibs ?? []);

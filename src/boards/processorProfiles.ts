@@ -34,7 +34,7 @@ import { TIMER_FUNCTION_E, TIMER_FUNCTION_F } from '../simulation/samd21/timers'
  * family is carried alongside as `boardArchitecture` rather than derived by
  * string matching, so the two vocabularies stay explicitly linked.
  */
-export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4';
+export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52';
 
 export interface PeripheralController {
   /** Controller id as the chip's own documentation names it: `i2c0`, `usart1`. */
@@ -444,6 +444,77 @@ const SAM3X8E: ProcessorProfile = {
   ],
 };
 
+const nrfPads = (p1: number) => [
+  ...Array.from({ length: 32 }, (_, i) => `P0.${String(i).padStart(2, '0')}`),
+  ...Array.from({ length: p1 }, (_, i) => `P1.${String(i).padStart(2, '0')}`),
+];
+
+const NRF52833: ProcessorProfile = {
+  id: 'proc.nrf52833',
+  name: 'Nordic nRF52833 (Cortex-M4F)',
+  architecture: 'nrf52',
+  boardArchitecture: 'nrf52',
+  vendor: 'Nordic Semiconductor',
+  clockHz: 64_000_000,
+  flashBytes: 524_288,
+  ramBytes: 131_072,
+  pads: nrfPads(10),
+  adcChannels: { 'P0.02': 0, 'P0.03': 1, 'P0.04': 2, 'P0.05': 3, 'P0.28': 4, 'P0.29': 5, 'P0.30': 6, 'P0.31': 7 },
+  // The PWM peripherals can drive any pad.
+  pwmPads: nrfPads(10),
+  uarts: [{ id: 'uart0', arduinoName: 'Serial', signals: { tx: nrfPads(10), rx: nrfPads(10) }, defaults: { tx: 'P0.06', rx: 'P1.08' } }],
+  i2c: [{ id: 'twi1', arduinoName: 'Wire', signals: { sda: nrfPads(10), scl: nrfPads(10) }, defaults: { sda: 'P1.00', scl: 'P0.26' } }],
+  spi: [{ id: 'spi2', arduinoName: 'SPI', signals: { sck: nrfPads(10), mosi: nrfPads(10), miso: nrfPads(10) }, defaults: { sck: 'P0.17', mosi: 'P0.13', miso: 'P0.01' } }],
+  interruptPads: nrfPads(10),
+  logicVolts: 3.3,
+  notModelled: [
+    'the 2.4 GHz radio (Bluetooth), NFC, I2S, PDM and the crypto blocks',
+    'PPI channels linking events to tasks across peripherals',
+    'low-power modes beyond waiting for an interrupt',
+  ],
+};
+
+const ra4m1Pads = [
+  ...['P000', 'P001', 'P002', 'P003', 'P004', 'P010', 'P011', 'P012', 'P013', 'P014', 'P015'],
+  ...Array.from({ length: 13 }, (_, i) => `P1${String(i).padStart(2, '0')}`),
+  ...['P200', 'P201', 'P204', 'P205', 'P206', 'P212', 'P213'],
+  ...['P300', 'P301', 'P302', 'P303', 'P304'],
+  ...['P400', 'P401', 'P402', 'P407', 'P408', 'P409', 'P410', 'P411'],
+  ...['P500', 'P501', 'P502'],
+];
+
+const RA4M1: ProcessorProfile = {
+  id: 'proc.ra4m1',
+  name: 'Renesas RA4M1 (R7FA4M1AB, Cortex-M4F)',
+  architecture: 'ra4m1',
+  boardArchitecture: 'renesas',
+  vendor: 'Renesas',
+  clockHz: 48_000_000,
+  flashBytes: 262_144,
+  ramBytes: 32_768,
+  pads: ra4m1Pads,
+  adcChannels: {
+    P000: 0, P001: 1, P002: 2, P003: 3, P004: 4, P010: 5, P011: 6, P012: 7, P013: 8, P014: 9, P015: 10,
+    P500: 16, P501: 17, P502: 18, P103: 19, P102: 20, P101: 21, P100: 22,
+  },
+  // GPT outputs, from the core's pinmux table.
+  pwmPads: ['P100', 'P101', 'P102', 'P103', 'P104', 'P105', 'P106', 'P107', 'P108', 'P109', 'P110', 'P111', 'P112',
+    'P300', 'P301', 'P302', 'P303', 'P304', 'P400', 'P401', 'P409', 'P408', 'P411', 'P410', 'P212', 'P213', 'P205', 'P204',
+    'P500', 'P501', 'P502', 'P000', 'P001', 'P002', 'P003', 'P010', 'P011', 'P012', 'P013', 'P014'],
+  uarts: [{ id: 'sci2', arduinoName: 'Serial1', signals: { tx: ['P302'], rx: ['P301'] }, defaults: { tx: 'P302', rx: 'P301' } }],
+  i2c: [{ id: 'iic1', arduinoName: 'Wire', signals: { sda: ['P101'], scl: ['P100'] }, defaults: { sda: 'P101', scl: 'P100' } }],
+  spi: [{ id: 'spi1', arduinoName: 'SPI', signals: { sck: ['P111'], mosi: ['P109'], miso: ['P110'] }, defaults: { sck: 'P111', mosi: 'P109', miso: 'P110' } }],
+  interruptPads: ['P400', 'P401', 'P402', 'P213', 'P212', 'P411', 'P410', 'P409', 'P408', 'P206', 'P205', 'P304', 'P302', 'P301',
+    'P110', 'P111', 'P105', 'P104', 'P101', 'P100', 'P501', 'P502', 'P015', 'P011', 'P004', 'P002', 'P001', 'P000'],
+  logicVolts: 5,
+  notModelled: [
+    'DMA and DTC transfers, CAN, the capacitive touch unit (CTSU), the RTC and the watchdogs',
+    "the DAC's analog output onto the canvas (its conversion register is modelled)",
+    'the clock tree: the CPU runs at the 48 MHz the core sets up from the start',
+    'low-power modes beyond waiting for an interrupt',
+  ],
+};
+
 const stm32Pads = ['A', 'B', 'C', 'D', 'H'].flatMap((port) =>
   Array.from({ length: port === 'D' ? 3 : port === 'H' ? 2 : 16 }, (_, i) => `P${port}${i}`),
 );
@@ -501,6 +572,8 @@ export const PROCESSOR_PROFILES: ProcessorProfile[] = [
   SAMD21,
   SAM3X8E,
   STM32F401RE,
+  RA4M1,
+  NRF52833,
 ];
 
 export function processorProfile(id: string): ProcessorProfile | undefined {

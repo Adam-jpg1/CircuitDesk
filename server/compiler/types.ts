@@ -116,7 +116,7 @@ export interface BoardTarget {
   id: string;
   fqbn: string;
   name: string;
-  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4';
+  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52833';
   /** arduino-cli core that provides this target. */
   core: string;
   fCpuHz: number;
@@ -270,6 +270,30 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     fCpuHz: 84_000_000,
     flashMaxBytes: 524_288,
     ramMaxBytes: 98_304,
+  },
+  // The BBC micro:bit V2, through the Arduino nRF5 core.
+  {
+    id: 'board.microbit',
+    fqbn: 'sandeepmistry:nRF5:BBCmicrobitV2',
+    name: 'BBC micro:bit V2 (nRF52833)',
+    arch: 'nrf52833',
+    core: 'sandeepmistry:nRF5',
+    mcu: 'nrf52833',
+    fCpuHz: 64_000_000,
+    flashMaxBytes: 524_288,
+    ramMaxBytes: 131_072,
+  },
+  // The Uno R4 Minima: the Arduino Renesas core, linked above its bootloader.
+  {
+    id: 'board.arduino-uno-r4',
+    fqbn: 'arduino:renesas_uno:minima',
+    name: 'Arduino Uno R4 Minima (RA4M1)',
+    arch: 'ra4m1',
+    core: 'arduino:renesas_uno',
+    mcu: 'ra4m1',
+    fCpuHz: 48_000_000,
+    flashMaxBytes: 262_144,
+    ramMaxBytes: 32_768,
   },
   // The Nucleo-64 F401RE, through STM32duino. Serial is USART2, the ST-LINK's
   // virtual COM port.

@@ -186,7 +186,7 @@ const samd21Adapter: BoardSimulatorAdapter = {
  */
 const armv7mAdapter: BoardSimulatorAdapter = {
   engine: 'armv7m',
-  processorProfileIds: ['proc.sam3x8e', 'proc.stm32f401re'],
+  processorProfileIds: ['proc.sam3x8e', 'proc.stm32f401re', 'proc.ra4m1', 'proc.nrf52833'],
   firmwareFormat: 'bin',
   async createRunner(firmware, board) {
     assertFormat(this, firmware, board);
@@ -230,6 +230,35 @@ const armv7mAdapter: BoardSimulatorAdapter = {
         }
         return new ArmRunner(() => {
           const chip = new Stm32f4();
+          chip.load(image);
+          return chip;
+        }, busDefaults);
+      }
+      case 'proc.ra4m1': {
+        const { Ra4m1 } = await import('./ra4m1/ra4m1');
+        // Linked above the 16 KB bootloader: the reset handler has to be there.
+        const reset = image[4] | (image[5] << 8) | (image[6] << 16) | (image[7] << 24);
+        if (reset >>> 0 < 0x4000 || reset >>> 0 >= 0x40000) {
+          throw new FirmwareRejectedError(
+            `${board.name} runs images linked at 0x4000; this one starts at 0x${(reset >>> 0).toString(16)}. Recompile for this board.`,
+          );
+        }
+        return new ArmRunner(() => {
+          const chip = new Ra4m1();
+          chip.load(image);
+          return chip;
+        }, busDefaults);
+      }
+      case 'proc.nrf52833': {
+        const { Nrf52 } = await import('./nrf52/nrf52');
+        const reset = image[4] | (image[5] << 8) | (image[6] << 16) | (image[7] << 24);
+        if (reset >>> 0 >= 0x80000) {
+          throw new FirmwareRejectedError(
+            `${board.name} runs images linked at 0; this one starts at 0x${(reset >>> 0).toString(16)}. Recompile for this board.`,
+          );
+        }
+        return new ArmRunner(() => {
+          const chip = new Nrf52('52833');
           chip.load(image);
           return chip;
         }, busDefaults);

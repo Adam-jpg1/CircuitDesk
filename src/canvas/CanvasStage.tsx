@@ -11,6 +11,7 @@ import { ComponentArtwork } from '../components-library/artwork/componentArtwork
 import { UnoArtwork } from '../boards/artwork/UnoArtwork';
 import { GenericModuleArtwork } from '../boards/artwork/GenericModuleArtwork';
 import { CustomBoardArtwork } from '../boards/artwork/CustomBoardArtwork';
+import { MicrobitArtwork } from '../boards/artwork/MicrobitArtwork';
 import { MegaArtwork } from '../boards/artwork/MegaArtwork';
 import { LeonardoArtwork } from '../boards/artwork/LeonardoArtwork';
 import { hotspotAt, type Hotspot } from '../components-library/artwork/interactiveGeometry';
@@ -370,6 +371,33 @@ export function CanvasStage() {
       const s = store.getState();
       const simRunning = useSimulationStore.getState().status === 'running';
       const def = definitions.get(inst.id);
+
+      // A board's own buttons (the micro:bit's A and B) while it runs: held
+      // for as long as the pointer is down, like the real ones.
+      if (simRunning && def?.isBoard) {
+        const onboard = (def.metadata.onboardButtons as { key: string; xMm: number; yMm: number; rMm: number }[] | undefined) ?? [];
+        if (onboard.length) {
+          const world = toWorld(e.clientX, e.clientY);
+          const w = def.widthMm * MM;
+          const h = def.heightMm * MM;
+          const theta = (-inst.rotation * Math.PI) / 180;
+          const dx = world.x - (inst.x + w / 2);
+          const dy = world.y - (inst.y + h / 2);
+          const lx = (dx * Math.cos(theta) - dy * Math.sin(theta) + w / 2) / MM;
+          const ly = (dx * Math.sin(theta) + dy * Math.cos(theta) + h / 2) / MM;
+          const hit = onboard.find((b) => Math.hypot(lx - b.xMm, ly - b.yMm) <= b.rMm + 1.5);
+          if (hit) {
+            const key = contactStateKey(inst.id, hit.key);
+            useSimulationStore.getState().pressButton(key, true);
+            const release = () => {
+              useSimulationStore.getState().pressButton(key, false);
+              window.removeEventListener('pointerup', release);
+            };
+            window.addEventListener('pointerup', release);
+            return;
+          }
+        }
+      }
 
       // interactive parts during simulation
       if (simRunning && def && !def.isBoard) {
@@ -1017,6 +1045,8 @@ const PartView = memo(function PartView({
           <MegaArtwork def={def} />
         ) : def.artwork.builtinId === 'arduino-leonardo' ? (
           <LeonardoArtwork def={def} />
+        ) : def.artwork.builtinId === 'microbit' ? (
+          <MicrobitArtwork def={def} visual={visual} />
         ) : def.artwork.kind === 'svg' || def.artwork.builtinId === 'custom-board' ? (
           <CustomBoardArtwork def={def} />
         ) : (

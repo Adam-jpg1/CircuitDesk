@@ -97,6 +97,10 @@ function projectWith(boardDefId: string): CircuitProject {
         // target, and proven to reach a toggling D13 on real compiled firmware.
         'board.arduino-pro-mini',
         'board.arduino-uno',
+        // Simulated on the strength of tests/r4.runtime.mts: Arduino Renesas core
+        // firmware on the ARMv7-M core and RA4M1 model, with Serial over a
+        // simulated USB host, Serial1, PWM, interrupts, Wire, Servo, tone and EEPROM.
+        'board.arduino-uno-r4',
         // Simulated on the strength of tests/esp32c3.firmware.mts and
         // tests/esp32c3.integration.mts: real compiled firmware reaching
         // setup() and repeated loop(), GPIO out on two different pins, GPIO in
@@ -114,6 +118,11 @@ function projectWith(boardDefId: string): CircuitProject {
         // adapter; two instances proven independent; and firmware-to-firmware
         // communication with a Pico over a shared net, in both directions.
         'board.esp32-c6-devkitc-1',
+        // Simulated on the strength of tests/microbit.runtime.mts: Arduino nRF5
+        // core firmware on the ARMv7-M core and nRF52833 model — Serial, time,
+        // analogRead, digital in, PWM, interrupts, the LED matrix, buttons A
+        // and B, and Wire on the canvas.
+        'board.microbit',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
         'board.seeed-xiao',

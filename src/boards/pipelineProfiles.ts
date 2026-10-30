@@ -104,6 +104,28 @@ export interface RuntimeProfile {
 
 export const COMPILE_PROFILES: CompileProfile[] = [
   {
+    id: 'compile.nrf5-microbit',
+    name: 'Arduino nRF5 (nRF52833)',
+    adapter: 'arduino-cli',
+    processorProfileIds: ['proc.nrf52833'],
+    requiredCore: 'sandeepmistry:nRF5',
+    fqbn: 'sandeepmistry:nRF5:BBCmicrobitV2',
+    serverTargetId: 'board.microbit',
+    artifactFormat: 'bin',
+    description: 'The Arduino nRF5 core for the BBC micro:bit V2. Emits a raw binary linked at 0, the start of flash.',
+  },
+  {
+    id: 'compile.renesas-uno',
+    name: 'Arduino Renesas (RA4M1)',
+    adapter: 'arduino-cli',
+    processorProfileIds: ['proc.ra4m1'],
+    requiredCore: 'arduino:renesas_uno',
+    fqbn: 'arduino:renesas_uno:minima',
+    serverTargetId: 'board.arduino-uno-r4',
+    artifactFormat: 'bin',
+    description: 'The Arduino Renesas core for the Uno R4 Minima. Emits a raw binary linked at 0x4000, above the bootloader.',
+  },
+  {
     id: 'compile.stm32-nucleo',
     name: 'STM32duino (STM32F401RE)',
     adapter: 'arduino-cli',
@@ -247,6 +269,36 @@ const AVR_APIS = [
 ];
 
 export const RUNTIME_PROFILES: RuntimeProfile[] = [
+  {
+    id: 'runtime.armv7m-nrf52',
+    name: 'CircuitDesk ARMv7-M (nRF52)',
+    engine: 'armv7m',
+    processorProfileIds: ['proc.nrf52833'],
+    acceptsFormats: ['bin'],
+    supportedApis: [
+      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'Wire', 'SPI', 'delay/millis/micros',
+      'Serial (UART)', 'attachInterrupt', 'LED matrix', 'buttons A/B',
+    ],
+    supportedPeripherals: ['GPIO', 'GPIOTE', 'RTC', 'TIMER', 'UART', 'SAADC', 'PWM', 'TWI', 'SPI'],
+    description:
+      "Executes nRF52 firmware on CircuitDesk's ARMv7-M core with an nRF52833 model: clocks, RTC, timers, GPIO and " +
+      'GPIOTE, UART, SAADC, PWM, TWI and SPI.',
+  },
+  {
+    id: 'runtime.armv7m-ra4m1',
+    name: 'CircuitDesk ARMv7-M (RA4M1)',
+    engine: 'armv7m',
+    processorProfileIds: ['proc.ra4m1'],
+    acceptsFormats: ['bin'],
+    supportedApis: [
+      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'Wire', 'SPI', 'delay/millis/micros',
+      'Serial (native USB)', 'Serial1 (SCI2)', 'attachInterrupt', 'Servo', 'tone', 'EEPROM',
+    ],
+    supportedPeripherals: ['PORT/PFS', 'ICU', 'AGT', 'SCI', 'GPT', 'ADC', 'IIC', 'SPI', 'USBFS'],
+    description:
+      "Executes Arduino Uno R4 firmware on CircuitDesk's ARMv7-M core with an RA4M1 model: ICU, PORT, AGT, SCI, GPT, " +
+      'ADC, IIC, SPI and the USB device controller.',
+  },
   {
     id: 'runtime.armv7m-stm32f4',
     name: 'CircuitDesk ARMv7-M (STM32F401RE)',

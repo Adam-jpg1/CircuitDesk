@@ -40,6 +40,7 @@ function wire(p: CircuitProject, a: string, ap: string, b: string, bp: string) {
 /** Boards whose Serial is a USB port, so the UART is Serial1. */
 const USB_CONSOLE = new Set([
   'board.arduino-leonardo',
+  'board.arduino-uno-r4',
   'board.raspberry-pi-pico',
   'board.raspberry-pi-pico-w',
   'board.seeed-xiao-rp2040',
@@ -78,11 +79,25 @@ function sketchFor(port: string, usb: boolean): string {
   ].join('\n');
 }
 
-const simulated = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'simulated');
+/**
+ * Boards whose only UART goes to an on-board USB bridge rather than to a pin:
+ * Serial works, but there is nowhere on the board to wire a GPS. Each must
+ * also bring out no pin claiming a UART capability.
+ */
+const NO_PIN_UART = new Set(['board.microbit']);
+
+const simulated = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'simulated' && !NO_PIN_UART.has(b.id));
 check(
   simulated.every((b) => BOARDS_WITH_UART.has(b.id)),
   `every Simulated board is in BOARDS_WITH_UART (${simulated.filter((b) => !BOARDS_WITH_UART.has(b.id)).map((b) => b.id).join(', ') || 'all'})`,
 );
+for (const id of NO_PIN_UART) {
+  const def = BOARD_DEFINITIONS.find((b) => b.id === id);
+  check(
+    !!def && !BOARDS_WITH_UART.has(id) && !def.pins.some((p) => p.capabilities.some((c) => c.startsWith('uart'))),
+    `${id} brings out no UART, and no part is offered one`,
+  );
+}
 
 for (const def of simulated) {
   console.log(`\n--- ${def.id}`);

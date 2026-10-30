@@ -320,6 +320,63 @@ const NUCLEO_LIMITATION =
   'and timer input capture are not simulated — sketches using them compile and run, but those peripherals do nothing. ' +
   'The CPU runs at the 84 MHz the Nucleo variant sets up from the start; the clock tree itself is not modelled.';
 
+const R4_SIM_APIS = [
+  'pinMode (INPUT, OUTPUT, INPUT_PULLUP)',
+  'digitalWrite',
+  'digitalRead',
+  'analogRead (A0-A5, 10-bit by default, analogReadResolution up to 14, 5 V reference)',
+  'analogWrite (PWM on 3, 5, 6, 9, 10 and 11, on the GPT timers)',
+  'Wire (I2C master on A4/A5, the IIC1 controller)',
+  'SPI (master on 11-13, the SPI1 controller)',
+  'delay/millis/micros',
+  'Serial (native USB: enumerated by a simulated host, both directions)',
+  'Serial1 (the UART on D0/D1, both directions)',
+  'attachInterrupt on 2 and 3 and the other IRQ pins (CHANGE, RISING, FALLING)',
+  'Servo and tone(), on the GPT timers',
+  'EEPROM (kept in the data flash through Renesas\' virtual EEPROM, as the core does it)',
+];
+
+const R4_SIM_PERIPHERALS = [
+  'ARMv7-M Cortex-M4 core with the single-precision FPU: Thumb-2, NVIC, SysTick',
+  'ICU event linking, with the IRQ0-15 pin interrupts',
+  'PORT and PFS: output, input, pull-ups, open drain and peripheral selection',
+  'AGT0/1 timers (millis runs on AGT0), GPT0-7 PWM with buffered compares',
+  'SCI asynchronous UARTs, IIC and SPI masters on the shared device buses',
+  'ADC 12/14-bit single scans; the USBFS device controller with a CDC host',
+];
+
+const R4_LIMITATION =
+  "Real RA4M1 firmware from the Arduino Renesas core on CircuitDesk's ARMv7-M core: startup, setup() and loop(), GPIO, " +
+  'analogRead, analogWrite, Wire, SPI, Serial over USB, Serial1, attachInterrupt, Servo, tone and EEPROM. DMA, CAN, the capacitive touch unit and ' +
+  "the DAC's analog output onto the canvas are not simulated — sketches using them compile and run, but those peripherals do " +
+  'nothing. The CPU runs at the 48 MHz the core configures from the start.';
+
+const MICROBIT_SIM_APIS = [
+  'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
+  'digitalWrite / digitalRead on the edge connector',
+  'the 5 x 5 LED matrix (rows high, columns low), drawn on the board',
+  'buttons A and B (pins 5 and 11, active low), pressed on the board',
+  'analogRead (0, 1, 2, 3, 4 and 10; 10-bit, 3.0 V full scale as the core configures it)',
+  'analogWrite (PWM on any pin)',
+  'delay/millis/micros',
+  'Serial (through the USB interface chip, both directions)',
+  'Wire (I2C master on 19/20) and SPI (master on 13-15)',
+  'attachInterrupt on any pin',
+];
+
+const NRF52_SIM_PERIPHERALS = [
+  'ARMv7-M Cortex-M4 core with the single-precision FPU: Thumb-2, NVIC, SysTick',
+  'CLOCK/POWER, RTC0-2, TIMER0-4 with compare events and shorts',
+  'GPIO P0/P1 with pulls and drive modes; GPIOTE edge events',
+  'UART and UARTE, SAADC with EasyDMA results, PWM sequences',
+  'TWI/TWIM and SPI/SPIM masters on the shared device buses',
+];
+
+const MICROBIT_LIMITATION =
+  "Real nRF52833 firmware from the Arduino nRF5 core on CircuitDesk's ARMv7-M core: startup, setup() and loop(), the edge " +
+  'pins, the LED matrix, buttons A and B, analogRead, analogWrite, Serial, Wire, SPI and attachInterrupt. The radio ' +
+  '(Bluetooth), the microphone, the speaker, the touch logo, the motion sensor and NFC are not simulated.';
+
 const samd21Compiler = (fqbn: string): BoardCompilerInfo => ({
   provider: 'arduino-cli',
   fqbn,
@@ -592,7 +649,30 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     manufacturer: 'Arduino',
     architecture: 'renesas',
     aliases: ['uno-r4', 'uno-r4-minima'],
-    limitation: 'Renesas RA4M1 toolchain not installed; wiring + validation only.',
+    processorProfileId: 'proc.ra4m1',
+    compileProfileId: 'compile.renesas-uno',
+    runtimeProfileId: 'runtime.armv7m-ra4m1',
+    serverTargetId: 'board.arduino-uno-r4',
+    // Every label and the RA4M1 pad behind it, from the core's variant.cpp.
+    padMap: {
+      D0: 'P301', D1: 'P302', D2: 'P105', D3: 'P104', D4: 'P103', D5: 'P102', D6: 'P106', D7: 'P107', D8: 'P304', D9: 'P303',
+      D10: 'P112', D11: 'P109', D12: 'P110', D13: 'P111', A0: 'P014', A1: 'P000', A2: 'P001', A3: 'P002', A4: 'P101', A5: 'P100',
+      SDA: 'P101', SCL: 'P100',
+    },
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'arduino:renesas_uno:minima',
+      requiredCore: 'arduino:renesas_uno',
+      supported: true,
+      note: 'Built with the Arduino Renesas core for the Uno R4 Minima, linked above its 16 KB bootloader.',
+    },
+    simulation: {
+      engine: 'armv7m',
+      supported: true,
+      supportedApis: R4_SIM_APIS,
+      supportedPeripherals: R4_SIM_PERIPHERALS,
+    },
+    limitation: R4_LIMITATION,
   },
   'board.nano-33-ble': {
     manufacturer: 'Arduino',
@@ -872,7 +952,30 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       'Originated by the BBC and now produced by the Micro:bit Educational Foundation, which is why the brand and the maker differ.',
     architecture: 'nrf52',
     aliases: ['micro:bit', 'microbit-v2'],
-    limitation: 'Edge-connector visual reference only.',
+    processorProfileId: 'proc.nrf52833',
+    compileProfileId: 'compile.nrf5-microbit',
+    runtimeProfileId: 'runtime.armv7m-nrf52',
+    serverTargetId: 'board.microbit',
+    // Edge pins and the nRF pads behind them, from the nRF5 core's variant.
+    padMap: {
+      P0: 'P0.02', P1: 'P0.03', P2: 'P0.04', P3: 'P0.31', P4: 'P0.28', P5: 'P0.14', P6: 'P1.05', P7: 'P0.11',
+      P8: 'P0.10', P9: 'P0.09', P10: 'P0.30', P11: 'P0.23', P12: 'P0.12', P13: 'P0.17', P14: 'P0.01', P15: 'P0.13',
+      P16: 'P1.02', P19: 'P0.26', P20: 'P1.00',
+    },
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'sandeepmistry:nRF5:BBCmicrobitV2',
+      requiredCore: 'sandeepmistry:nRF5',
+      supported: true,
+      note: "Built with the Arduino nRF5 core's micro:bit V2 target.",
+    },
+    simulation: {
+      engine: 'armv7m',
+      supported: true,
+      supportedApis: MICROBIT_SIM_APIS,
+      supportedPeripherals: NRF52_SIM_PERIPHERALS,
+    },
+    limitation: MICROBIT_LIMITATION,
   },
 
   // ---------------- Linux SBC headers ----------------

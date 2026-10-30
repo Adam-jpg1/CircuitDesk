@@ -1,5 +1,7 @@
 import type { BoardDefinition, PinCapability, PinDefinition, SupportLevel } from '../types';
 import { ARDUINO_DUE } from './dueDefinition';
+import { ARDUINO_UNO_R4_MINIMA } from './r4Definition';
+import { MICROBIT_V2 } from './microbitDefinition';
 import { BOARD_CAPABILITIES } from './capabilities';
 import { deriveBoardSupportLevel } from '../project/support';
 import { ARDUINO_UNO } from './unoDefinition';
@@ -359,12 +361,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   XIAO_RP2040,
   ESP32_C3_SUPERMINI,
   ARDUINO_DUE,
-  simpleWiringBoard(
-    'board.arduino-uno-r4', 'Arduino Uno R4 Minima', 'Arduino Renesas', 'RA4M1 (Cortex-M4)', 68.6, 53.4, 5,
-    [gpio('D0', 'RX0', ['digital-in', 'digital-out', 'uart-rx']), gpio('D1', 'TX1', ['digital-in', 'digital-out', 'uart-tx']), gpio('D2', 'D2'), gpio('D3', 'D3'), gpio('D4', 'D4'), gpio('D5', 'D5'), gpio('D6', 'D6'), gpio('D7', 'D7'), gpio('D8', 'D8'), gpio('D9', 'D9'), gpio('D10', 'D10'), gpio('D11', 'D11'), gpio('D12', 'D12'), gpio('D13', 'D13')],
-    [p5v('5V'), p3v3('3V3'), gnd('GND1'), gnd('GND2'), vin('VIN'), analog('A0', 'A0'), analog('A1', 'A1'), analog('A2', 'A2'), analog('A3', 'A3'), analog('A4', 'A4'), analog('A5', 'A5'), reset('RESET')],
-    'wiring', { color: '#0b3d5e' },
-  ),
+  ARDUINO_UNO_R4_MINIMA,
   simpleWiringBoard(
     'board.nano-33-ble', 'Arduino Nano 33 BLE', 'Arduino mbed', 'nRF52840', 18, 45, 3.3,
     [g3('TX1', 'TX1', { caps: ['digital-in', 'digital-out', 'uart-tx'] }), g3('RX0', 'RX0', { caps: ['digital-in', 'digital-out', 'uart-rx'] }), reset('RST1', 'RST'), gnd('GND1'), g3('D2', 'D2'), g3('D3', 'D3'), g3('D4', 'D4'), g3('D5', 'D5'), g3('D6', 'D6'), g3('D7', 'D7'), g3('D8', 'D8'), g3('D9', 'D9'), g3('D10', 'D10'), g3('D11', 'D11'), g3('D12', 'D12')],
@@ -505,12 +502,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     [p5v('VIN_5V', 'VIN'), gnd('GND2'), p3v3('3V3_2'), ...seqPins('D', 13, 23, 3.3), gnd('GND3')],
     'wiring', { color: '#0b3d2e' },
   ),
-  simpleWiringBoard(
-    'board.microbit', 'BBC micro:bit', 'BBC', 'nRF52833', 52, 43, 3.3,
-    [a3('P0', 'P0'), a3('P1', 'P1'), a3('P2', 'P2')],
-    [p3v3('3V'), gnd('GND')],
-    'visual-only', { usb: 'micro', color: '#1a1a24', description: 'micro:bit edge connector (large pads P0-P2, 3V, GND). Visual reference with pin metadata.' },
-  ),
+  MICROBIT_V2,
   simpleWiringBoard(
     // The pins keep their pad names as ids, which is what earlier projects
     // saved; the Arduino-header names are aliases. D0/D1 are left out of the

@@ -214,9 +214,18 @@ const parsed = parseNotices(NOTICES);
         // still has to notice if it changes a capability claim.
         'board.arduino-pro-mini',
         'board.arduino-uno',
+        // Simulated on the strength of tests/r4.runtime.mts: Arduino Renesas core
+        // firmware on the ARMv7-M core and RA4M1 model, with Serial over a
+        // simulated USB host, Serial1, PWM, interrupts, Wire, Servo, tone and EEPROM.
+        'board.arduino-uno-r4',
         'board.esp32-c3',
         'board.esp32-c3-supermini',
         'board.esp32-c6-devkitc-1',
+        // Simulated on the strength of tests/microbit.runtime.mts: Arduino nRF5
+        // core firmware on the ARMv7-M core and nRF52833 model — Serial, time,
+        // analogRead, digital in, PWM, interrupts, the LED matrix, buttons A
+        // and B, and Wire on the canvas.
+        'board.microbit',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
         'board.seeed-xiao',

@@ -166,9 +166,25 @@ export function runnerPinIndex(board: BoardDefinition, pinId: string): number | 
   if (board.architecture === 'samd') return samdPadIndex(pad);
   if (board.architecture === 'sam') return portPadIndex(pad, 4, 32);
   if (board.architecture === 'stm32') return portPadIndex(pad, 8, 16);
+  if (board.architecture === 'renesas') return renesasPadIndex(pad);
+  if (board.architecture === 'nrf52') return nrfPadIndex(pad);
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPadIndex(pad, espPads);
   return arduinoPinNumber(board, pinId);
+}
+
+/** P0.13 is 13 and P1.08 is 40 on the nRF52: port * 32 + pin. */
+export function nrfPadIndex(pad: string): number | undefined {
+  const match = /^P([01])\.(\d{1,2})$/.exec(pad);
+  if (!match || Number(match[2]) > 31) return undefined;
+  return Number(match[1]) * 32 + Number(match[2]);
+}
+
+/** P<port><pin> on the RA4M1, P111 being port 1 pin 11: port * 16 + pin. */
+export function renesasPadIndex(pad: string): number | undefined {
+  const match = /^P(\d)(\d\d)$/.exec(pad);
+  if (!match || Number(match[2]) > 15) return undefined;
+  return Number(match[1]) * 16 + Number(match[2]);
 }
 
 /**
@@ -302,6 +318,14 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
     const pad = board.padMap?.[pinId] ?? pinId;
     return processorProfile('proc.stm32f401re')?.adcChannels?.[pad];
   }
+  if (board.architecture === 'renesas') {
+    const pad = board.padMap?.[pinId] ?? pinId;
+    return processorProfile('proc.ra4m1')?.adcChannels?.[pad];
+  }
+  if (board.architecture === 'nrf52') {
+    const pad = board.padMap?.[pinId] ?? pinId;
+    return processorProfile(board.processorProfileId ?? 'proc.nrf52833')?.adcChannels?.[pad];
+  }
   if (board.architecture === 'rp2040') {
     const index = rp2040PinIndex(board.padMap?.[pinId] ?? pinId);
     if (index === undefined) return undefined;
@@ -316,7 +340,7 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
 
 /** Full-scale ADC reference for a board, in volts. */
 export function boardAdcReference(board: BoardDefinition): number {
-  if (board.architecture === 'rp2040' || board.architecture === 'samd' || board.architecture === 'sam' || board.architecture === 'stm32' || isEspRiscv(board)) return 3.3;
+  if (board.architecture === 'rp2040' || board.architecture === 'samd' || board.architecture === 'sam' || board.architecture === 'stm32' || board.architecture === 'nrf52' || isEspRiscv(board)) return 3.3;
   return 5;
 }
 
@@ -329,6 +353,10 @@ export function runnerPinCount(board: BoardDefinition): number {
   if (board.architecture === 'sam') return 128;
   // PA0-PH15 on the STM32F4, sixteen to a port.
   if (board.architecture === 'stm32') return 128;
+  // P000-P915 on the RA4M1, sixteen to a port.
+  if (board.architecture === 'renesas') return 160;
+  // P0.00-P1.15 on the nRF52.
+  if (board.architecture === 'nrf52') return 48;
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPads;
   return avrProfileFor(board)?.pinCount ?? 0;

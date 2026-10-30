@@ -67,7 +67,12 @@ const UART_SUPPORT: Record<string, { tx: boolean; rx: boolean; note: string }> =
   'board.adafruit-qtpy': { tx: true, rx: true, note: 'SAMD21 SERCOM0 behind Serial1; Serial is native USB' },
   'board.seeed-xiao': { tx: true, rx: true, note: 'SAMD21 SERCOM4 behind Serial1; Serial is native USB' },
   'board.arduino-due': { tx: true, rx: true, note: 'SAM3X UART behind Serial on D0/D1 (the programming port); USART0-2 behind Serial1-3' },
+  'board.arduino-uno-r4': { tx: true, rx: true, note: 'RA4M1 SCI2 behind Serial1 on D0/D1; Serial is native USB' },
   'board.stm32-nucleo': { tx: true, rx: true, note: 'STM32F401 USART2 behind Serial on PA2/PA3, shared with the ST-LINK virtual COM port' },
+  // The UART exists and Serial reaches the monitor both ways, but its pads
+  // (P0.06/P1.08) go to the USB interface chip, not the edge connector, so
+  // there is nothing on the board a GPS or a modem could be wired to.
+  'board.microbit': { tx: false, rx: false, note: 'nRF52833 UARTE0 behind Serial, wired only to the USB interface chip; no UART on the edge connector' },
 };
 
 // ==================================== 1. the table matches the shipped boards
@@ -134,7 +139,7 @@ section('4. the boards that do have a UART have both directions');
     check(!(claim.rx && !claim.tx), `${boardId} does not claim receive without transmit`);
   }
   const withUart = Object.entries(UART_SUPPORT).filter(([, c]) => c.tx && c.rx);
-  check(withUart.length === 16, `sixteen boards carry a real UART today (${withUart.length})`);
+  check(withUart.length === 17, `seventeen boards carry a real UART today (${withUart.length})`);
 }
 
 

@@ -3,8 +3,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { CLI_CACHE_ROOT } from './buildCache.js';
-import { dataDirFor } from './coreDataDirs.js';
+import { dataDirFor, resolveSharedDataDir } from './coreDataDirs.js';
 
 /**
  * Environment every arduino-cli call runs with.
@@ -194,6 +195,29 @@ const SKIP_MERGED_IMAGE = ['--build-property', 'recipe.hooks.objcopy.postobjcopy
 const stockBootloaders = new Map<string, Buffer>();
 const BOOTLOADER_FILE = 'bootloader.bin';
 
+/**
+ * Cores whose own compiler cannot run here, built with another installed one.
+ *
+ * The sandeepmistry nRF5 core ships GCC 5.2 for 32-bit x86 only, which a
+ * 64-bit container without i386 libraries cannot execute. Its sources build
+ * with the 64-bit GCC 7 the Arduino Renesas core installs. This is fixed
+ * server configuration keyed by core — never anything a request supplies —
+ * and it is passed as one argument, not through a shell.
+ */
+const TOOLCHAIN_OVERRIDES: Record<string, { packager: string; tool: string; version: string }> = {
+  'sandeepmistry:nRF5': { packager: 'arduino', tool: 'arm-none-eabi-gcc', version: '7-2017q4' },
+};
+
+async function toolchainOverride(fqbn: string): Promise<string[]> {
+  const core = fqbn.split(':').slice(0, 2).join(':');
+  const o = TOOLCHAIN_OVERRIDES[core];
+  if (!o) return [];
+  const shared = await resolveSharedDataDir();
+  if (!shared) return [];
+  const bin = path.join(shared, 'packages', o.packager, 'tools', o.tool, o.version, 'bin');
+  return existsSync(bin) ? ['--build-property', `compiler.path=${bin}${path.sep}`] : [];
+}
+
 export async function cliCompile(
   sketchDir: string,
   outputDir: string,
@@ -217,9 +241,10 @@ export async function cliCompile(
   // is content-keyed instead, which is what keeps one user's sketch objects out
   // of another's while the core archives, which contain nobody's source, are
   // shared.
+  const toolchain = await toolchainOverride(fqbn);
   const args = syntaxOnly
-    ? ['compile', ...jobs, ...skip, '--fqbn', fqbn, '--warnings', 'default', sketchDir]
-    : ['compile', ...jobs, ...skip, '--fqbn', fqbn, '--warnings', 'default', '--output-dir', outputDir, sketchDir];
+    ? ['compile', ...jobs, ...skip, ...toolchain, '--fqbn', fqbn, '--warnings', 'default', sketchDir]
+    : ['compile', ...jobs, ...skip, ...toolchain, '--fqbn', fqbn, '--warnings', 'default', '--output-dir', outputDir, sketchDir];
   // A data directory holding only this core's package, so arduino-cli does not
   // parse every other installed platform before compiling — see coreDataDirs.
   const dataDir = await dataDirFor(fqbn);
@@ -286,7 +311,7 @@ export async function cliCompile(
             binaryRegions.push({ offset: 0x8000, data: (await readFile(path.join(outputDir, partitions))).toString('base64') });
           }
         }
-      } else if (arch === 'sam3x' || arch === 'stm32f4') {
+      } else if (arch === 'sam3x' || arch === 'stm32f4' || arch === 'ra4m1' || arch === 'nrf52833') {
         // The ARM cores write a raw binary of flash from its first byte, which
         // is what the chip model loads; a .hex beside it (where a core makes
         // one) is the same image in another encoding.

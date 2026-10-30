@@ -8,6 +8,12 @@ import { MM } from '../pinHelpers';
  * always matches the interactive connection points.
  */
 export const UnoArtwork = memo(function UnoArtwork({ def }: { def: BoardDefinition }) {
+  // The Uno R4 Minima is the same board shape with different silicon: it names itself.
+  const title = typeof def.metadata?.artworkTitle === 'string' ? def.metadata.artworkTitle : 'ARDUINO UNO R3';
+  const chip = typeof def.metadata?.artworkChip === 'string' ? def.metadata.artworkChip : 'ATmega328P';
+  const chipMark = typeof def.metadata?.artworkChipMark === 'string' ? def.metadata.artworkChipMark : 'ATMEGA328P';
+  // The R4 runs from the RA4M1's internal oscillator: no 16 MHz crystal to draw.
+  const crystal = def.metadata?.artworkCrystal !== false;
   const W = def.widthMm * MM;
   const H = def.heightMm * MM;
   const topPins = def.pins.filter((p) => p.y < H / 2);
@@ -88,13 +94,17 @@ export const UnoArtwork = memo(function UnoArtwork({ def }: { def: BoardDefiniti
           </g>
         ))}
         <text x={48 * MM} y={40.4 * MM} fontSize="7.5" fill="#8b949e" fontFamily="monospace" textAnchor="middle">
-          ATMEGA328P
+          {chipMark}
         </text>
       </g>
 
       {/* 16 MHz crystal */}
-      <rect x={26 * MM} y={28 * MM} width={9 * MM} height={3.6 * MM} rx={1.8 * MM} fill="url(#uno-metal)" stroke="#79828b" />
-      <text x={30.5 * MM} y={30.7 * MM} fontSize="6" fill="#4a525a" textAnchor="middle" fontFamily="monospace">16MHz</text>
+      {crystal && (
+        <>
+          <rect x={26 * MM} y={28 * MM} width={9 * MM} height={3.6 * MM} rx={1.8 * MM} fill="url(#uno-metal)" stroke="#79828b" />
+          <text x={30.5 * MM} y={30.7 * MM} fontSize="6" fill="#4a525a" textAnchor="middle" fontFamily="monospace">16MHz</text>
+        </>
+      )}
 
       {/* USB interface IC */}
       <rect x={16 * MM} y={12.5 * MM} width={5.5 * MM} height={5.5 * MM} rx="1" fill="#15181c" stroke="#000" transform={`rotate(45 ${18.7 * MM} ${15.2 * MM})`} />
@@ -150,10 +160,10 @@ export const UnoArtwork = memo(function UnoArtwork({ def }: { def: BoardDefiniti
           the manufacturer's own; CircuitDesk's branding belongs in the
           application around the canvas, not on the board on it. */}
       <text x={22 * MM} y={33 * MM} fontSize="11" fontWeight="700" fill="#e8f1f8" fontFamily="sans-serif" letterSpacing="0.5">
-        ARDUINO UNO R3
+        {title}
       </text>
       <text x={22 * MM} y={35.6 * MM} fontSize="6.5" fill="#a9c8dd" fontFamily="sans-serif">
-        ATmega328P
+        {chip}
       </text>
       <text x={44 * MM} y={11.2 * MM} fontSize="6.5" fill="#cfe3f0" fontFamily="sans-serif" textAnchor="middle" letterSpacing="1">
         DIGITAL (PWM ~)
