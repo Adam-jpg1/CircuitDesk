@@ -180,6 +180,56 @@ export const NANO_33_BLE = headerBoard({
   ],
 });
 
+// Teensy 4.1: an i.MX RT1062 Cortex-M7 with 3.3 V logic (not 5 V tolerant).
+// The outer pins, top to bottom with the USB connector up: GND, 0-12, 3.3V,
+// 24-32 down the left; VIN, GND, 3.3V, 23-13, GND, 41-33 down the right. Pin
+// ids keep the ones earlier projects saved (D0-D23, GND1-3, 3V3_1/2, VIN_5V).
+const TEENSY_PWM = new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18, 19, 22, 23, 24, 25, 28, 29, 33, 36, 37]);
+const TEENSY_ANALOG: Record<number, number> = {
+  14: 0, 15: 1, 16: 2, 17: 3, 18: 4, 19: 5, 20: 6, 21: 7, 22: 8, 23: 9, 24: 10, 25: 11, 26: 12, 27: 13, 38: 14, 39: 15, 40: 16, 41: 17,
+};
+const TEENSY_EXTRA: Record<number, PinCapability[]> = {
+  0: ['uart-rx'], 1: ['uart-tx'], 10: ['spi-ss'], 11: ['spi-mosi'], 12: ['spi-miso'], 13: ['spi-sck'], 18: ['i2c-sda'], 19: ['i2c-scl'],
+};
+const TEENSY_NOTES: Record<number, string> = {
+  0: 'RX1: Serial1 receive', 1: 'TX1: Serial1 transmit', 13: 'SCK, and the orange LED', 18: 'SDA (Wire)', 19: 'SCL (Wire)',
+};
+function teensyPin(n: number): PinSpec {
+  const caps: PinCapability[] = ['digital-in', 'digital-out', 'interrupt', ...(TEENSY_PWM.has(n) ? (['pwm'] as PinCapability[]) : []), ...(TEENSY_EXTRA[n] ?? [])];
+  const a = TEENSY_ANALOG[n];
+  const description = TEENSY_NOTES[n];
+  if (a !== undefined) {
+    return analog(`D${n}`, `${n}/A${a}`, 3.3, { caps: ['analog-in', ...caps], aliases: [`A${a}`], ...(description ? { description } : {}) });
+  }
+  return gpio(`D${n}`, String(n), caps, 3.3, description ? { description } : {});
+}
+const teensyRange = (from: number, to: number) => {
+  const out: PinSpec[] = [];
+  const step = from <= to ? 1 : -1;
+  for (let n = from; n !== to + step; n += step) out.push(teensyPin(n));
+  return out;
+};
+
+export const TEENSY_41 = headerBoard({
+  id: 'board.teensy41',
+  name: 'Teensy 4.1',
+  family: 'PJRC',
+  processor: 'i.MX RT1062 (Cortex-M7)',
+  widthMm: 18,
+  heightMm: 61,
+  supportLevel: 'simulated',
+  logicVoltage: 3.3,
+  color: '#0b3d2e',
+  usb: 'micro',
+  description:
+    "Teensy 4.1: an i.MX RT1062 Cortex-M7 with 3.3 V logic. Simulated on CircuitDesk's ARMv7-M core and i.MX RT model " +
+    "running the Teensy 4 core, built at the core's 60 MHz speed setting: Serial over native USB, Serial1 on pins 0/1, " +
+    'digital I/O and interrupts, analogRead on A0-A17, analogWrite (FlexPWM and QuadTimer pins), Wire on 18/19 and SPI on 11-13.',
+  metadata: { i2cPins: ['D18', 'D19'], spiPins: ['D11', 'D12', 'D13'] },
+  left: [gnd('GND1'), ...teensyRange(0, 12), p3v3('3V3_1'), ...teensyRange(24, 32)],
+  right: [p5v('VIN_5V', 'VIN'), gnd('GND2'), p3v3('3V3_2'), ...teensyRange(23, 13), gnd('GND3'), ...teensyRange(41, 33)],
+});
+
 export const ESP32_DEVKIT = headerBoard({
   id: 'board.esp32-devkit',
   name: 'ESP32 DevKit V1',
@@ -552,12 +602,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     [p5v('5V_1'), p5v('5V_2'), gnd('GND2'), g3('GPIO14', 'GPIO14 TXD', { caps: ['digital-out', 'uart-tx'] }), g3('GPIO15', 'GPIO15 RXD', { caps: ['digital-in', 'uart-rx'] }), g3('GPIO18', 'GPIO18'), gnd('GND3'), g3('GPIO23', 'GPIO23')],
     'wiring', { usb: 'none', color: '#0b3d2e' },
   ),
-  simpleWiringBoard(
-    'board.teensy41', 'Teensy 4.1', 'PJRC', 'IMXRT1062 (Cortex-M7)', 18, 61, 3.3,
-    [gnd('GND1'), ...seqPins('D', 0, 12, 3.3), p3v3('3V3_1')],
-    [p5v('VIN_5V', 'VIN'), gnd('GND2'), p3v3('3V3_2'), ...seqPins('D', 13, 23, 3.3), gnd('GND3')],
-    'wiring', { color: '#0b3d2e' },
-  ),
+  TEENSY_41,
   MICROBIT_V2,
   simpleWiringBoard(
     // The pins keep their pad names as ids, which is what earlier projects

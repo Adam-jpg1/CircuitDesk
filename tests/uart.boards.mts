@@ -42,6 +42,7 @@ const USB_CONSOLE = new Set([
   'board.arduino-leonardo',
   'board.arduino-uno-r4',
   'board.nano-33-ble',
+  'board.teensy41',
   'board.raspberry-pi-pico',
   'board.raspberry-pi-pico-w',
   'board.seeed-xiao-rp2040',

@@ -73,6 +73,7 @@ const UART_SUPPORT: Record<string, { tx: boolean; rx: boolean; note: string }> =
   // (P0.06/P1.08) go to the USB interface chip, not the edge connector, so
   // there is nothing on the board a GPS or a modem could be wired to.
   'board.nano-33-ble': { tx: true, rx: true, note: 'nRF52840 UARTE0 behind Serial1 on TX1/RX0 (EasyDMA, with PPI); Serial is native USB' },
+  'board.teensy41': { tx: true, rx: true, note: 'i.MX RT1062 LPUART6 behind Serial1 on pins 0/1; Serial is native USB' },
   'board.microbit': { tx: false, rx: false, note: 'nRF52833 UARTE0 behind Serial, wired only to the USB interface chip; no UART on the edge connector' },
 };
 
@@ -140,7 +141,7 @@ section('4. the boards that do have a UART have both directions');
     check(!(claim.rx && !claim.tx), `${boardId} does not claim receive without transmit`);
   }
   const withUart = Object.entries(UART_SUPPORT).filter(([, c]) => c.tx && c.rx);
-  check(withUart.length === 18, `eighteen boards carry a real UART today (${withUart.length})`);
+  check(withUart.length === 19, `nineteen boards carry a real UART today (${withUart.length})`);
 }
 
 

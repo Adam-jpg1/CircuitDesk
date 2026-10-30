@@ -34,7 +34,7 @@ import { TIMER_FUNCTION_E, TIMER_FUNCTION_F } from '../simulation/samd21/timers'
  * family is carried alongside as `boardArchitecture` rather than derived by
  * string matching, so the two vocabularies stay explicitly linked.
  */
-export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52';
+export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52' | 'imxrt';
 
 export interface PeripheralController {
   /** Controller id as the chip's own documentation names it: `i2c0`, `usart1`. */
@@ -493,6 +493,47 @@ const NRF52840: ProcessorProfile = {
   ],
 };
 
+// The pads the Teensy 4.1 brings out, from its core's core_pins.h.
+const teensyPads = [
+  'GPIO1_02', 'GPIO1_03', 'GPIO1_12', 'GPIO1_13', 'GPIO1_16', 'GPIO1_17', 'GPIO1_18', 'GPIO1_19', 'GPIO1_20', 'GPIO1_21',
+  'GPIO1_22', 'GPIO1_23', 'GPIO1_24', 'GPIO1_25', 'GPIO1_26', 'GPIO1_27', 'GPIO1_28', 'GPIO1_29', 'GPIO1_30', 'GPIO1_31',
+  'GPIO2_00', 'GPIO2_01', 'GPIO2_02', 'GPIO2_03', 'GPIO2_10', 'GPIO2_11', 'GPIO2_12', 'GPIO2_16', 'GPIO2_17', 'GPIO2_18',
+  'GPIO2_19', 'GPIO2_28', 'GPIO2_29', 'GPIO3_18', 'GPIO3_22', 'GPIO3_23', 'GPIO4_04', 'GPIO4_05', 'GPIO4_06', 'GPIO4_07',
+  'GPIO4_08', 'GPIO4_31',
+];
+
+const IMXRT1062: ProcessorProfile = {
+  id: 'proc.imxrt1062',
+  name: 'NXP i.MX RT1062 (Cortex-M7)',
+  architecture: 'imxrt',
+  boardArchitecture: 'imxrt',
+  vendor: 'NXP',
+  clockHz: 60_000_000,
+  flashBytes: 8_126_464,
+  ramBytes: 1_048_576,
+  pads: teensyPads,
+  // Every ADC input is a GPIO1 pad; the channel is its bit.
+  adcChannels: Object.fromEntries(
+    ['12', '13', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31'].map((b) => [`GPIO1_${b}`, Number(b)]),
+  ),
+  pwmPads: [
+    'GPIO1_02', 'GPIO1_03', 'GPIO1_12', 'GPIO1_13', 'GPIO1_16', 'GPIO1_17', 'GPIO1_18', 'GPIO1_19', 'GPIO1_24', 'GPIO1_25',
+    'GPIO2_00', 'GPIO2_01', 'GPIO2_02', 'GPIO2_03', 'GPIO2_10', 'GPIO2_11', 'GPIO2_16', 'GPIO2_17', 'GPIO2_18', 'GPIO2_19',
+    'GPIO3_18', 'GPIO4_04', 'GPIO4_05', 'GPIO4_06', 'GPIO4_07', 'GPIO4_08', 'GPIO4_31',
+  ],
+  uarts: [{ id: 'lpuart6', arduinoName: 'Serial1', signals: { tx: ['GPIO1_02'], rx: ['GPIO1_03'] }, defaults: { tx: 'GPIO1_02', rx: 'GPIO1_03' } }],
+  i2c: [{ id: 'lpi2c1', arduinoName: 'Wire', signals: { sda: ['GPIO1_17'], scl: ['GPIO1_16'] }, defaults: { sda: 'GPIO1_17', scl: 'GPIO1_16' } }],
+  spi: [{ id: 'lpspi4', arduinoName: 'SPI', signals: { sck: ['GPIO2_03'], mosi: ['GPIO2_02'], miso: ['GPIO2_01'] }, defaults: { sck: 'GPIO2_03', mosi: 'GPIO2_02', miso: 'GPIO2_01' } }],
+  interruptPads: teensyPads,
+  logicVolts: 3.3,
+  notModelled: [
+    'LPUART1-5/7/8, LPI2C2-4 and LPSPI1-3 (Serial2-8, Wire1/2, SPI1/2)',
+    'PIT and GPT timers (IntervalTimer, tone), eDMA, FlexIO, ENET, uSDHC, the external PSRAM',
+    'the EEPROM emulation in flash',
+    'clock reconfiguration: the CPU runs at the speed the sketch was built for',
+  ],
+};
+
 const ra4m1Pads = [
   ...['P000', 'P001', 'P002', 'P003', 'P004', 'P010', 'P011', 'P012', 'P013', 'P014', 'P015'],
   ...Array.from({ length: 13 }, (_, i) => `P1${String(i).padStart(2, '0')}`),
@@ -594,6 +635,7 @@ export const PROCESSOR_PROFILES: ProcessorProfile[] = [
   RA4M1,
   NRF52833,
   NRF52840,
+  IMXRT1062,
 ];
 
 export function processorProfile(id: string): ProcessorProfile | undefined {

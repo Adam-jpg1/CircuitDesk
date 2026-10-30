@@ -63,6 +63,15 @@
       "note": "The Arduino mbed core, for the Nano 33 BLE. Serial is native USB (mbed's USBCDC); emits a raw binary linked at 0x10000, above the board's bootloader. Shares the Renesas core's GCC 7."
     },
     {
+      "id": "teensy:avr",
+      "version": "1.62.0",
+      "additionalUrl": "https://www.pjrc.com/teensy/package_teensy_index.json",
+      "targets": ["teensy:avr:teensy41:speed=60"],
+      "required": true,
+      "teensyKeepMultilibs": ["thumb/v7e-m+dp"],
+      "note": "The Teensy core, for the Teensy 4.1, built at its 60 MHz speed setting so the simulation keeps pace. Emits Intel HEX of the flash from 0x60000000, which the server turns into an image. Pruned after install to the ARM compiler's Cortex-M7 double-precision multilib, without the AVR compiler for the 8-bit Teensys — see installCores.mjs."
+    },
+    {
       "id": "sandeepmistry:nRF5",
       "version": "0.8.0",
       "additionalUrl": "https://sandeepmistry.github.io/arduino-nRF5/package_nRF5_boards_index.json",

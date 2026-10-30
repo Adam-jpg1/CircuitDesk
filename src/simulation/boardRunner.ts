@@ -57,7 +57,7 @@ export interface PinSnapshot {
 }
 
 export interface BoardRunner {
-  readonly engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m';
+  readonly engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python';
 
   /** Advances the simulation by a slice of simulated time. Always bounded. */
   runFor(simMs: number): void;
@@ -168,6 +168,7 @@ export function runnerPinIndex(board: BoardDefinition, pinId: string): number | 
   if (board.architecture === 'stm32') return portPadIndex(pad, 8, 16);
   if (board.architecture === 'renesas') return renesasPadIndex(pad);
   if (board.architecture === 'nrf52') return nrfPadIndex(pad);
+  if (board.architecture === 'imxrt') return imxrtPadIndex(pad);
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPadIndex(pad, espPads);
   return arduinoPinNumber(board, pinId);
@@ -178,6 +179,13 @@ export function nrfPadIndex(pad: string): number | undefined {
   const match = /^P([01])\.(\d{1,2})$/.exec(pad);
   if (!match || Number(match[2]) > 31) return undefined;
   return Number(match[1]) * 32 + Number(match[2]);
+}
+
+/** GPIO2_03 on the i.MX RT is GPIO2 bit 3: (port - 1) * 32 + bit, GPIO1-5. */
+export function imxrtPadIndex(pad: string): number | undefined {
+  const match = /^GPIO([1-5])_(\d{2})$/.exec(pad);
+  if (!match || Number(match[2]) > 31) return undefined;
+  return (Number(match[1]) - 1) * 32 + Number(match[2]);
 }
 
 /** P<port><pin> on the RA4M1, P111 being port 1 pin 11: port * 16 + pin. */
@@ -326,6 +334,10 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
     const pad = board.padMap?.[pinId] ?? pinId;
     return processorProfile(board.processorProfileId ?? 'proc.nrf52833')?.adcChannels?.[pad];
   }
+  if (board.architecture === 'imxrt') {
+    const pad = board.padMap?.[pinId] ?? pinId;
+    return processorProfile('proc.imxrt1062')?.adcChannels?.[pad];
+  }
   if (board.architecture === 'rp2040') {
     const index = rp2040PinIndex(board.padMap?.[pinId] ?? pinId);
     if (index === undefined) return undefined;
@@ -340,7 +352,7 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
 
 /** Full-scale ADC reference for a board, in volts. */
 export function boardAdcReference(board: BoardDefinition): number {
-  if (board.architecture === 'rp2040' || board.architecture === 'samd' || board.architecture === 'sam' || board.architecture === 'stm32' || board.architecture === 'nrf52' || isEspRiscv(board)) return 3.3;
+  if (board.architecture === 'rp2040' || board.architecture === 'samd' || board.architecture === 'sam' || board.architecture === 'stm32' || board.architecture === 'nrf52' || board.architecture === 'imxrt' || isEspRiscv(board)) return 3.3;
   return 5;
 }
 
@@ -357,6 +369,8 @@ export function runnerPinCount(board: BoardDefinition): number {
   if (board.architecture === 'renesas') return 160;
   // P0.00-P1.15 on the nRF52.
   if (board.architecture === 'nrf52') return 48;
+  // GPIO1-GPIO5, thirty-two pads each, on the i.MX RT.
+  if (board.architecture === 'imxrt') return 160;
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPads;
   return avrProfileFor(board)?.pinCount ?? 0;

@@ -116,7 +116,7 @@ export interface BoardTarget {
   id: string;
   fqbn: string;
   name: string;
-  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52833' | 'nrf52840';
+  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52833' | 'nrf52840' | 'imxrt1062';
   /** arduino-cli core that provides this target. */
   core: string;
   fCpuHz: number;
@@ -294,6 +294,18 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     fCpuHz: 64_000_000,
     flashMaxBytes: 983_040,
     ramMaxBytes: 262_144,
+  },
+  // The Teensy 4.1 through the Teensy 4 core, at its 60 MHz speed setting.
+  {
+    id: 'board.teensy41',
+    fqbn: 'teensy:avr:teensy41:speed=60',
+    name: 'Teensy 4.1 (i.MX RT1062)',
+    arch: 'imxrt1062',
+    core: 'teensy:avr',
+    mcu: 'imxrt1062',
+    fCpuHz: 60_000_000,
+    flashMaxBytes: 8_126_464,
+    ramMaxBytes: 524_288,
   },
   // The Uno R4 Minima: the Arduino Renesas core, linked above its bootloader.
   {

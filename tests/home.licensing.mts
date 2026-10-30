@@ -240,6 +240,11 @@ const parsed = parseNotices(NOTICES);
         // analogRead, digital in, PWM, interrupts, Servo, tone, a second
         // UART, EEPROM in flash, and Wire and an LED on the canvas.
         'board.stm32-nucleo',
+        // Simulated on the strength of tests/teensy41.runtime.mts: Teensy 4 core
+        // firmware on the ARMv7-M core (as a Cortex-M7) and the i.MX RT1062
+        // model, with Serial over a simulated USB host, Serial1, analogRead,
+        // FlexPWM and QuadTimer PWM, interrupts, Wire and SPI.
+        'board.teensy41',
       ]),
     `the set of Simulated boards is unchanged (${simulated.join(', ')})`,
   );

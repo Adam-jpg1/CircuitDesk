@@ -126,6 +126,17 @@ export const COMPILE_PROFILES: CompileProfile[] = [
     description: 'The Arduino mbed core for the Nano 33 BLE. Emits a raw binary linked at 0x10000, above the board\'s bootloader.',
   },
   {
+    id: 'compile.teensy41',
+    name: 'Teensy 4 (i.MX RT1062)',
+    adapter: 'arduino-cli',
+    processorProfileIds: ['proc.imxrt1062'],
+    requiredCore: 'teensy:avr',
+    fqbn: 'teensy:avr:teensy41:speed=60',
+    serverTargetId: 'board.teensy41',
+    artifactFormat: 'bin',
+    description: 'The Teensy 4 core for the Teensy 4.1 at its 60 MHz setting. Emits the flash image from 0x60000000, boot header and image vector table included.',
+  },
+  {
     id: 'compile.renesas-uno',
     name: 'Arduino Renesas (RA4M1)',
     adapter: 'arduino-cli',
@@ -280,6 +291,21 @@ const AVR_APIS = [
 ];
 
 export const RUNTIME_PROFILES: RuntimeProfile[] = [
+  {
+    id: 'runtime.armv7m-imxrt',
+    name: 'CircuitDesk ARMv7-M (i.MX RT1062)',
+    engine: 'armv7m',
+    processorProfileIds: ['proc.imxrt1062'],
+    acceptsFormats: ['bin'],
+    supportedApis: [
+      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'analogWrite', 'Wire', 'SPI', 'delay/millis/micros',
+      'Serial (USB CDC)', 'Serial1', 'attachInterrupt',
+    ],
+    supportedPeripherals: ['GPIO', 'IOMUXC', 'ADC', 'FlexPWM', 'QuadTimer', 'LPUART', 'LPI2C', 'LPSPI', 'USB'],
+    description:
+      "Executes i.MX RT1062 firmware on CircuitDesk's ARMv7-M core (Cortex-M7, double-precision FPU) with a model of the " +
+      'parts the Teensy 4 core uses: clocks, IOMUXC, GPIO, ADC, FlexPWM and QuadTimer, LPUART6, LPI2C1, LPSPI4 and USB.',
+  },
   {
     id: 'runtime.armv7m-nrf52',
     name: 'CircuitDesk ARMv7-M (nRF52)',

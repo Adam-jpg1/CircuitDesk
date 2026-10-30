@@ -186,7 +186,7 @@ const samd21Adapter: BoardSimulatorAdapter = {
  */
 const armv7mAdapter: BoardSimulatorAdapter = {
   engine: 'armv7m',
-  processorProfileIds: ['proc.sam3x8e', 'proc.stm32f401re', 'proc.ra4m1', 'proc.nrf52833', 'proc.nrf52840'],
+  processorProfileIds: ['proc.sam3x8e', 'proc.stm32f401re', 'proc.ra4m1', 'proc.nrf52833', 'proc.nrf52840', 'proc.imxrt1062'],
   firmwareFormat: 'bin',
   async createRunner(firmware, board) {
     assertFormat(this, firmware, board);
@@ -276,6 +276,20 @@ const armv7mAdapter: BoardSimulatorAdapter = {
         return new ArmRunner(() => {
           const chip = new Nrf52('52840');
           chip.load(image, 0x10000);
+          return chip;
+        }, busDefaults);
+      }
+      case 'proc.imxrt1062': {
+        // The flash image from 0x60000000: the FlexSPI configuration block,
+        // then the image vector table at 0x1000 the boot ROM reads.
+        const { Imxrt1062 } = await import('./imxrt/imxrt1062');
+        const ivt = image[0x1000] | (image[0x1001] << 8) | (image[0x1002] << 16) | (image[0x1003] << 24);
+        if (image.length < 0x1008 || (ivt & 0xff) !== 0xd1) {
+          throw new FirmwareRejectedError(`${board.name} runs flash images with an image vector table at 0x1000; this one has none. Recompile for this board.`);
+        }
+        return new ArmRunner(() => {
+          const chip = new Imxrt1062();
+          chip.load(image);
           return chip;
         }, busDefaults);
       }

@@ -26,7 +26,7 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(readFileSync(join(here, 'cores.json'), 'utf8'));
-/** @type {{id:string,version:string,additionalUrl?:string,required?:boolean,keepChips?:string[],keepCmsisLibs?:string[],keepStm32Series?:string[],keepMultilibs?:string[],removeTools?:string[],targets:string[]}[]} */
+/** @type {{id:string,version:string,additionalUrl?:string,required?:boolean,keepChips?:string[],keepCmsisLibs?:string[],keepStm32Series?:string[],keepMultilibs?:string[],teensyKeepMultilibs?:string[],removeTools?:string[],targets:string[]}[]} */
 const CORES = manifest.cores;
 /** @type {{version:string}|undefined} */
 const CLI_PIN = manifest.arduinoCli;
@@ -237,6 +237,40 @@ function pruneStm32(keepSeries, keepMultilibs) {
   return { removed };
 }
 
+/**
+ * Narrows the Teensy package to what a Teensy 4.1 build reads: its compiler
+ * bundle carries an ARM toolchain with libraries for every ARM profile and an
+ * AVR toolchain for the 8-bit Teensys. The AVR one goes, and of the ARM
+ * multilibs only `keepMultilibs` (thumb/v7e-m+dp, the Cortex-M7's) stays.
+ */
+function pruneTeensy(keepMultilibs) {
+  const compile = join(dataDir(), 'packages', 'teensy', 'tools', 'teensy-compile');
+  const removed = [];
+  const rm = (path) => {
+    rmSync(path, { recursive: true, force: true });
+    removed.push(path.slice(compile.length + 1));
+  };
+  const keep = new Set(keepMultilibs);
+  for (const version of existsSync(compile) ? readdirSync(compile) : []) {
+    const base = join(compile, version);
+    if (existsSync(join(base, 'avr'))) rm(join(base, 'avr'));
+    const arm = join(base, 'arm');
+    const trees = [join(arm, 'arm-none-eabi', 'lib')];
+    const libgcc = join(arm, 'lib', 'gcc', 'arm-none-eabi');
+    for (const v of existsSync(libgcc) ? readdirSync(libgcc) : []) trees.push(join(libgcc, v));
+    for (const tree of trees) {
+      for (const mode of ['thumb', 'arm']) {
+        const dir = join(tree, mode);
+        for (const entry of existsSync(dir) ? readdirSync(dir) : []) {
+          if (!keep.has(`${mode}/${entry}`)) rm(join(dir, entry));
+        }
+      }
+    }
+    for (const doc of [join(arm, 'share', 'doc'), join(arm, 'share', 'info'), join(arm, 'share', 'man')]) if (existsSync(doc)) rm(doc);
+  }
+  return { removed };
+}
+
 function install(core) {
   const args = ['core', 'install', `${core.id}@${core.version}`];
   if (core.additionalUrl) args.push('--additional-urls', core.additionalUrl);
@@ -333,6 +367,10 @@ for (const core of CORES) {
   if (core.keepStm32Series) {
     const { removed } = pruneStm32(core.keepStm32Series, core.keepMultilibs ?? []);
     console.log(`[cores] pruned ${removed.length} STM32 series, debugger and multilib entr(ies) not built for`);
+  }
+  if (core.teensyKeepMultilibs) {
+    const { removed } = pruneTeensy(core.teensyKeepMultilibs);
+    console.log(`[cores] pruned ${removed.length} Teensy compiler entr(ies) not built for`);
   }
   if (core.keepCmsisLibs) {
     const vendor = core.id.split(':')[0];

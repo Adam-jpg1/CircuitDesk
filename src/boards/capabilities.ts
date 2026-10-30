@@ -402,6 +402,35 @@ const NANO33_LIMITATION =
   "(the ArduinoBLE library), the onboard IMU, and the board's own LEDs other than the one on D13 are not simulated. " +
   "The board's bootloader is not run: the sketch starts directly, as it does after the bootloader hands over.";
 
+const TEENSY41_SIM_APIS = [
+  'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
+  'digitalWrite / digitalRead',
+  'analogRead (A0-A17; 10-bit by default, analogReadResolution 8-12)',
+  'analogWrite (the FlexPWM and QuadTimer pins)',
+  'delay/millis/micros',
+  'Serial (native USB CDC, both directions)',
+  'Serial1 (LPUART6 on pins 0/1, both directions)',
+  'attachInterrupt (RISING, FALLING, CHANGE, LOW, HIGH)',
+  'Wire (pins 18/19)',
+  'SPI (pins 11-13)',
+];
+
+const TEENSY41_SIM_PERIPHERALS = [
+  'ARMv7-M Cortex-M7 core with the double-precision FPU: Thumb-2, NVIC, SysTick on its 100 kHz reference',
+  'ITCM, DTCM and OCRAM; execution from the QSPI flash; the boot ROM\'s jump through the image vector table',
+  'clock, PLL, DCDC and temperature-monitor status; IOMUXC pin muxing and pulls',
+  'GPIO1-5 and the fast GPIO6-9 with edge and level interrupts',
+  'ADC1/ADC2, FlexPWM1-4 and QuadTimer1-3 outputs, LPUART6, LPI2C1, LPSPI4',
+  'USB OTG1 in device mode (queue heads, transfer descriptors, a simulated host that opens the CDC port)',
+];
+
+const TEENSY41_LIMITATION =
+  "Real i.MX RT1062 firmware from the Teensy 4 core on CircuitDesk's ARMv7-M core: startup, setup() and loop(), GPIO, " +
+  'analogRead, analogWrite, Serial over USB, Serial1, Wire, SPI and attachInterrupt. Built at the core\'s 60 MHz speed ' +
+  'setting rather than 600 MHz, so heavy computation runs slower than on the board while timing stays exact. Serial2-8, ' +
+  'the other I2C and SPI ports, IntervalTimer and tone(), EEPROM, DMA, Ethernet, the SD card slot, the external PSRAM ' +
+  'and audio are not simulated.';
+
 const samd21Compiler = (fqbn: string): BoardCompilerInfo => ({
   provider: 'arduino-cli',
   fqbn,
@@ -992,7 +1021,33 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     manufacturer: 'PJRC',
     architecture: 'imxrt',
     aliases: ['teensy-4.1'],
-    limitation: 'IMXRT1062 toolchain not installed; wiring only.',
+    processorProfileId: 'proc.imxrt1062',
+    compileProfileId: 'compile.teensy41',
+    runtimeProfileId: 'runtime.armv7m-imxrt',
+    serverTargetId: 'board.teensy41',
+    // The pins and the GPIO pads behind them, from the Teensy 4 core's core_pins.h.
+    padMap: {
+      D0: 'GPIO1_03', D1: 'GPIO1_02', D2: 'GPIO4_04', D3: 'GPIO4_05', D4: 'GPIO4_06', D5: 'GPIO4_08', D6: 'GPIO2_10',
+      D7: 'GPIO2_17', D8: 'GPIO2_16', D9: 'GPIO2_11', D10: 'GPIO2_00', D11: 'GPIO2_02', D12: 'GPIO2_01', D13: 'GPIO2_03',
+      D14: 'GPIO1_18', D15: 'GPIO1_19', D16: 'GPIO1_23', D17: 'GPIO1_22', D18: 'GPIO1_17', D19: 'GPIO1_16', D20: 'GPIO1_26',
+      D21: 'GPIO1_27', D22: 'GPIO1_24', D23: 'GPIO1_25', D24: 'GPIO1_12', D25: 'GPIO1_13', D26: 'GPIO1_30', D27: 'GPIO1_31',
+      D28: 'GPIO3_18', D29: 'GPIO4_31', D30: 'GPIO3_23', D31: 'GPIO3_22', D32: 'GPIO2_12', D33: 'GPIO4_07', D34: 'GPIO2_29',
+      D35: 'GPIO2_28', D36: 'GPIO2_18', D37: 'GPIO2_19', D38: 'GPIO1_28', D39: 'GPIO1_29', D40: 'GPIO1_20', D41: 'GPIO1_21',
+    },
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'teensy:avr:teensy41:speed=60',
+      requiredCore: 'teensy:avr',
+      supported: true,
+      note: "Built with the Teensy 4 core at its 60 MHz speed setting, so the simulation keeps pace with real time; timing functions are exact at any speed.",
+    },
+    simulation: {
+      engine: 'armv7m',
+      supported: true,
+      supportedApis: TEENSY41_SIM_APIS,
+      supportedPeripherals: TEENSY41_SIM_PERIPHERALS,
+    },
+    limitation: TEENSY41_LIMITATION,
   },
   'board.microbit': {
     manufacturer: 'Micro:bit Educational Foundation',

@@ -208,6 +208,32 @@ const TOOLCHAIN_OVERRIDES: Record<string, { packager: string; tool: string; vers
   'sandeepmistry:nRF5': { packager: 'arduino', tool: 'arm-none-eabi-gcc', version: '7-2017q4' },
 };
 
+/** Intel HEX to the bytes it describes from `base` up, gaps left erased. */
+export function hexToImage(hex: string, base: number): Buffer {
+  const chunks: [number, Buffer][] = [];
+  let upper = 0;
+  let end = 0;
+  for (const raw of hex.split('\n')) {
+    const line = raw.trim();
+    if (!line.startsWith(':')) continue;
+    const bytes = Buffer.from(line.slice(1), 'hex');
+    const count = bytes[0];
+    const type = bytes[3];
+    if (type === 0x04) upper = ((bytes[4] << 8) | bytes[5]) * 0x10000;
+    else if (type === 0x02) upper = ((bytes[4] << 8) | bytes[5]) * 16;
+    else if (type === 0x01) break;
+    else if (type === 0x00) {
+      const at = upper + ((bytes[1] << 8) | bytes[2]) - base;
+      if (at < 0) continue;
+      chunks.push([at, bytes.subarray(4, 4 + count)]);
+      end = Math.max(end, at + count);
+    }
+  }
+  const image = Buffer.alloc(end, 0xff);
+  for (const [at, data] of chunks) data.copy(image, at);
+  return image;
+}
+
 async function toolchainOverride(fqbn: string): Promise<string[]> {
   const core = fqbn.split(':').slice(0, 2).join(':');
   const o = TOOLCHAIN_OVERRIDES[core];
@@ -310,6 +336,14 @@ export async function cliCompile(
           if (partitions) {
             binaryRegions.push({ offset: 0x8000, data: (await readFile(path.join(outputDir, partitions))).toString('base64') });
           }
+        }
+      } else if (arch === 'imxrt1062') {
+        // The Teensy core writes only Intel HEX, of the flash from 0x60000000;
+        // the chip model takes it as a raw image of that flash.
+        const hexFile = files.find((f) => f.endsWith('.ino.hex'));
+        if (hexFile) {
+          binaryBase64 = hexToImage(await readFile(path.join(outputDir, hexFile), 'utf8'), 0x60000000).toString('base64');
+          binaryFormat = 'bin';
         }
       } else if (arch === 'sam3x' || arch === 'stm32f4' || arch === 'ra4m1' || arch === 'nrf52833' || arch === 'nrf52840') {
         // The ARM cores write a raw binary of flash from its first byte, which
