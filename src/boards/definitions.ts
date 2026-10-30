@@ -230,6 +230,81 @@ export const TEENSY_41 = headerBoard({
   right: [p5v('VIN_5V', 'VIN'), gnd('GND2'), p3v3('3V3_2'), ...teensyRange(23, 13), gnd('GND3'), ...teensyRange(41, 33)],
 });
 
+// The Raspberry Pi's 40-pin J8 header: physical pins 1, 3 ... 39 down one
+// row, 2, 4 ... 40 down the other. GPIO pins are named by their BCM numbers,
+// which is what RPi.GPIO in BCM mode and gpiozero use. `ids` gives the power
+// and ground pins the ids each board's earlier projects saved, in physical
+// pin order.
+const J8: (string | number)[] = [
+  '3V3', '5V', 2, '5V', 3, 'GND', 4, 14, 'GND', 15, 17, 18, 27, 'GND', 22, 23, '3V3', 24, 10, 'GND',
+  9, 25, 11, 8, 'GND', 7, 0, 1, 5, 'GND', 6, 12, 13, 'GND', 19, 16, 26, 20, 'GND', 21,
+];
+const J8_ROLES: Record<number, { caps: PinCapability[]; note: string }> = {
+  2: { caps: ['i2c-sda'], note: 'SDA1 (I2C)' }, 3: { caps: ['i2c-scl'], note: 'SCL1 (I2C)' },
+  14: { caps: ['uart-tx'], note: 'TXD (UART)' }, 15: { caps: ['uart-rx'], note: 'RXD (UART)' },
+  10: { caps: ['spi-mosi'], note: 'MOSI (SPI0)' }, 9: { caps: ['spi-miso'], note: 'MISO (SPI0)' }, 11: { caps: ['spi-sck'], note: 'SCLK (SPI0)' },
+  8: { caps: ['spi-ss'], note: 'CE0 (SPI0)' }, 7: { caps: ['spi-ss'], note: 'CE1 (SPI0)' },
+  0: { caps: [], note: 'ID_SD: reserved for HAT EEPROMs' }, 1: { caps: [], note: 'ID_SC: reserved for HAT EEPROMs' },
+  18: { caps: [], note: 'PCM_CLK / PWM0' }, 12: { caps: [], note: 'PWM0' }, 13: { caps: [], note: 'PWM1' }, 19: { caps: [], note: 'PCM_FS / PWM1' },
+};
+function j8Header(ids: { power: string[]; ground: string[] }): { left: PinSpec[]; right: PinSpec[] } {
+  const p3 = ids.power.filter((x) => x.startsWith('3V3'));
+  const p5 = ids.power.filter((x) => x.startsWith('5V'));
+  const g = [...ids.ground];
+  const spec = (entry: string | number, physical: number): PinSpec => {
+    if (entry === '3V3') return { ...p3v3(p3.shift()!, '3V3'), description: `Pin ${physical}: 3.3 V` };
+    if (entry === '5V') return { ...p5v(p5.shift()!, '5V'), description: `Pin ${physical}: 5 V` };
+    if (entry === 'GND') return { ...gnd(g.shift()!), description: `Pin ${physical}: ground` };
+    const n = entry as number;
+    const role = J8_ROLES[n];
+    return gpio(`GPIO${n}`, `GPIO${n}`, ['digital-in', 'digital-out', 'pwm', 'interrupt', ...(role?.caps ?? [])], 3.3, {
+      description: `Pin ${physical}: GPIO${n}${role ? ` — ${role.note}` : ''}`,
+      aliases: [`BOARD${physical}`],
+    });
+  };
+  const left: PinSpec[] = [];
+  const right: PinSpec[] = [];
+  J8.forEach((entry, i) => (i % 2 === 0 ? left : right).push(spec(entry, i + 1)));
+  return { left, right };
+}
+
+const PI_DESCRIPTION =
+  "Simulated by running main.py's GPIO in CircuitDesk's Python interpreter — RPi.GPIO and gpiozero on the header's BCM " +
+  'GPIO 0-27, with print() and input() on the Serial Monitor. Not a Linux emulator: the script runs, the Pi does not.';
+
+// Portrait: the header runs along the long edge.
+export const RPI_ZERO_GPIO = headerBoard({
+  id: 'board.rpi-zero-gpio',
+  name: 'Raspberry Pi Zero GPIO Header',
+  family: 'Raspberry Pi',
+  processor: 'BCM2835 (GPIO header)',
+  widthMm: 30,
+  heightMm: 65,
+  supportLevel: 'simulated',
+  logicVoltage: 3.3,
+  color: '#0b3d2e',
+  usb: 'none',
+  description: `The Raspberry Pi Zero's 40-pin GPIO header. ${PI_DESCRIPTION}`,
+  metadata: { i2cPins: ['GPIO2', 'GPIO3'], spiPins: ['GPIO10', 'GPIO9', 'GPIO11'] },
+  ...j8Header({ power: ['3V3_1', '5V_1', '5V_2', '3V3_2'], ground: ['GND3', 'GND1', 'GND4', 'GND5', 'GND2', 'GND7', 'GND8', 'GND6'] }),
+});
+
+export const RPI4_GPIO = headerBoard({
+  id: 'board.rpi4-gpio',
+  name: 'Raspberry Pi 4/5 GPIO Header',
+  family: 'Raspberry Pi',
+  processor: 'BCM2711/BCM2712 (GPIO header)',
+  widthMm: 30,
+  heightMm: 65,
+  supportLevel: 'simulated',
+  logicVoltage: 3.3,
+  color: '#0b3d2e',
+  usb: 'none',
+  description: `The Raspberry Pi 4 and 5's 40-pin GPIO header. ${PI_DESCRIPTION}`,
+  metadata: { i2cPins: ['GPIO2', 'GPIO3'], spiPins: ['GPIO10', 'GPIO9', 'GPIO11'] },
+  ...j8Header({ power: ['3V3_1', '5V_1', '5V_2', '3V3_2'], ground: ['GND2', 'GND1', 'GND3', 'GND6', 'GND4', 'GND7', 'GND8', 'GND5'] }),
+});
+
 export const ESP32_DEVKIT = headerBoard({
   id: 'board.esp32-devkit',
   name: 'ESP32 DevKit V1',
@@ -587,21 +662,8 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   ),
   PICO,
   { ...PICO, id: 'board.raspberry-pi-pico-w', name: 'Raspberry Pi Pico W', description: 'Pico W (wireless). The RP2040 side runs real firmware exactly as the Pico does; the CYW43 Wi-Fi radio is not simulated.', metadata: { ...PICO.metadata } },
-  simpleWiringBoard(
-    // Portrait: the 40-pin header runs along the Zero's 65 mm edge. Drawn
-    // landscape, thirteen pins a side did not fit in 30 mm and four of them
-    // sat off the board.
-    'board.rpi-zero-gpio', 'Raspberry Pi Zero GPIO Header', 'Raspberry Pi', 'BCM2835 (header only)', 30, 65, 3.3,
-    [p3v3('3V3_1'), g3('GPIO2', 'GPIO2', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('GPIO3', 'GPIO3', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('GPIO4', 'GPIO4'), gnd('GND1'), g3('GPIO17', 'GPIO17'), g3('GPIO27', 'GPIO27'), g3('GPIO22', 'GPIO22'), p3v3('3V3_2'), g3('GPIO10', 'GPIO10', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }), g3('GPIO9', 'GPIO9', { caps: ['digital-in', 'digital-out', 'spi-miso'] }), g3('GPIO11', 'GPIO11', { caps: ['digital-in', 'digital-out', 'spi-sck'] }), gnd('GND2')],
-    [p5v('5V_1'), p5v('5V_2'), gnd('GND3'), g3('GPIO14', 'GPIO14 TXD', { caps: ['digital-out', 'uart-tx'] }), g3('GPIO15', 'GPIO15 RXD', { caps: ['digital-in', 'uart-rx'] }), g3('GPIO18', 'GPIO18'), gnd('GND4'), g3('GPIO23', 'GPIO23'), g3('GPIO24', 'GPIO24'), gnd('GND5'), g3('GPIO25', 'GPIO25'), g3('GPIO8', 'GPIO8'), g3('GPIO7', 'GPIO7')],
-    'wiring', { usb: 'none', color: '#0b3d2e', description: 'Raspberry Pi GPIO header (subset of the 40-pin J8). Wiring/validation only — Linux boards are not simulated.' },
-  ),
-  simpleWiringBoard(
-    'board.rpi4-gpio', 'Raspberry Pi 4/5 GPIO Header', 'Raspberry Pi', 'BCM2711/BCM2712 (header only)', 85, 20, 3.3,
-    [p3v3('3V3_1'), g3('GPIO2', 'GPIO2', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('GPIO3', 'GPIO3', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('GPIO4', 'GPIO4'), gnd('GND1'), g3('GPIO17', 'GPIO17'), g3('GPIO27', 'GPIO27'), g3('GPIO22', 'GPIO22')],
-    [p5v('5V_1'), p5v('5V_2'), gnd('GND2'), g3('GPIO14', 'GPIO14 TXD', { caps: ['digital-out', 'uart-tx'] }), g3('GPIO15', 'GPIO15 RXD', { caps: ['digital-in', 'uart-rx'] }), g3('GPIO18', 'GPIO18'), gnd('GND3'), g3('GPIO23', 'GPIO23')],
-    'wiring', { usb: 'none', color: '#0b3d2e' },
-  ),
+  RPI_ZERO_GPIO,
+  RPI4_GPIO,
   TEENSY_41,
   MICROBIT_V2,
   simpleWiringBoard(

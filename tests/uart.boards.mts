@@ -88,7 +88,15 @@ function sketchFor(port: string, usb: boolean): string {
  */
 const NO_PIN_UART = new Set(['board.microbit']);
 
-const simulated = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'simulated' && !NO_PIN_UART.has(b.id));
+/**
+ * Boards whose UART pins are real but whose runtime has no way to use them:
+ * the Raspberry Pi headers run Python, and pyserial is not provided. They must
+ * not be offered to UART parts either.
+ */
+const NO_UART_RUNTIME = new Set(['board.rpi-zero-gpio', 'board.rpi4-gpio']);
+for (const id of NO_UART_RUNTIME) check(!BOARDS_WITH_UART.has(id), `${id} has no UART runtime, and no part is offered one`);
+
+const simulated = BOARD_DEFINITIONS.filter((b) => b.supportLevel === 'simulated' && !NO_PIN_UART.has(b.id) && !NO_UART_RUNTIME.has(b.id));
 check(
   simulated.every((b) => BOARDS_WITH_UART.has(b.id)),
   `every Simulated board is in BOARDS_WITH_UART (${simulated.filter((b) => !BOARDS_WITH_UART.has(b.id)).map((b) => b.id).join(', ') || 'all'})`,

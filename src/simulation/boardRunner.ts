@@ -169,6 +169,11 @@ export function runnerPinIndex(board: BoardDefinition, pinId: string): number | 
   if (board.architecture === 'renesas') return renesasPadIndex(pad);
   if (board.architecture === 'nrf52') return nrfPadIndex(pad);
   if (board.architecture === 'imxrt') return imxrtPadIndex(pad);
+  // The Pi header's GPIO pins, by BCM number.
+  if (board.architecture === 'linux') {
+    const m = /^GPIO(\d{1,2})$/.exec(pad);
+    return m && Number(m[1]) <= 27 ? Number(m[1]) : undefined;
+  }
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPadIndex(pad, espPads);
   return arduinoPinNumber(board, pinId);
@@ -352,7 +357,7 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
 
 /** Full-scale ADC reference for a board, in volts. */
 export function boardAdcReference(board: BoardDefinition): number {
-  if (board.architecture === 'rp2040' || board.architecture === 'samd' || board.architecture === 'sam' || board.architecture === 'stm32' || board.architecture === 'nrf52' || board.architecture === 'imxrt' || isEspRiscv(board)) return 3.3;
+  if (board.architecture === 'rp2040' || board.architecture === 'samd' || board.architecture === 'sam' || board.architecture === 'stm32' || board.architecture === 'nrf52' || board.architecture === 'imxrt' || board.architecture === 'linux' || isEspRiscv(board)) return 3.3;
   return 5;
 }
 
@@ -371,6 +376,8 @@ export function runnerPinCount(board: BoardDefinition): number {
   if (board.architecture === 'nrf52') return 48;
   // GPIO1-GPIO5, thirty-two pads each, on the i.MX RT.
   if (board.architecture === 'imxrt') return 160;
+  // BCM GPIO 0-27 on a Raspberry Pi header.
+  if (board.architecture === 'linux') return 28;
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPads;
   return avrProfileFor(board)?.pinCount ?? 0;

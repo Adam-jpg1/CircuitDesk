@@ -26,9 +26,50 @@
 
 import { uid, type CircuitProject, type CodeFile, type ComponentInstance } from '../types';
 
-/** A sketch is an .ino document. Headers and .cpp files are not sketches. */
+/**
+ * A sketch is a board's program: an .ino document, or a .py one for the boards
+ * that run Python (the Raspberry Pi headers). Headers and .cpp files are not
+ * sketches.
+ */
 export function isSketchFile(file: CodeFile): boolean {
-  return file.name.toLowerCase().endsWith('.ino');
+  const name = file.name.toLowerCase();
+  return name.endsWith('.ino') || name.endsWith('.py');
+}
+
+/** Which kind of program a board runs: an Arduino sketch or a Python script. */
+export type ProgramKind = 'ino' | 'py';
+
+export function programKindOf(file: CodeFile): ProgramKind {
+  return file.name.toLowerCase().endsWith('.py') ? 'py' : 'ino';
+}
+
+/** What a new Raspberry Pi script starts as: a blink, the hello world of GPIO. */
+export const PYTHON_STARTER = `# Raspberry Pi GPIO in Python. Pins are BCM GPIO numbers (GPIO17 is 17).
+from gpiozero import LED
+from time import sleep
+
+led = LED(17)
+
+while True:
+    led.on()
+    sleep(0.5)
+    led.off()
+    sleep(0.5)
+`;
+
+/**
+ * The document a board of `kind` should run: the first one of that kind, or a
+ * new one (main.py with a starter blink, or an empty sketch.ino) added to the
+ * project. A Pi is never handed an .ino, nor an Arduino board a .py.
+ */
+export function programFor(project: CircuitProject, kind: ProgramKind): { project: CircuitProject; sketchId: string } {
+  const existing = project.codeFiles.find((f) => isSketchFile(f) && programKindOf(f) === kind);
+  if (existing) return { project, sketchId: existing.id };
+  const file: CodeFile =
+    kind === 'py'
+      ? { id: uid('file'), name: uniqueSketchName(project, 'main.py'), content: PYTHON_STARTER, language: 'python' }
+      : { id: uid('file'), name: uniqueSketchName(project, 'sketch.ino'), content: '', language: 'cpp' };
+  return { project: { ...project, codeFiles: [...project.codeFiles, file] }, sketchId: file.id };
 }
 
 /** Every sketch document in the project, in project order. */
@@ -54,6 +95,10 @@ export function supportFiles(project: CircuitProject): CodeFile[] {
  */
 export function defaultSketchId(project: CircuitProject): string | undefined {
   return sketchDocuments(project)[0]?.id;
+}
+
+function defaultSketchIdOfKind(project: CircuitProject, kind: ProgramKind): string | undefined {
+  return project.codeFiles.find((f) => isSketchFile(f) && programKindOf(f) === kind)?.id;
 }
 
 /** The sketch id a board instance uses, resolved through the fallback. */
@@ -86,6 +131,8 @@ export function boardsUsingSketch(project: CircuitProject, sketchId: string): Co
 export function filesForBoard(project: CircuitProject, boardInstanceId: string): CodeFile[] {
   const sketch = sketchFor(project, boardInstanceId);
   const support = supportFiles(project);
+  // A Python script is the whole program; the .h/.cpp files are not its.
+  if (sketch && programKindOf(sketch) === 'py') return [sketch];
   if (!sketch) return support;
   return [{ ...sketch, name: 'sketch.ino' }, ...support];
 }
@@ -97,7 +144,27 @@ export function filesForBoard(project: CircuitProject, boardInstanceId: string):
  * feature has one sketch and no assignments, so every board ends up on it and
  * behaves exactly as it did. Nothing is renamed and no source is touched.
  */
-export function ensureSketchAssignments(project: CircuitProject): CircuitProject {
+export function ensureSketchAssignments(
+  project: CircuitProject,
+  /** The kind of program each board definition runs, when known. */
+  kindOf?: (definitionId: string) => ProgramKind,
+): CircuitProject {
+  if (kindOf) {
+    // Boards whose program is of the wrong kind (a Pi on an .ino, an Arduino
+    // board on a .py) are moved to one of the right kind, created if need be.
+    let p = project;
+    let moved = false;
+    const boardInstances = project.boardInstances.map((b) => {
+      const want = kindOf(b.definitionId);
+      const current = p.codeFiles.find((f) => f.id === (b.sketchId ?? defaultSketchIdOfKind(p, want)));
+      if (current && isSketchFile(current) && programKindOf(current) === want) return b.sketchId ? b : { ...b, sketchId: current.id };
+      const r = programFor(p, want);
+      p = r.project;
+      moved = true;
+      return { ...b, sketchId: r.sketchId };
+    });
+    if (moved || boardInstances.some((b, i) => b !== project.boardInstances[i])) project = { ...p, boardInstances };
+  }
   const sketches = sketchDocuments(project);
   // A project with no .ino at all gets one, which is what an empty project has
   // always been given.

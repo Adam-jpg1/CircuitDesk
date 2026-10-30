@@ -149,7 +149,7 @@ export function CodePanel() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 const name = (e.target as HTMLInputElement).value.trim();
-                if (/^[A-Za-z0-9_\-]{1,60}\.(ino|h|hpp|c|cpp)$/.test(name)) {
+                if (/^[A-Za-z0-9_\-]{1,60}\.(ino|h|hpp|c|cpp|py)$/.test(name)) {
                   s.addCodeFile(name);
                   setAddingFile(false);
                 }
@@ -164,7 +164,7 @@ export function CodePanel() {
       <div style={{ flex: 1, minHeight: 0 }}>
         <Editor
           path={`${project.id}/${file.name}`}
-          language="cpp"
+          language={file.name.toLowerCase().endsWith('.py') ? 'python' : 'cpp'}
           value={file.content}
           onChange={(value) => s.updateCodeFile(file.id, value ?? '')}
           onMount={onMount}

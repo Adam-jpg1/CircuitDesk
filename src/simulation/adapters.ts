@@ -31,7 +31,7 @@ export interface FirmwareArtifact {
 }
 
 export interface BoardSimulatorAdapter {
-  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m';
+  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python';
   /**
    * Processor profiles this adapter genuinely executes.
    *
@@ -43,7 +43,7 @@ export interface BoardSimulatorAdapter {
    */
   processorProfileIds: string[];
   /** The artifact format this engine executes. */
-  firmwareFormat: 'intel-hex' | 'uf2' | 'esp-image' | 'bin';
+  firmwareFormat: 'intel-hex' | 'uf2' | 'esp-image' | 'bin' | 'python';
   /** Lazily loads the engine and creates a runner with the board's own profile. */
   createRunner(firmware: FirmwareArtifact, board: BoardDefinition): Promise<BoardRunner>;
 }
@@ -299,7 +299,22 @@ const armv7mAdapter: BoardSimulatorAdapter = {
   },
 };
 
-const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32c3Adapter, esp32c6Adapter, samd21Adapter, armv7mAdapter];
+/**
+ * The Raspberry Pi headers: the "artifact" is main.py itself, checked when it
+ * was built, and the runner interprets it on simulated time.
+ */
+const pythonAdapter: BoardSimulatorAdapter = {
+  engine: 'python',
+  processorProfileIds: ['proc.rpi-gpio'],
+  firmwareFormat: 'python',
+  async createRunner(firmware, board) {
+    assertFormat(this, firmware, board);
+    const { PiRunner } = await import('./python/piRunner');
+    return new PiRunner(new TextDecoder().decode(decodeBase64Firmware(firmware.data)));
+  },
+};
+
+const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32c3Adapter, esp32c6Adapter, samd21Adapter, armv7mAdapter, pythonAdapter];
 
 /**
  * The adapter for a board, or null when the board is not genuinely simulated.

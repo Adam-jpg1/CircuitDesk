@@ -74,6 +74,20 @@ for (const board of simulated) {
   }
   const pad = runnerPinIndex(board, pin.id)!;
   const arduinoPin = sketchPin(board, pin, pad);
+  // The Raspberry Pi headers run Python: the same blink and tick, in gpiozero.
+  const python = board.simulation?.engine === 'python';
+  const script = `from gpiozero import LED
+import time
+led = LED(${pad})
+n = 0
+while True:
+    led.on()
+    time.sleep(0.1)
+    led.off()
+    time.sleep(0.1)
+    print("tick", n)
+    n += 1
+`;
   const sketch = `void setup() {
   pinMode(${arduinoPin}, OUTPUT);
   Serial.begin(115200);
@@ -99,7 +113,7 @@ void loop() {
   p.boardInstances = [b];
   p.componentInstances = [r, led];
   p.connections = [wire(b, pin.id, r, 'p1'), wire(r, 'p2', led, 'anode'), wire(led, 'cathode', b, ground.id)];
-  p.codeFiles = [code('sketch.ino', sketch)];
+  p.codeFiles = [python ? code('main.py', script) : code('sketch.ino', sketch)];
 
   simulationController.stop();
   const report = await simulationController.build(p);

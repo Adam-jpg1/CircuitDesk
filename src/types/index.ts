@@ -80,7 +80,8 @@ export type BoardArchitecture =
   | 'other';
 
 export interface BoardCompilerInfo {
-  provider: 'arduino-cli' | 'none';
+  /** 'python': a script the browser checks and the Raspberry Pi runtime runs; never sent to the compiler service. */
+  provider: 'arduino-cli' | 'python' | 'none';
   fqbn?: string;
   /** Core the compiler service must have installed (e.g. "arduino:avr"). */
   requiredCore?: string;
@@ -94,7 +95,7 @@ export interface BoardCompilerInfo {
 }
 
 export interface BoardSimulationInfo {
-  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'none';
+  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python' | 'none';
   supported: boolean;
   /** APIs genuinely exercised by automated tests for this board. */
   supportedApis: string[];
@@ -229,7 +230,7 @@ export interface CodeFile {
   id: string;
   name: string;
   content: string;
-  language: 'cpp' | 'plaintext';
+  language: 'cpp' | 'python' | 'plaintext';
 }
 
 export interface TestInputEvent {
@@ -387,7 +388,7 @@ export interface CompileResult {
    * instruction.
    */
   firmware?: {
-    format: 'intel-hex' | 'uf2' | 'bin' | 'esp-image';
+    format: 'intel-hex' | 'uf2' | 'bin' | 'esp-image' | 'python';
     data: string;
     regions?: { offset: number; data: string }[];
   };

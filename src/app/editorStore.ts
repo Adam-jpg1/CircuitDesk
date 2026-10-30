@@ -11,7 +11,7 @@ import {
 } from '../types';
 import { loadProject, saveProject } from '../project/projectService';
 import { resolveDefinition } from '../project/partsRegistry';
-import { assignSketch, createSeparateSketch, renameSketch, sketchIdFor } from '../project/sketches';
+import { assignSketch, createSeparateSketch, programFor, renameSketch, sketchIdFor } from '../project/sketches';
 import { loadSetting, saveSetting, DEFAULT_PANEL_SIZES, type PanelSizes } from '../persistence/settings';
 import { renderProjectThumbnail } from '../canvas/thumbnail';
 
@@ -372,8 +372,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
         simulationState: {},
       };
       get().mutateCircuit((p) => {
-        if (def.isBoard) p.boardInstances.push(inst);
-        else p.componentInstances.push(inst);
+        if (def.isBoard) {
+          // A board runs a program of its own kind: a Raspberry Pi header a
+          // .py script, every other board an .ino sketch. The first of that
+          // kind in the project, or a new one if there is none.
+          const program = programFor(p, def.compiler?.provider === 'python' ? 'py' : 'ino');
+          p.codeFiles = program.project.codeFiles;
+          inst.sketchId = program.sketchId;
+          p.boardInstances.push(inst);
+        } else p.componentInstances.push(inst);
       });
       set({ selection: { componentIds: [inst.id], connectionIds: [] } });
       return inst.id;
@@ -518,7 +525,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     addCodeFile(name) {
       const { project } = get();
       if (!project) return;
-      const file: CodeFile = { id: uid('file'), name, content: '', language: 'cpp' };
+      const file: CodeFile = { id: uid('file'), name, content: '', language: name.toLowerCase().endsWith('.py') ? 'python' : 'cpp' };
       set({
         project: { ...project, codeFiles: [...project.codeFiles, file] },
         activeFileId: file.id,

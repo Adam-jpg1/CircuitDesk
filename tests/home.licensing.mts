@@ -233,6 +233,11 @@ const parsed = parseNotices(NOTICES);
         'board.nano-33-ble',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
+        // Simulated on the strength of tests/pi.runtime.mts and
+        // tests/python.interpreter.mts: main.py run by CircuitDesk's Python
+        // interpreter with RPi.GPIO and gpiozero on the header's GPIO.
+        'board.rpi-zero-gpio',
+        'board.rpi4-gpio',
         'board.seeed-xiao',
         'board.seeed-xiao-rp2040',
         // Simulated on the strength of tests/stm32.runtime.mts: STM32duino

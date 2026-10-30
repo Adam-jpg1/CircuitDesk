@@ -431,6 +431,36 @@ const TEENSY41_LIMITATION =
   'the other I2C and SPI ports, IntervalTimer and tone(), EEPROM, DMA, Ethernet, the SD card slot, the external PSRAM ' +
   'and audio are not simulated.';
 
+const PI_SIM_APIS = [
+  'Python 3: functions, classes, loops, try/except, comprehensions, f-strings',
+  'RPi.GPIO: setmode (BCM, BOARD), setup with pull-ups, output, input, PWM, add_event_detect, wait_for_edge, cleanup',
+  'gpiozero: LED, PWMLED, Button (when_pressed / when_released / when_held), Buzzer, MotionSensor, LineSensor, Servo, AngularServo',
+  'time.sleep / time.time / time.monotonic on simulated time, math, random, signal.pause',
+  'print() and input() on the Serial Monitor',
+];
+
+const PI_RUNTIME = {
+  processorProfileId: 'proc.rpi-gpio',
+  compileProfileId: 'compile.python-pi',
+  runtimeProfileId: 'runtime.python-pi',
+  compiler: {
+    provider: 'python' as const,
+    fqbn: 'python:rpi:gpio',
+    supported: true,
+    note: 'main.py is checked for syntax in the browser; nothing is compiled or sent to the server.',
+  },
+  simulation: {
+    engine: 'python' as const,
+    supported: true,
+    supportedApis: PI_SIM_APIS,
+    supportedPeripherals: ['GPIO 0-27 with pull-ups and pull-downs', 'software PWM', 'edge detection with bounce time'],
+  },
+  limitation:
+    "Runs main.py's GPIO in CircuitDesk's own Python interpreter on simulated time. It is not a Linux emulator, so " +
+    'only the modules listed are available: no pip packages, files, networking, threads of your own, or I2C, SPI and ' +
+    'UART from Python (smbus, spidev, pyserial). Statements take simulated time as on a real Pi, so busy loops still let the clock run.',
+};
+
 const samd21Compiler = (fqbn: string): BoardCompilerInfo => ({
   provider: 'arduino-cli',
   fqbn,
@@ -1086,14 +1116,12 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     manufacturer: 'Raspberry Pi',
     architecture: 'linux',
     aliases: ['raspberry-pi-zero'],
-    limitation:
-      'Linux boards are not emulated. No behavioral GPIO runtime is implemented yet, so this stays at wiring level — it is never claimed as simulated.',
+    ...PI_RUNTIME,
   },
   'board.rpi4-gpio': {
     manufacturer: 'Raspberry Pi',
     architecture: 'linux',
     aliases: ['raspberry-pi-4', 'raspberry-pi-5'],
-    limitation:
-      'Linux boards are not emulated. No behavioral GPIO runtime is implemented yet, so this stays at wiring level — it is never claimed as simulated.',
+    ...PI_RUNTIME,
   },
 };

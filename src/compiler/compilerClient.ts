@@ -69,6 +69,7 @@ export async function compileProjectCode(
   },
   syntaxOnly = false,
 ): Promise<CompileResult> {
+  if (target.fqbn.startsWith('python:')) return checkPython(project, target);
   const body = {
     projectId: project.id,
     boardId: target.boardId,
@@ -189,4 +190,48 @@ export async function fetchCompilerCapabilities(): Promise<CompilerCapabilities>
     // able to tell them apart to say anything useful.
     return { status: 'unreachable', missingRequiredCores: [], driftedCores: [], cores: [], targets: [] };
   }
+}
+
+/**
+ * A Raspberry Pi header's "build": main.py is parsed here, in the browser, and
+ * a syntax error is reported the way a compiler error is. Nothing is sent to
+ * the compiler service — a Python script is never compiled or run on the server.
+ */
+async function checkPython(
+  project: CircuitProject,
+  target: { boardId: string; stampBoardId?: string; fqbn: string; files?: { name: string; content: string }[] },
+): Promise<CompileResult> {
+  const started = Date.now();
+  const files = target.files ?? project.codeFiles;
+  const main = files.find((f) => f.name.toLowerCase().endsWith('.py'));
+  const base = { toolchain: 'none' as const, toolchainVersion: 'python', stdout: '', boardId: target.stampBoardId ?? target.boardId, fqbn: target.fqbn };
+  if (!main) {
+    return {
+      ...base, success: false, stderr: '', diagnostics: [], durationMs: 0,
+      error: 'This board runs a Python script, and the project has no .py file for it. Add main.py.',
+    };
+  }
+  const { Interpreter } = await import('../simulation/python/interpreter');
+  const err = Interpreter.check(main.content);
+  if (err) {
+    return {
+      ...base,
+      success: false,
+      stderr: `  File "${main.name}", line ${err.line}\nSyntaxError: ${err.message}`,
+      diagnostics: [{ file: main.name, line: err.line, column: err.col || 1, severity: 'error', message: `SyntaxError: ${err.message}` }],
+      durationMs: Date.now() - started,
+      error: `SyntaxError: ${err.message} (line ${err.line})`,
+    };
+  }
+  const bytes = new TextEncoder().encode(main.content);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return {
+    ...base,
+    success: true,
+    stderr: '',
+    diagnostics: [],
+    durationMs: Date.now() - started,
+    firmware: { format: 'python', data: btoa(bin) },
+  };
 }

@@ -34,7 +34,7 @@ import { TIMER_FUNCTION_E, TIMER_FUNCTION_F } from '../simulation/samd21/timers'
  * family is carried alongside as `boardArchitecture` rather than derived by
  * string matching, so the two vocabularies stay explicitly linked.
  */
-export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52' | 'imxrt';
+export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52' | 'imxrt' | 'bcm';
 
 export interface PeripheralController {
   /** Controller id as the chip's own documentation names it: `i2c0`, `usart1`. */
@@ -534,6 +534,30 @@ const IMXRT1062: ProcessorProfile = {
   ],
 };
 
+const piGpio = Array.from({ length: 28 }, (_, i) => `GPIO${i}`);
+
+const RPI_GPIO: ProcessorProfile = {
+  id: 'proc.rpi-gpio',
+  name: 'Raspberry Pi GPIO header (BCM GPIO 0-27)',
+  architecture: 'bcm',
+  boardArchitecture: 'linux',
+  vendor: 'Raspberry Pi',
+  clockHz: 1_000_000_000,
+  flashBytes: 0,
+  ramBytes: 0,
+  pads: piGpio,
+  pwmPads: piGpio,
+  uarts: [],
+  i2c: [],
+  spi: [],
+  interruptPads: piGpio,
+  logicVolts: 3.3,
+  notModelled: [
+    'Linux itself: the script runs in CircuitDesk\'s Python interpreter, not on an emulated Pi',
+    'I2C, SPI and UART from Python (smbus, spidev, pyserial), hardware PWM, the camera, audio, networking and files',
+  ],
+};
+
 const ra4m1Pads = [
   ...['P000', 'P001', 'P002', 'P003', 'P004', 'P010', 'P011', 'P012', 'P013', 'P014', 'P015'],
   ...Array.from({ length: 13 }, (_, i) => `P1${String(i).padStart(2, '0')}`),
@@ -636,6 +660,7 @@ export const PROCESSOR_PROFILES: ProcessorProfile[] = [
   NRF52833,
   NRF52840,
   IMXRT1062,
+  RPI_GPIO,
 ];
 
 export function processorProfile(id: string): ProcessorProfile | undefined {

@@ -19,7 +19,7 @@
 import type { ProcessorArchitecture } from './processorProfiles';
 
 /** Artifact formats the pipeline system can represent. */
-export type ArtifactFormat = 'intel-hex' | 'uf2' | 'bin' | 'elf' | 'esp-image';
+export type ArtifactFormat = 'intel-hex' | 'uf2' | 'bin' | 'elf' | 'esp-image' | 'python';
 
 export interface CompileProfile {
   id: string;
@@ -31,7 +31,7 @@ export interface CompileProfile {
    * so only against the server's own allowlist of targets. `none` is a real
    * choice, not a failure: a board can be wiring-only and still be a board.
    */
-  adapter: 'arduino-cli' | 'none';
+  adapter: 'arduino-cli' | 'python' | 'none';
   /** Processor profiles this compile profile targets. */
   processorProfileIds: string[];
   /** arduino-cli core the compiler service must have installed. */
@@ -84,7 +84,7 @@ export interface RuntimeProfile {
   id: string;
   name: string;
   /** The emulator that executes the artifact. */
-  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'none';
+  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python' | 'none';
   /** Processor profiles this runtime can genuinely execute. */
   processorProfileIds: string[];
   /** Formats the engine accepts. An artifact of any other format is refused. */
@@ -135,6 +135,16 @@ export const COMPILE_PROFILES: CompileProfile[] = [
     serverTargetId: 'board.teensy41',
     artifactFormat: 'bin',
     description: 'The Teensy 4 core for the Teensy 4.1 at its 60 MHz setting. Emits the flash image from 0x60000000, boot header and image vector table included.',
+  },
+  {
+    id: 'compile.python-pi',
+    name: 'Python (Raspberry Pi GPIO)',
+    adapter: 'python',
+    processorProfileIds: ['proc.rpi-gpio'],
+    fqbn: 'python:rpi:gpio',
+    serverTargetId: 'board.rpi-gpio',
+    artifactFormat: 'python',
+    description: 'A Python script for the Pi\'s GPIO header. Checked for syntax in the browser; nothing is sent to the compiler service.',
   },
   {
     id: 'compile.renesas-uno',
@@ -291,6 +301,22 @@ const AVR_APIS = [
 ];
 
 export const RUNTIME_PROFILES: RuntimeProfile[] = [
+  {
+    id: 'runtime.python-pi',
+    name: 'CircuitDesk Python (Raspberry Pi GPIO)',
+    engine: 'python',
+    processorProfileIds: ['proc.rpi-gpio'],
+    acceptsFormats: ['python'],
+    supportedApis: [
+      'RPi.GPIO: setmode, setup, output, input, PWM, add_event_detect, wait_for_edge, cleanup',
+      'gpiozero: LED, PWMLED, Button, Buzzer, MotionSensor, LineSensor, Servo, AngularServo, digital devices',
+      'time, math, random, signal.pause, print and input on the Serial Monitor',
+    ],
+    supportedPeripherals: ['GPIO 0-27', 'software PWM', 'edge detection'],
+    description:
+      "Runs a Raspberry Pi GPIO script in CircuitDesk's own Python interpreter on simulated time. Not a Linux emulator: " +
+      'the script\'s GPIO is what is simulated, through RPi.GPIO and gpiozero.',
+  },
   {
     id: 'runtime.armv7m-imxrt',
     name: 'CircuitDesk ARMv7-M (i.MX RT1062)',

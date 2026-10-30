@@ -33,7 +33,7 @@ export function wire(
 }
 
 export function code(name: string, content: string): CodeFile {
-  return { id: uid('file'), name, content, language: 'cpp' };
+  return { id: uid('file'), name, content, language: name.toLowerCase().endsWith('.py') ? 'python' : 'cpp' };
 }
 
 /**

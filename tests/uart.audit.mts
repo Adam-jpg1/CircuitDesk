@@ -74,6 +74,10 @@ const UART_SUPPORT: Record<string, { tx: boolean; rx: boolean; note: string }> =
   // there is nothing on the board a GPS or a modem could be wired to.
   'board.nano-33-ble': { tx: true, rx: true, note: 'nRF52840 UARTE0 behind Serial1 on TX1/RX0 (EasyDMA, with PPI); Serial is native USB' },
   'board.teensy41': { tx: true, rx: true, note: 'i.MX RT1062 LPUART6 behind Serial1 on pins 0/1; Serial is native USB' },
+  // GPIO14/15 are the Pi's UART, but the Python runtime has no serial library
+  // (pyserial), so no part can be attached to them yet.
+  'board.rpi-zero-gpio': { tx: false, rx: false, note: 'UART pins GPIO14/15 exist, but the Python runtime offers no serial library to drive them' },
+  'board.rpi4-gpio': { tx: false, rx: false, note: 'UART pins GPIO14/15 exist, but the Python runtime offers no serial library to drive them' },
   'board.microbit': { tx: false, rx: false, note: 'nRF52833 UARTE0 behind Serial, wired only to the USB interface chip; no UART on the edge connector' },
 };
 

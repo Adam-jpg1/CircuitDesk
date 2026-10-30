@@ -130,6 +130,11 @@ function projectWith(boardDefId: string): CircuitProject {
         'board.nano-33-ble',
         'board.raspberry-pi-pico',
         'board.raspberry-pi-pico-w',
+        // Simulated on the strength of tests/pi.runtime.mts and
+        // tests/python.interpreter.mts: main.py run by CircuitDesk's Python
+        // interpreter with RPi.GPIO and gpiozero on the header's GPIO.
+        'board.rpi-zero-gpio',
+        'board.rpi4-gpio',
         'board.seeed-xiao',
         // Simulated on the strength of tests/boards.sameChip.mts: an RP2040
         // built through the Arduino-Pico generic target, with the XIAO's own
@@ -245,9 +250,16 @@ function projectWith(boardDefId: string): CircuitProject {
   check(esp32.metadata.variant === 'esp32' && s3.metadata.variant === 'esp32s3' && c3.metadata.variant === 'esp32c3', 'ESP32 variants are tracked distinctly (esp32/esp32s3/esp32c3)');
   check(nodemcu.architecture === 'esp8266' && Number(nodemcu.metadata.logicVoltage) === 3.3, 'ESP8266: own architecture, 3.3 V');
   check(!esp32.compiler?.supported && !esp32.simulation?.supported, 'ESP32 honestly reports no compile/simulation support');
-  // Linux boards never claim simulation
-  const rpi = getBoardDefinition('board.rpi4-gpio')!;
-  check(rpi.architecture === 'linux' && !rpi.simulation?.supported && rpi.supportLevel !== 'simulated', 'Linux SBC header: never claimed simulated (no behavioral runtime implemented)');
+  // The Pi headers are simulated by running their Python GPIO script — and say
+  // plainly that this is not Linux being emulated.
+  for (const id of ['board.rpi-zero-gpio', 'board.rpi4-gpio']) {
+    const rpi = getBoardDefinition(id)!;
+    check(
+      rpi.architecture === 'linux' && rpi.simulation?.engine === 'python' && rpi.compiler?.provider === 'python' &&
+        /not a Linux emulator/.test(String(rpi.metadata.limitation ?? '')) && /Not a Linux emulator/.test(rpi.description ?? ''),
+      `${rpi.name}: simulated through its Python script, and never described as an emulated Linux board`,
+    );
+  }
 }
 
 // ---------- 5. No Uno fallbacks anywhere ----------

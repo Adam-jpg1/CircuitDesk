@@ -138,7 +138,10 @@ export function normalizeProject(raw: unknown): CircuitProject {
   // Sketch assignments. A project saved before per-board sketches has one
   // source and no assignments; every board is put on it, which is exactly what
   // it was already doing. Idempotent, so a new-format project is untouched.
-  Object.assign(project, ensureSketchAssignments(project));
+  Object.assign(
+    project,
+    ensureSketchAssignments(project, (definitionId) => (resolveDefinition(definitionId, project)?.compiler?.provider === 'python' ? 'py' : 'ino')),
+  );
   // Drop connections that reference missing instances or pins.
   const instMap = new Map(
     [...project.boardInstances, ...project.componentInstances].map((i) => [i.id, i] as const),
