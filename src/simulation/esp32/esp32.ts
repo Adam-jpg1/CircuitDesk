@@ -15,8 +15,9 @@
 // two cores are interleaved on the same timeline. A core in WAITI costs
 // nothing — the clock jumps to the next thing that can wake it.
 
-import { Xtensa, type XtensaBus, type XtensaConfig } from '../xtensa/xtensa';
-import type { InterruptingPeripheral, Peripheral, SimulatedClock } from '../espRiscv/peripheral';
+import type { XtensaConfig } from '../xtensa/xtensa';
+import { EspXtensaMachine } from '../xtensa/espXtensaMachine';
+import type { Peripheral, SimulatedClock } from '../espRiscv/peripheral';
 import { EspUart, type UartLayout } from '../espRiscv/uart';
 import type { SerialNorFlash } from '../esp32c3/spiFlash';
 import { FLASH_COMMAND } from '../esp32c3/spiFlash';
@@ -26,13 +27,11 @@ import { Esp32TimerGroup } from './timg';
 import { Esp32Ledc } from './ledc';
 import { Esp32Spi } from './spi';
 import { Esp32Sens } from './adc';
-import { EspI2c, type EspBusPorts } from '../espRiscv/i2c';
-import { ESP32_ROM, ESP32_ROM_END, REENT_TRAMPOLINE, REENT_TRAMPOLINE_CODE, ESP32_ROM_START, createRomState, esp32MacCrc8, type Esp32RomHost, type Esp32RomState } from './rom';
+import { EspI2c } from '../espRiscv/i2c';
+import { ESP32_ROM, ESP32_ROM_END, REENT_TRAMPOLINE, REENT_TRAMPOLINE_CODE, ESP32_ROM_START, esp32MacCrc8, type Esp32RomHost } from './rom';
 
 /** Interrupt level of each CPU interrupt number on the ESP32 (XCHAL_INT*_LEVEL). */
 export const ESP32_INT_LEVEL = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 7, 3, 5, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 3, 4, 3, 4, 5];
-/** CPU interrupts wired inside the core (timers, software, profiling): not routable. */
-const INTERNAL_INTERRUPTS = (1 << 6) | (1 << 7) | (1 << 11) | (1 << 15) | (1 << 16) | (1 << 29);
 export const ESP32_SOURCE = {
   tg0T0: 14, tg0T1: 15, tg0Wdt: 16, tg0Lact: 17, tg1T0: 18, tg1T1: 19, tg1Wdt: 20, tg1Lact: 21,
   gpio: 22, fromCpu0: 24, spi2: 30, spi3: 31, uart0: 34, uart1: 35, uart2: 36, ledc: 43, rtcCore: 46,
@@ -84,16 +83,6 @@ const MMU_INVALID = 0x100;
 /** Where the ROM leaves each CPU's stack before the application sets its own. */
 const PRO_ROM_STACK = 0x3ffe3f00;
 const APP_ROM_STACK = 0x3ffe7f00;
-
-export class UnimplementedEsp32RomError extends Error {
-  constructor(readonly address: number, readonly caller: number) {
-    super(
-      `The sketch called the ESP32 mask ROM at 0x${address.toString(16)} (from 0x${caller.toString(16)}), ` +
-        'which this simulator does not provide.',
-    );
-    this.name = 'UnimplementedEsp32RomError';
-  }
-}
 
 /** Plain register storage, for blocks whose registers only need to read back. */
 class Store implements Peripheral {
@@ -225,22 +214,11 @@ class Efuse extends Store {
   }
 }
 
-interface CoreSlot {
-  cpu: Xtensa;
-  /** Simulated nanoseconds this core has reached. */
-  ns: number;
-  running: boolean;
-  /** Set while a ROM delay holds the core. */
-  stalledUntil: number;
-  /** Interrupt matrix: CPU line each source is routed to. */
-  map: Uint8Array;
-}
-
 export interface Esp32Options {
   onUnclaimedMmio?: (address: number, write: boolean, value: number) => void;
 }
 
-export class Esp32Machine implements SimulatedClock {
+export class Esp32Machine extends EspXtensaMachine {
   readonly dram = new Uint8Array(DRAM_END - DRAM_BASE);
   readonly iram = new Uint8Array(IRAM_END - IRAM_BASE);
   readonly rtcFast = new Uint8Array(RTC_SIZE);
@@ -248,45 +226,22 @@ export class Esp32Machine implements SimulatedClock {
   /** Flash MMU: 256 entries per CPU; [cpu * 256 + entry] = flash byte offset of the page, or -1. */
   private readonly pageBase = new Int32Array(512).fill(-1);
   private readonly mmuRaw = new Uint32Array(512).fill(MMU_INVALID);
-  readonly slots: CoreSlot[];
-  readonly romState: Esp32RomState = createRomState();
   readonly gpio: Esp32Gpio;
   readonly uarts: EspUart[];
   readonly timerGroups: Esp32TimerGroup[];
   readonly sens = new Esp32Sens();
   private readonly dport = new Store('dport', 0x3ff00000, 0x1000);
   private readonly rtc: RtcCntl;
-  private readonly peripherals: Peripheral[] = [];
-  private readonly interrupting: InterruptingPeripheral[] = [];
   private readonly fallback = new Map<number, number>();
   private readonly sparse = new Map<number, Uint8Array>();
-  private interruptsDirty = true;
-  private nextCheckNs: number | undefined;
-  private image: EspApplicationImage | null = null;
   private appBootAddress = 0;
   private appReleased = false;
-  private readonly externalEvents: { nextEventNanos(): number | undefined }[] = [];
-  /** Where I2C0/I2C1 and HSPI/VSPI reach the device models; the runner fills these in. */
-  readonly ports: EspBusPorts = { i2c: null, spi: null };
-  /** Bytes the ROM console printed before the UART driver took over. */
-  onConsoleByte: ((byte: number) => void) | null = null;
-  /** Set when the firmware stops in a way it cannot recover from. */
-  fault: string | null = null;
-  timeLimitNanos: number | undefined;
-  /** The core whose instruction is executing, for bus accesses that depend on it. */
-  private current = 0;
-
   constructor(
-    readonly flash: SerialNorFlash,
+    flash: SerialNorFlash,
     private readonly options: Esp32Options = {},
   ) {
-    this.slots = [0xcdcd, 0xabab].map((prid, i) => {
-      const cpu = new Xtensa(this.busFor(i), esp32CoreConfig(prid));
-      cpu.romStart = ESP32_ROM_START;
-      cpu.romEnd = ESP32_ROM_END;
-      cpu.rom = (pc) => this.romCall(i, pc);
-      return { cpu, ns: 0, running: false, stalledUntil: 0, map: new Uint8Array(ESP32_SOURCE.count).fill(16) };
-    });
+    super(flash, [esp32CoreConfig(0xcdcd), esp32CoreConfig(0xabab)], ESP32_SOURCE.count, { start: ESP32_ROM_START, end: ESP32_ROM_END }, ESP32_ROM);
+    this.romCode.push({ start: REENT_TRAMPOLINE, end: REENT_TRAMPOLINE + REENT_TRAMPOLINE_CODE.length });
     this.gpio = new Esp32Gpio(this, ESP32_SOURCE.gpio);
     this.gpio.onInterruptChange = () => (this.interruptsDirty = true);
     this.rtc = new RtcCntl(this);
@@ -311,24 +266,10 @@ export class Esp32Machine implements SimulatedClock {
     ]) this.addPeripheral(p);
   }
 
-  addPeripheral(p: Peripheral): void {
-    this.peripherals.push(p);
-    if (typeof (p as unknown as InterruptingPeripheral).assertedInterruptSources === 'function') this.interrupting.push(p as unknown as InterruptingPeripheral);
-    this.interruptsDirty = true;
-  }
-
-  addEventSource(source: { nextEventNanos(): number | undefined }): void {
-    this.externalEvents.push(source);
-  }
-
-  interruptSourceChanged(): void {
-    this.interruptsDirty = true;
-  }
-
   // ------------------------------------------------------------- clocks
 
   /** The CPU clock the firmware selected. */
-  get cpuMhz(): number {
+  override get cpuMhz(): number {
     const sel = (this.rtc.readUint32(0x70) >>> 27) & 3;
     if (sel === 1) return [80, 160, 240, 240][this.dport.readUint32(0x3c) & 3];
     // XTAL, divided by APB_CTRL's pre-divider.
@@ -347,18 +288,9 @@ export class Esp32Machine implements SimulatedClock {
     return (3 << 20) | (39 << 12);
   }
 
-  get nanos(): number {
-    const [pro, app] = this.slots;
-    return app.running ? Math.min(pro.ns, app.ns) : pro.ns;
-  }
-
-  get micros(): number {
-    return this.nanos / 1000;
-  }
-
   // ------------------------------------------------------------- loading
 
-  loadImage(image: EspApplicationImage): void {
+  override loadImage(image: EspApplicationImage): void {
     this.image = image;
     this.dram.fill(0);
     this.iram.fill(0);
@@ -396,33 +328,10 @@ export class Esp32Machine implements SimulatedClock {
     );
     this.appBootAddress = 0;
     this.appReleased = false;
-    for (const slot of this.slots) {
-      slot.ns = 0;
-      slot.running = false;
-      slot.stalledUntil = 0;
-      slot.map.fill(16);
-      slot.cpu.cycles = 0;
-    }
+    this.resetCores();
     this.startCore(0, image.entryPoint, PRO_ROM_STACK);
     this.fault = null;
     this.interruptsDirty = true;
-  }
-
-  reset(): void {
-    if (this.image) this.loadImage(this.image);
-  }
-
-  private startCore(i: number, pc: number, sp: number): void {
-    const slot = this.slots[i];
-    slot.cpu.reset(pc);
-    // As the ROM leaves it: user vector mode, window overflow enabled, level 0.
-    slot.cpu.ps = 0x00040020;
-    slot.cpu.setA(1, sp);
-    slot.running = true;
-    if (i === 1) {
-      slot.ns = this.slots[0].ns;
-      slot.cpu.cycles = this.slots[0].cpu.cycles;
-    }
   }
 
   // ------------------------------------------------------------- flash MMU
@@ -453,26 +362,8 @@ export class Esp32Machine implements SimulatedClock {
 
   // ------------------------------------------------------------- the bus
 
-  private busFor(cpu: number): XtensaBus {
-    return {
-      read8: (a) => this.read8(a, cpu),
-      read16: (a) => this.read8(a, cpu) | (this.read8(a + 1, cpu) << 8),
-      read32: (a) => this.read32(a, cpu),
-      write8: (a, v) => this.write8(a, v),
-      write16: (a, v) => {
-        if (this.isMmio(a)) this.mmioWrite(a, v, 2);
-        else {
-          this.write8(a, v);
-          this.write8(a + 1, v >> 8);
-        }
-      },
-      write32: (a, v) => this.write32(a, v),
-      fetch: (a) => this.fetch(a, cpu),
-    };
-  }
-
   /** Three instruction bytes, with the two places code runs from taken directly. */
-  private fetch(a: number, cpu: number): number {
+  protected override fetch(a: number, cpu: number): number {
     a >>>= 0;
     if (a >= IROM_BASE && a < IROM_END && (a & 0xffff) <= 0xfffd) {
       const base = this.pageBase[(cpu & 1) * 256 + 64 + ((a & 0x3fffff) >>> 16)];
@@ -495,7 +386,7 @@ export class Esp32Machine implements SimulatedClock {
     return this.flash.bytes[(base + (a & 0xffff)) % this.flash.bytes.length];
   }
 
-  read8(a: number, cpu = this.current): number {
+  override read8(a: number, cpu = this.current): number {
     a >>>= 0;
     if (a >= IROM_BASE && a < IROM_END) return this.flashByte(a, cpu, 64 + ((a & 0x3fffff) >>> 16));
     if (a >= IRAM_BASE && a < IRAM_END) return this.iram[a - IRAM_BASE];
@@ -508,7 +399,7 @@ export class Esp32Machine implements SimulatedClock {
     return this.sparse.get(a >>> 16)?.[a & 0xffff] ?? 0;
   }
 
-  read32(a: number, cpu = this.current): number {
+  override read32(a: number, cpu = this.current): number {
     a >>>= 0;
     if (a >= DRAM_BASE && a + 3 < DRAM_END) {
       const o = a - DRAM_BASE;
@@ -519,7 +410,15 @@ export class Esp32Machine implements SimulatedClock {
     return (this.read8(a, cpu) | (this.read8(a + 1, cpu) << 8) | (this.read8(a + 2, cpu) << 16) | (this.read8(a + 3, cpu) << 24)) >>> 0;
   }
 
-  write8(a: number, v: number): void {
+  override write16(a: number, v: number): void {
+    if (this.isMmio(a)) this.mmioWrite(a, v, 2);
+    else {
+      this.write8(a, v);
+      this.write8(a + 1, v >> 8);
+    }
+  }
+
+  override write8(a: number, v: number): void {
     a >>>= 0;
     v &= 0xff;
     if (a >= DRAM_BASE && a < DRAM_END) this.dram[a - DRAM_BASE] = v;
@@ -536,7 +435,7 @@ export class Esp32Machine implements SimulatedClock {
     }
   }
 
-  write32(a: number, v: number): void {
+  override write32(a: number, v: number): void {
     a >>>= 0;
     if (this.isMmio(a)) {
       this.mmioWrite(a, v, 4);
@@ -647,11 +546,6 @@ export class Esp32Machine implements SimulatedClock {
     return v >>> 0;
   }
 
-  setInterruptMap(cpu: number, source: number, line: number): void {
-    if (source >= 0 && source < ESP32_SOURCE.count) this.slots[cpu & 1].map[source] = line & 0x1f;
-    this.interruptsDirty = true;
-  }
-
   setAppCpuBootAddress(address: number): void {
     this.appBootAddress = address >>> 0;
     this.maybeStartApp();
@@ -665,60 +559,16 @@ export class Esp32Machine implements SimulatedClock {
     this.startCore(1, this.appBootAddress, APP_ROM_STACK);
   }
 
-  // ------------------------------------------------------------- interrupts
-
-  private asserted: number[] = [];
-
-  private refreshInterrupts(): void {
-    this.interruptsDirty = false;
-    const asserted: number[] = [];
-    let soonest: number | undefined;
-    for (const p of this.interrupting) {
-      for (const s of p.assertedInterruptSources()) asserted.push(s);
-      const at = p.nextInterruptChangeNanos?.();
-      if (at !== undefined && (soonest === undefined || at < soonest)) soonest = at;
-    }
+  protected override softwareSources(): number[] {
     // DPORT_CPU_INTR_FROM_CPU_0..3: the cross-core (and self) software interrupts.
-    for (let n = 0; n < 4; n++) if (this.dport.readUint32(0xdc + n * 4) & 1) asserted.push(ESP32_SOURCE.fromCpu0 + n);
-    this.asserted = asserted;
-    this.nextCheckNs = soonest;
-    for (const slot of this.slots) {
-      let lines = 0;
-      for (const s of asserted) {
-        const line = slot.map[s];
-        if (line < 32 && !((INTERNAL_INTERRUPTS >>> line) & 1)) lines |= 1 << line;
-      }
-      slot.cpu.lines = lines >>> 0;
-    }
+    const out: number[] = [];
+    for (let n = 0; n < 4; n++) if (this.dport.readUint32(0xdc + n * 4) & 1) out.push(ESP32_SOURCE.fromCpu0 + n);
+    return out;
   }
 
   // ------------------------------------------------------------- ROM
 
-  private romCall(i: number, pc: number): boolean {
-    if (pc >= REENT_TRAMPOLINE && pc < REENT_TRAMPOLINE + REENT_TRAMPOLINE_CODE.length) return false;
-    const entry = ESP32_ROM.get(pc);
-    const cpu = this.slots[i].cpu;
-    if (!entry) {
-      const n = (cpu.ps >>> 16) & 3;
-      const caller = ((cpu.a(n * 4) & 0x3fffffff) | 0x40000000) >>> 0;
-      throw new UnimplementedEsp32RomError(pc, caller);
-    }
-    const host = this.romHost(i);
-    const result = entry.handler(host);
-    if (result && typeof result === 'object' && !Array.isArray(result)) {
-      // Forwarded into firmware: the callee runs as though called directly.
-      const n = (cpu.ps >>> 16) & 3;
-      if (result.a6 !== undefined) cpu.setA(n * 4 + 6, result.a6 >>> 0);
-      if (result.a7 !== undefined) cpu.setA(n * 4 + 7, result.a7 >>> 0);
-      cpu.pc = result.jump >>> 0;
-      return true;
-    }
-    if (Array.isArray(result)) cpu.romReturn(result[0], result[1]);
-    else cpu.romReturn(typeof result === 'number' ? result : undefined);
-    return true;
-  }
-
-  private romHost(i: number): Esp32RomHost {
+  protected override romHost(i: number): Esp32RomHost {
     const slot = this.slots[i];
     const cpu = slot.cpu;
     // eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -764,129 +614,5 @@ export class Esp32Machine implements SimulatedClock {
     const off = IO_MUX_OFFSET[gpio];
     if (off === undefined || off < 0) return;
     this.gpio.ioMux.writeUint32(off, f(this.gpio.ioMux.readUint32(off)) >>> 0);
-  }
-
-  private pendingReset = false;
-
-  softwareReset(): void {
-    this.pendingReset = true;
-  }
-
-  // ------------------------------------------------------------- running
-
-  private periodNs(): number {
-    return 1000 / this.cpuMhz;
-  }
-
-  /** Earliest time something outside the cores will act. */
-  nextEventNanos(): number | undefined {
-    let soonest = this.nextCheckNs;
-    for (const e of this.externalEvents) {
-      const at = e.nextEventNanos();
-      if (at !== undefined && (soonest === undefined || at < soonest)) soonest = at;
-    }
-    for (const slot of this.slots) {
-      if (!slot.running) continue;
-      const at = this.timerWakeNs(slot);
-      if (at !== undefined && (soonest === undefined || at < soonest)) soonest = at;
-    }
-    return soonest;
-  }
-
-  private timerWakeNs(slot: CoreSlot): number | undefined {
-    const cycles = slot.cpu.cyclesToNextTimer();
-    return Number.isFinite(cycles) ? slot.ns + cycles * this.periodNs() : undefined;
-  }
-
-  /** Can this core do nothing until an interrupt arrives? */
-  private idle(slot: CoreSlot): boolean {
-    return slot.cpu.waiting && slot.cpu.pendingLevel() === 0;
-  }
-
-  /** Moves a core's clock forward without executing, keeping CCOUNT in step. */
-  private advance(slot: CoreSlot, toNs: number): void {
-    if (toNs <= slot.ns) return;
-    const cycles = Math.floor((toNs - slot.ns) / this.periodNs());
-    slot.cpu.cycles += cycles;
-    slot.ns += cycles * this.periodNs();
-    if (slot.ns < toNs) slot.ns = toNs;
-  }
-
-  /**
-   * Runs both cores until simulated time reaches `untilNs` or the instruction
-   * budget is spent. Returns the instructions executed.
-   */
-  run(untilNs: number, budget: number): number {
-    let executed = 0;
-    const [pro, app] = this.slots;
-    while (executed < budget && !this.fault) {
-      if (this.pendingReset) {
-        this.pendingReset = false;
-        const ns = this.nanos;
-        this.romState.resetReason = 12;
-        this.reset();
-        this.romState.resetReason = 12;
-        for (const s of this.slots) s.ns = ns;
-        return executed;
-      }
-      // The core that is behind runs next, so the two share one timeline.
-      const slot = app.running && app.ns < pro.ns ? app : pro;
-      const other = slot === pro ? app : pro;
-      if (slot.ns >= untilNs) {
-        if (!other.running || other.ns >= untilNs) break;
-      }
-      if (this.interruptsDirty || (this.nextCheckNs !== undefined && this.nanos >= this.nextCheckNs)) this.refreshInterrupts();
-      if (slot.stalledUntil > slot.ns) {
-        this.advance(slot, Math.min(slot.stalledUntil, untilNs, other.running ? Math.max(other.ns, slot.ns + 1000) : untilNs));
-        if (slot.ns >= slot.stalledUntil) slot.stalledUntil = 0;
-        continue;
-      }
-      if (this.idle(slot)) {
-        // Asleep until its own timer, a peripheral, the other core, or the end of the slice.
-        let wake = untilNs;
-        const own = this.timerWakeNs(slot);
-        if (own !== undefined) wake = Math.min(wake, own);
-        const ext = this.nextEventNanos();
-        if (ext !== undefined) wake = Math.min(wake, Math.max(ext, slot.ns));
-        if (other.running && !this.idle(other)) wake = Math.min(wake, Math.max(other.ns, slot.ns));
-        if (wake <= slot.ns) wake = slot.ns + this.periodNs();
-        this.advance(slot, wake);
-        slot.cpu.step(); // lets the core see a timer that has now matched
-        this.interruptsDirty = true;
-        continue;
-      }
-      this.current = slot === pro ? 0 : 1;
-      const period = this.periodNs();
-      // How far this core may run before the other must be looked at again: a
-      // few microseconds ahead of a busy one, or up to an idle one's next wake.
-      let horizon = untilNs;
-      if (other.running) {
-        if (this.idle(other)) {
-          const own = this.timerWakeNs(other);
-          if (own !== undefined) horizon = Math.min(horizon, own);
-        } else horizon = Math.min(horizon, other.ns + 2000);
-      }
-      if (this.nextCheckNs !== undefined) horizon = Math.min(horizon, Math.max(this.nextCheckNs, slot.ns + period));
-      for (const e of this.externalEvents) {
-        const at = e.nextEventNanos();
-        if (at !== undefined) horizon = Math.min(horizon, Math.max(at, slot.ns + period));
-      }
-      for (let k = 0; k < 4096; k++) {
-        try {
-          slot.cpu.step();
-        } catch (e) {
-          this.fault = e instanceof Error ? e.message : String(e);
-          return executed;
-        }
-        slot.ns += period;
-        executed++;
-        if (slot.cpu.halted) {
-          this.fault = slot.cpu.halted;
-          return executed;
-        }
-        if (this.interruptsDirty || slot.stalledUntil || slot.cpu.waiting || slot.ns >= horizon) break;
-      }
-    }
-    return executed;
   }
 }
