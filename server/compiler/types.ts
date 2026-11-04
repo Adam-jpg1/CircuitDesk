@@ -116,7 +116,7 @@ export interface BoardTarget {
   id: string;
   fqbn: string;
   name: string;
-  arch: 'avr' | 'rp2040' | 'esp32' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52833' | 'nrf52840' | 'imxrt1062';
+  arch: 'avr' | 'rp2040' | 'esp32' | 'esp32s3' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52833' | 'nrf52840' | 'imxrt1062';
   /** arduino-cli core that provides this target. */
   core: string;
   fCpuHz: number;
@@ -257,6 +257,20 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     core: 'esp32:esp32',
     mcu: 'esp32',
     variant: 'esp32',
+    fCpuHz: 240_000_000,
+    flashMaxBytes: 1_310_720,
+    ramMaxBytes: 327_680,
+  },
+  // The ESP32-S3, as the Espressif core's "ESP32S3 Dev Module" with its
+  // default 8 MB flash and that entry's default partitions.
+  {
+    id: 'board.esp32-s3',
+    fqbn: 'esp32:esp32:esp32s3',
+    name: 'ESP32-S3 (Xtensa LX7)',
+    arch: 'esp32s3',
+    core: 'esp32:esp32',
+    mcu: 'esp32s3',
+    variant: 'esp32s3',
     fCpuHz: 240_000_000,
     flashMaxBytes: 1_310_720,
     ramMaxBytes: 327_680,

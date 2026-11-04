@@ -23,15 +23,9 @@ const ENABLE1 = 0x2c, ENABLE1_W1TS = 0x30, ENABLE1_W1TC = 0x34;
 const STRAP = 0x38, IN = 0x3c, IN1 = 0x40;
 const STATUS = 0x44, STATUS_W1TS = 0x48, STATUS_W1TC = 0x4c;
 const STATUS1 = 0x50, STATUS1_W1TS = 0x54, STATUS1_W1TC = 0x58;
-const ACPU_INT = 0x60, ACPU_INT1 = 0x74, PCPU_INT = 0x68, PCPU_INT1 = 0x7c;
-const PIN0 = 0x88;
-const FUNC_IN_SEL = 0x130;
-const FUNC_OUT_SEL = 0x530;
 
 /** The matrix's "plain GPIO output" signal: the pad follows GPIO_OUT. */
 export const SIG_GPIO_OUT = 256;
-/** IO MUX function number that hands a pad to the GPIO matrix. */
-const PIN_FUNC_GPIO = 2;
 
 /** IO MUX register offset of each pad, from io_mux_reg.h (-1: not bonded). */
 export const IO_MUX_OFFSET = [
@@ -52,6 +46,69 @@ export interface SignalDrive {
   level: 0 | 1;
 }
 
+/**
+ * Where a chip keeps what differs. The ESP32-S3 shares the ESP32's field
+ * layout (and the 0x00-0x58 registers) and moves the rest: PIN0 to 0x74, the
+ * matrix to 0x154/0x554, one interrupt status pair for both cores, a linear
+ * IO MUX with GPIO as function 1, pulls only in IO MUX, and 49 pads all of
+ * which can drive.
+ */
+export interface Esp32GpioLayout {
+  base: number;
+  ioMuxBase: number;
+  ioMuxSize: number;
+  padCount: number;
+  ioMuxOffset: readonly number[];
+  pinFuncGpio: number;
+  pin0: number;
+  funcInSel: number;
+  funcOutSel: number;
+  /** Interrupt status registers per CPU interrupt-enable bit: [enable bit, word 0 offset, word 1 offset]. */
+  cpuInts: [number, number, number][];
+  /** First input-only pad, or padCount if every pad can drive. */
+  inputOnlyFrom: number;
+  rtcPull: Record<number, [number, number, number]>;
+  strap: number;
+}
+
+export const ESP32_GPIO_LAYOUT: Esp32GpioLayout = {
+  base: 0x3ff44000,
+  ioMuxBase: 0x3ff49000,
+  ioMuxSize: 0x100,
+  padCount: 40,
+  ioMuxOffset: IO_MUX_OFFSET,
+  pinFuncGpio: 2,
+  pin0: 0x88,
+  funcInSel: 0x130,
+  funcOutSel: 0x530,
+  // int_ena bit 15 is the PRO CPU's (PCPU_INT), bit 13 the APP CPU's (ACPU_INT).
+  cpuInts: [[15, 0x68, 0x7c], [13, 0x60, 0x74]],
+  inputOnlyFrom: 34,
+  rtcPull: RTC_PULL,
+  // GPIO0, 2, 5, 12, 15 strapping as an ordinary SPI boot.
+  strap: 0x13,
+};
+
+/** GPIO pads that exist on the S3 (22-25 do not). */
+const S3_IO_MUX = Array.from({ length: 49 }, (_, n) => (n >= 22 && n <= 25 ? -1 : 0x04 + n * 4));
+
+export const ESP32S3_GPIO_LAYOUT: Esp32GpioLayout = {
+  base: 0x60004000,
+  ioMuxBase: 0x60009000,
+  ioMuxSize: 0x100,
+  padCount: 49,
+  ioMuxOffset: S3_IO_MUX,
+  pinFuncGpio: 1,
+  pin0: 0x74,
+  funcInSel: 0x154,
+  funcOutSel: 0x554,
+  cpuInts: [[13, 0x5c, 0x68]],
+  inputOnlyFrom: 49,
+  rtcPull: {},
+  // GPIO0 high (SPI boot), the rest at their idle levels.
+  strap: 0x08,
+};
+
 class RegisterFile implements Peripheral {
   readonly regs = new Map<number, number>();
   constructor(readonly name: string, readonly base: number, readonly size: number, private readonly onWrite: () => void) {}
@@ -69,8 +126,9 @@ class RegisterFile implements Peripheral {
 
 export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
   readonly name = 'gpio';
-  readonly base = 0x3ff44000;
+  readonly base: number;
   readonly size = 0x1000;
+  readonly padCount: number;
   /** IO MUX, at 0x3FF49000. */
   readonly ioMux: RegisterFile;
   /** RTC IO, at 0x3FF48400. */
@@ -82,9 +140,9 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
   private enable1 = 0;
   private status = 0;
   private status1 = 0;
-  private readonly pinReg = new Uint32Array(ESP32_PAD_COUNT);
+  private readonly pinReg: Uint32Array;
   private readonly inSel = new Uint32Array(256);
-  private readonly outSel = new Uint32Array(ESP32_PAD_COUNT);
+  private readonly outSel: Uint32Array;
   private readonly external = new Map<number, 0 | 1>();
   private readonly signals = new Map<number, 0 | 1>();
   private readonly reported = new Map<number, PinState>();
@@ -98,8 +156,13 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
   constructor(
     private readonly clock: SimulatedClock,
     private readonly interruptSource = 22,
+    private readonly layout: Esp32GpioLayout = ESP32_GPIO_LAYOUT,
   ) {
-    this.ioMux = new RegisterFile('io_mux', 0x3ff49000, 0x100, () => this.refresh());
+    this.base = layout.base;
+    this.padCount = layout.padCount;
+    this.pinReg = new Uint32Array(layout.padCount);
+    this.outSel = new Uint32Array(layout.padCount);
+    this.ioMux = new RegisterFile('io_mux', layout.ioMuxBase, layout.ioMuxSize, () => this.refresh());
     this.rtcIo = new RegisterFile('rtc_io', 0x3ff48400, 0x100, () => this.refresh());
     this.reset();
   }
@@ -118,14 +181,14 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
     // configures every pin it uses.
     this.signals.clear();
     this.reported.clear();
-    for (let pin = 0; pin < ESP32_PAD_COUNT; pin++) this.reported.set(pin, this.pinState(pin));
+    for (let pin = 0; pin < this.padCount; pin++) this.reported.set(pin, this.pinState(pin));
   }
 
   // ------------------------------------------------------------ pad state
 
   private mux(pin: number): number {
-    const off = IO_MUX_OFFSET[pin];
-    return off < 0 ? 0 : this.ioMux.readUint32(off);
+    const off = this.layout.ioMuxOffset[pin];
+    return off === undefined || off < 0 ? 0 : this.ioMux.readUint32(off);
   }
 
   private functionOf(pin: number): number {
@@ -139,7 +202,7 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
   pullOf(pin: number): 'up' | 'down' | 'none' {
     let up = ((this.mux(pin) >>> 8) & 1) === 1;
     let down = ((this.mux(pin) >>> 7) & 1) === 1;
-    const rtc = RTC_PULL[pin];
+    const rtc = this.layout.rtcPull[pin];
     if (rtc) {
       const v = this.rtcIo.readUint32(rtc[0]);
       up ||= ((v >>> rtc[1]) & 1) === 1;
@@ -159,13 +222,16 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
   /** What the chip drives onto a pad, if anything. */
   private drive(pin: number): { driving: boolean; level: 0 | 1; openDrain: boolean } {
     const none = { driving: false, level: 0 as 0 | 1, openDrain: false };
-    if (pin >= 34 || IO_MUX_OFFSET[pin] < 0) return none;
-    if (this.functionOf(pin) !== PIN_FUNC_GPIO) return none;
+    if (pin >= this.layout.inputOnlyFrom || !(this.layout.ioMuxOffset[pin] >= 0)) return none;
+    if (this.functionOf(pin) !== this.layout.pinFuncGpio) return none;
     const sel = this.outSel[pin];
-    let oe = this.enabledBit(pin);
+    const signal = sel & 0x1ff;
+    // OEN_SEL set, or the plain GPIO output, takes output enable from
+    // GPIO_ENABLE; clear, from the peripheral driving the signal, which
+    // enables its own outputs (ESP-IDF relies on that on the S3).
+    let oe = sel & (1 << 10) || signal === SIG_GPIO_OUT ? this.enabledBit(pin) : this.signals.has(signal) || this.enabledBit(pin);
     if (sel & (1 << 11)) oe = !oe;
     if (!oe) return none;
-    const signal = sel & 0x1ff;
     let level: 0 | 1 = signal === SIG_GPIO_OUT ? this.outBit(pin) : (this.signals.get(signal) ?? 0);
     if (signal !== SIG_GPIO_OUT && sel & (1 << 9)) level = (1 - level) as 0 | 1;
     const openDrain = ((this.pinReg[pin] >>> 2) & 1) === 1;
@@ -186,8 +252,8 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
 
   pinState(pin: number): PinState {
     const d = this.drive(pin);
-    const openDrainHigh = !d.driving && d.openDrain && this.enabledBit(pin) && this.functionOf(pin) === PIN_FUNC_GPIO;
-    const direction = d.driving || openDrainHigh ? 'output' : this.inputEnabled(pin) || this.functionOf(pin) === PIN_FUNC_GPIO ? 'input' : 'disabled';
+    const openDrainHigh = !d.driving && d.openDrain && this.enabledBit(pin) && this.functionOf(pin) === this.layout.pinFuncGpio;
+    const direction = d.driving || openDrainHigh ? 'output' : this.inputEnabled(pin) || this.functionOf(pin) === this.layout.pinFuncGpio ? 'input' : 'disabled';
     return {
       pin,
       direction,
@@ -212,8 +278,7 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
       case OUT1: return this.out1 >>> 0;
       case ENABLE: return this.enable >>> 0;
       case ENABLE1: return this.enable1 >>> 0;
-      // GPIO0, 2, 5, 12, 15 strapping as an ordinary SPI boot.
-      case STRAP: return 0x13;
+      case STRAP: return this.layout.strap;
       case IN: {
         let v = 0;
         for (let pin = 0; pin < 32; pin++) if (this.inputLevel(pin)) v |= 1 << pin;
@@ -221,19 +286,20 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
       }
       case IN1: {
         let v = 0;
-        for (let pin = 32; pin < ESP32_PAD_COUNT; pin++) if (this.inputLevel(pin)) v |= 1 << (pin - 32);
+        for (let pin = 32; pin < this.padCount; pin++) if (this.inputLevel(pin)) v |= 1 << (pin - 32);
         return v >>> 0;
       }
       case STATUS: return this.status >>> 0;
       case STATUS1: return this.status1 >>> 0;
-      case PCPU_INT: return this.pending(15, 0);
-      case PCPU_INT1: return this.pending(15, 1);
-      case ACPU_INT: return this.pending(13, 0);
-      case ACPU_INT1: return this.pending(13, 1);
     }
-    if (offset >= PIN0 && offset < PIN0 + ESP32_PAD_COUNT * 4) return this.pinReg[(offset - PIN0) >> 2];
-    if (offset >= FUNC_IN_SEL && offset < FUNC_IN_SEL + 256 * 4) return this.inSel[(offset - FUNC_IN_SEL) >> 2];
-    if (offset >= FUNC_OUT_SEL && offset < FUNC_OUT_SEL + ESP32_PAD_COUNT * 4) return this.outSel[(offset - FUNC_OUT_SEL) >> 2];
+    for (const [bit, w0, w1] of this.layout.cpuInts) {
+      if (offset === w0) return this.pending(bit, 0);
+      if (offset === w1) return this.pending(bit, 1);
+    }
+    const { pin0, funcInSel, funcOutSel } = this.layout;
+    if (offset >= pin0 && offset < pin0 + this.padCount * 4) return this.pinReg[(offset - pin0) >> 2];
+    if (offset >= funcInSel && offset < funcInSel + 256 * 4) return this.inSel[(offset - funcInSel) >> 2];
+    if (offset >= funcOutSel && offset < funcOutSel + this.padCount * 4) return this.outSel[(offset - funcOutSel) >> 2];
     return 0;
   }
 
@@ -243,28 +309,35 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
       case OUT: this.out = value; break;
       case OUT_W1TS: this.out |= value; break;
       case OUT_W1TC: this.out &= ~value; break;
-      case OUT1: this.out1 = value & 0xff; break;
-      case OUT1_W1TS: this.out1 |= value & 0xff; break;
+      case OUT1: this.out1 = value & this.word1Mask; break;
+      case OUT1_W1TS: this.out1 |= value & this.word1Mask; break;
       case OUT1_W1TC: this.out1 &= ~value; break;
       case ENABLE: this.enable = value; break;
       case ENABLE_W1TS: this.enable |= value; break;
       case ENABLE_W1TC: this.enable &= ~value; break;
-      case ENABLE1: this.enable1 = value & 0xff; break;
-      case ENABLE1_W1TS: this.enable1 |= value & 0xff; break;
+      case ENABLE1: this.enable1 = value & this.word1Mask; break;
+      case ENABLE1_W1TS: this.enable1 |= value & this.word1Mask; break;
       case ENABLE1_W1TC: this.enable1 &= ~value; break;
       case STATUS: this.status = value; break;
       case STATUS_W1TS: this.status |= value; break;
       case STATUS_W1TC: this.status &= ~value; break;
-      case STATUS1: this.status1 = value & 0xff; break;
-      case STATUS1_W1TS: this.status1 |= value & 0xff; break;
+      case STATUS1: this.status1 = value & this.word1Mask; break;
+      case STATUS1_W1TS: this.status1 |= value & this.word1Mask; break;
       case STATUS1_W1TC: this.status1 &= ~value; break;
-      default:
-        if (offset >= PIN0 && offset < PIN0 + ESP32_PAD_COUNT * 4) this.pinReg[(offset - PIN0) >> 2] = value;
-        else if (offset >= FUNC_IN_SEL && offset < FUNC_IN_SEL + 256 * 4) this.inSel[(offset - FUNC_IN_SEL) >> 2] = value;
-        else if (offset >= FUNC_OUT_SEL && offset < FUNC_OUT_SEL + ESP32_PAD_COUNT * 4) this.outSel[(offset - FUNC_OUT_SEL) >> 2] = value;
+      default: {
+        const { pin0, funcInSel, funcOutSel } = this.layout;
+        if (offset >= pin0 && offset < pin0 + this.padCount * 4) this.pinReg[(offset - pin0) >> 2] = value;
+        else if (offset >= funcInSel && offset < funcInSel + 256 * 4) this.inSel[(offset - funcInSel) >> 2] = value;
+        else if (offset >= funcOutSel && offset < funcOutSel + this.padCount * 4) this.outSel[(offset - funcOutSel) >> 2] = value;
         else return;
+      }
     }
     this.refresh();
+  }
+
+  /** Bits of the second register word that are pads on this chip. */
+  private get word1Mask(): number {
+    return ((1 << (this.padCount - 32)) - 1) >>> 0;
   }
 
   // ------------------------------------------------------------ interrupts
@@ -275,7 +348,7 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
     const status = word === 0 ? this.status : this.status1;
     for (let i = 0; i < 32; i++) {
       const pin = word * 32 + i;
-      if (pin >= ESP32_PAD_COUNT) break;
+      if (pin >= this.padCount) break;
       if ((status >>> i) & 1 && (this.pinReg[pin] >>> enaBit) & 1) v |= 1 << i;
     }
     return v >>> 0;
@@ -288,7 +361,7 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
 
   /** Latches level-type interrupts, which hold while their level does. */
   private latchLevels(): void {
-    for (let pin = 0; pin < ESP32_PAD_COUNT; pin++) {
+    for (let pin = 0; pin < this.padCount; pin++) {
       const type = (this.pinReg[pin] >>> 7) & 7;
       if (type === 4 && this.inputLevel(pin) === 0) this.setStatus(pin);
       if (type === 5 && this.inputLevel(pin) === 1) this.setStatus(pin);
@@ -301,14 +374,15 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
   }
 
   assertedInterruptSources(): number[] {
-    const any = this.pending(15, 0) | this.pending(15, 1) | this.pending(13, 0) | this.pending(13, 1);
+    let any = 0;
+    for (const [bit] of this.layout.cpuInts) any |= this.pending(bit, 0) | this.pending(bit, 1);
     return any ? [this.interruptSource] : [];
   }
 
   // ------------------------------------------------------------ outside world
 
   drivePin(pin: number, level: 0 | 1 | undefined): void {
-    if (pin < 0 || pin >= ESP32_PAD_COUNT) return;
+    if (pin < 0 || pin >= this.padCount) return;
     if (level === undefined) this.external.delete(pin);
     else this.external.set(pin, level);
     this.refresh();
@@ -331,22 +405,22 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
     const cfg = this.inSel[signal];
     if (!(cfg & (1 << 7))) return undefined;
     const pin = cfg & 0x3f;
-    return pin < ESP32_PAD_COUNT ? pin : undefined;
+    return pin < this.padCount ? pin : undefined;
   }
 
   /** The level a peripheral input signal sees. */
   inputSignalLevel(signal: number): 0 | 1 {
     const cfg = this.inSel[signal];
     const pin = cfg & 0x3f;
-    let level: 0 | 1 = pin < ESP32_PAD_COUNT ? (this.levelOf(pin) === 1 ? 1 : 0) : pin === 0x38 ? 1 : 0;
+    let level: 0 | 1 = pin < this.padCount ? (this.levelOf(pin) === 1 ? 1 : 0) : pin === 0x38 ? 1 : 0;
     if (cfg & (1 << 6)) level = (1 - level) as 0 | 1;
     return level;
   }
 
   /** The first pad carrying a peripheral output signal, if any. */
   outputSignalPin(signal: number): number | undefined {
-    for (let pin = 0; pin < ESP32_PAD_COUNT; pin++) {
-      if (IO_MUX_OFFSET[pin] >= 0 && this.functionOf(pin) === PIN_FUNC_GPIO && (this.outSel[pin] & 0x1ff) === signal) return pin;
+    for (let pin = 0; pin < this.padCount; pin++) {
+      if (this.layout.ioMuxOffset[pin] >= 0 && this.functionOf(pin) === this.layout.pinFuncGpio && (this.outSel[pin] & 0x1ff) === signal) return pin;
     }
     return undefined;
   }
@@ -356,8 +430,8 @@ export class Esp32Gpio implements Peripheral, InterruptingPeripheral {
     this.refreshing = true;
     try {
       const before = this.assertedInterruptSources().length;
-      for (let pin = 0; pin < ESP32_PAD_COUNT; pin++) {
-        if (IO_MUX_OFFSET[pin] < 0) continue;
+      for (let pin = 0; pin < this.padCount; pin++) {
+        if (!(this.layout.ioMuxOffset[pin] >= 0)) continue;
         const current = this.pinState(pin);
         const previous = this.reported.get(pin)!;
         this.reported.set(pin, current);

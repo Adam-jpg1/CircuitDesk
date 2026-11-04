@@ -84,7 +84,7 @@ export interface RuntimeProfile {
   id: string;
   name: string;
   /** The emulator that executes the artifact. */
-  engine: 'avr8js' | 'rp2040js' | 'esp32' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python' | 'none';
+  engine: 'avr8js' | 'rp2040js' | 'esp32' | 'esp32s3' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python' | 'none';
   /** Processor profiles this runtime can genuinely execute. */
   processorProfileIds: string[];
   /** Formats the engine accepts. An artifact of any other format is refused. */
@@ -280,6 +280,18 @@ export const COMPILE_PROFILES: CompileProfile[] = [
     artifactFormat: 'esp-image',
     libraries: [],
     description: 'The Espressif Arduino core built for the ESP32 (ESP32 Dev Module). Emits an ESP application image.',
+  },
+  {
+    id: 'compile.esp32s3-arduino',
+    name: 'Arduino ESP32 (S3)',
+    adapter: 'arduino-cli',
+    processorProfileIds: ['proc.esp32s3'],
+    requiredCore: 'esp32:esp32',
+    fqbn: 'esp32:esp32:esp32s3',
+    serverTargetId: 'board.esp32-s3',
+    artifactFormat: 'esp-image',
+    libraries: [],
+    description: 'The Espressif Arduino core built for the ESP32-S3 (ESP32S3 Dev Module). Emits an ESP application image.',
   },
   {
     id: 'compile.esp32c6-arduino',
@@ -496,6 +508,19 @@ export const RUNTIME_PROFILES: RuntimeProfile[] = [
     ],
     supportedPeripherals: ['both Xtensa LX6 cores', 'GPIO matrix', 'GPIO interrupts', 'timer groups', 'UART0', 'SAR ADC1/ADC2 (one-shot)', 'LED PWM controller', 'I2C0/I2C1 (master)', 'HSPI/VSPI (master)'],
     description: 'Executes ESP32 application images on the CircuitDesk Xtensa core, both CPUs, under ESP-IDF\'s own FreeRTOS: GPIO, UART0, the ADC, LED PWM, I2C and SPI.',
+  },
+  {
+    id: 'runtime.esp32s3',
+    name: 'CircuitDesk ESP32-S3',
+    engine: 'esp32s3',
+    processorProfileIds: ['proc.esp32s3'],
+    acceptsFormats: ['esp-image'],
+    supportedApis: [
+      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'delay/millis/micros', 'Serial (UART0)',
+      'floating point', 'analogWrite (PWM)', 'tone()', 'Servo (ESP32Servo)', 'attachInterrupt', 'Wire', 'SPI',
+    ],
+    supportedPeripherals: ['both Xtensa LX7 cores', 'GPIO matrix', 'GPIO interrupts', 'system timer', 'timer groups', 'UART0/UART1', 'SAR ADC1/ADC2 (one-shot)', 'LED PWM controller', 'I2C0/I2C1 (master)', 'GP-SPI2/SPI3 (master)'],
+    description: 'Executes ESP32-S3 application images on the CircuitDesk Xtensa core, both CPUs, under ESP-IDF\'s own FreeRTOS.',
   },
   {
     id: 'runtime.esp32c6',

@@ -77,6 +77,8 @@ export interface UartLayout {
    * ESP-IDF computes the RX length from these rather than from STATUS there.
    */
   memRxStatus?: number;
+  /** CLKDIV as one integer field this wide, with no fraction (the ESP8266's 20 bits). */
+  clkdivIntegerBits?: number;
 }
 
 export const ESP32C3_UART_LAYOUT: UartLayout = {
@@ -85,6 +87,23 @@ export const ESP32C3_UART_LAYOUT: UartLayout = {
   conf0TxfifoRst: 18,
   conf1FieldBits: 9,
   toutEnable: { offset: CONF1, bit: 21 },
+  selfClearing: [],
+  fsmStatus: 0x6c,
+  clockConf: 0x78,
+};
+
+/**
+ * The ESP32-S3's: the C3's design with ten-bit CONF1 thresholds, RX_TOUT_EN
+ * at bit 23 and the timeout threshold in MEM_CONF (bits 26:17), from the
+ * S3's uart_reg.h.
+ */
+export const ESP32S3_UART_LAYOUT: UartLayout = {
+  countBits: 10,
+  conf0RxfifoRst: 17,
+  conf0TxfifoRst: 18,
+  conf1FieldBits: 10,
+  toutEnable: { offset: CONF1, bit: 23 },
+  toutThreshold: { offset: 0x60, shift: 17 },
   selfClearing: [],
   fsmStatus: 0x6c,
   clockConf: 0x78,
@@ -157,8 +176,9 @@ export class EspUart implements Peripheral, InterruptingPeripheral {
   get baudRate(): number {
     const div = this.registers.get(CLKDIV);
     if (div === undefined) return DEFAULT_BAUD;
-    const integer = div & 0xfff;
-    const fraction = (div >>> 20) & 0xf;
+    const wide = this.layout.clkdivIntegerBits;
+    const integer = wide ? div & ((1 << wide) - 1) : div & 0xfff;
+    const fraction = wide ? 0 : (div >>> 20) & 0xf;
     const divider = integer + fraction / 16;
     if (divider <= 0) return DEFAULT_BAUD;
     const conf =

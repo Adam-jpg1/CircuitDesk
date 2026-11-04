@@ -31,6 +31,8 @@ export interface LedcLayout {
   signalBase: number;
   /** LEDC_CONF on the C3, where the clock source is selected; the C6 selects it in PCR instead. */
   confOffset: number;
+  /** Channels the part has: six on the C3 and C6, eight on the S3. */
+  channels?: number;
 }
 
 export const ESP32C3_LEDC: LedcLayout = {
@@ -43,6 +45,18 @@ export const ESP32C3_LEDC: LedcLayout = {
   confOffset: 0xd0,
 };
 
+/** The S3's, which is the C3's design with eight channels (ledc_reg.h, gpio_sig_map.h). */
+export const ESP32S3_LEDC: LedcLayout = {
+  base: 0x60019000,
+  dutyResMask: 0xf,
+  clkDivShift: 4,
+  pauseBit: 22,
+  rstBit: 23,
+  signalBase: 73,
+  confOffset: 0xd0,
+  channels: 8,
+};
+
 export const ESP32C6_LEDC: LedcLayout = {
   base: 0x60007000,
   dutyResMask: 0x1f,
@@ -53,7 +67,6 @@ export const ESP32C6_LEDC: LedcLayout = {
   confOffset: 0x1f0,
 };
 
-const CHANNELS = 6;
 const TIMERS = 4;
 const CH_STRIDE = 0x14;
 const CH_CONF0 = 0x00;
@@ -86,7 +99,8 @@ export class EspLedc implements Peripheral, InterruptingPeripheral {
   private readonly registers = new Map<number, number>();
   /** When each timer last started counting from zero. */
   private readonly anchorNs = new Array<number>(TIMERS).fill(0);
-  private readonly levels = new Array<0 | 1 | undefined>(CHANNELS).fill(undefined);
+  private readonly channels: number;
+  private readonly levels: (0 | 1 | undefined)[];
 
   /**
    * @param sourceSelect reads the clock-source select where the chip keeps it
@@ -99,12 +113,14 @@ export class EspLedc implements Peripheral, InterruptingPeripheral {
     private readonly sourceSelect?: () => number,
   ) {
     this.base = layout.base;
+    this.channels = layout.channels ?? 6;
+    this.levels = new Array<0 | 1 | undefined>(this.channels).fill(undefined);
   }
 
   reset(): void {
     this.registers.clear();
     this.anchorNs.fill(0);
-    for (let ch = 0; ch < CHANNELS; ch++) {
+    for (let ch = 0; ch < this.channels; ch++) {
       if (this.levels[ch] !== undefined) this.gpio.driveSignal(this.layout.signalBase + ch, undefined);
     }
     this.levels.fill(undefined);
@@ -115,7 +131,7 @@ export class EspLedc implements Peripheral, InterruptingPeripheral {
   }
 
   readUint32(offset: number): number {
-    if (offset < CHANNELS * CH_STRIDE) {
+    if (offset < this.channels * CH_STRIDE) {
       const ch = Math.floor(offset / CH_STRIDE);
       const field = offset % CH_STRIDE;
       // The duty in use reads back as written, fraction included.
@@ -222,7 +238,7 @@ export class EspLedc implements Peripheral, InterruptingPeripheral {
   /** Brings every channel's output up to the present. */
   private update(): void {
     const now = this.clock.nanos;
-    for (let ch = 0; ch < CHANNELS; ch++) {
+    for (let ch = 0; ch < this.channels; ch++) {
       const level = this.levelAt(ch, now);
       if (level === this.levels[ch]) continue;
       this.levels[ch] = level;
@@ -235,7 +251,7 @@ export class EspLedc implements Peripheral, InterruptingPeripheral {
   nextInterruptChangeNanos(): number | undefined {
     const now = this.clock.nanos;
     let soonest: number | undefined;
-    for (let ch = 0; ch < CHANNELS; ch++) {
+    for (let ch = 0; ch < this.channels; ch++) {
       const at = this.nextEdge(ch, now);
       if (at !== undefined && (soonest === undefined || at < soonest)) soonest = at;
     }

@@ -164,6 +164,8 @@ const MEGA_PORTS = [
 const EXTRA_PORTS = [
   ...MEGA_PORTS.map((m) => ({ ...m, board: 'board.arduino-mega2560', vcc: '5V', others: MEGA_PORTS.map((x) => x.port) })),
   { port: 'Serial2', rx: 'RX2', tx: 'TX2', board: 'board.esp32-devkit', vcc: '3V3', others: ['Serial2'] },
+  // And the S3's Serial1, on the variant's RX1/TX1 (GPIO18/GPIO17).
+  { port: 'Serial1', rx: 'GPIO18', tx: 'GPIO17', board: 'board.esp32-s3', vcc: '3V3', others: ['Serial1'] },
 ];
 for (const { port, rx, tx, board: boardId, vcc, others: portsOnBoard } of EXTRA_PORTS) {
   console.log(`\n--- ${boardId} ${port}`);

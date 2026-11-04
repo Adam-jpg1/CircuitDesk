@@ -987,7 +987,31 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     architecture: 'esp32',
     variant: 'esp32s3',
     aliases: ['esp32-s3', 'esp32-s3 devkitc', 'esp32-s3-devkitc'],
-    limitation: 'ESP32-S3 (Xtensa LX7) — validation only; distinct from the base ESP32.',
+    processorProfileId: 'proc.esp32s3',
+    compileProfileId: 'compile.esp32s3-arduino',
+    runtimeProfileId: 'runtime.esp32s3',
+    serverTargetId: 'board.esp32-s3',
+    padMap: { TX0: 'GPIO43', RX0: 'GPIO44' },
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'esp32:esp32:esp32s3',
+      requiredCore: 'esp32:esp32',
+      supported: true,
+      note: 'Built as the Espressif core\'s "ESP32S3 Dev Module" with its defaults: Serial is UART0 on TX/RX, through the board\'s USB-to-UART bridge.',
+    },
+    simulation: {
+      engine: 'esp32s3',
+      supported: true,
+      supportedApis: ESP32_SIM_APIS,
+      supportedPeripherals: [
+        'both Xtensa LX7 cores under FreeRTOS', 'GPIO matrix and interrupts', 'system timer', 'timer groups', 'UART0/UART1',
+        'SAR ADC1/ADC2', 'LED PWM controller', 'I2C0/I2C1 (master)', 'GP-SPI2/SPI3 (master)',
+      ],
+    },
+    limitation:
+      'Real Xtensa LX7 execution of the compiled image on both cores, under ESP-IDF\'s own startup and FreeRTOS: GPIO and '
+      + 'interrupts, timing, Serial and Serial1, floating point, analogRead(), PWM/tone()/servos, Wire and SPI. The ADC '
+      + 'converts ideally. Wi-Fi, Bluetooth, the native USB port and the on-board RGB LED are not simulated.',
   },
   // The board is real and its pins are right; the runtime is not built yet, so
   // The compiler target is genuine — the core's generic esp32c6 target is what

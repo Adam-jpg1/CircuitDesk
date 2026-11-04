@@ -550,11 +550,50 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
   ARDUINO_UNO_R4_MINIMA,
   NANO_33_BLE,
   ESP32_DEVKIT,
+  // ESP32-S3-DevKitC-1, its J1 and J3 headers top to bottom as Espressif's
+  // user guide documents them. ADC1 is on GPIO1-10 and ADC2 on GPIO11-20.
+  // Pin ids from the earlier definition are kept, and GPIO43/GPIO44 resolve to
+  // TX/RX, so older projects still open on the same pins.
   simpleWiringBoard(
     'board.esp32-s3', 'ESP32-S3-DevKitC-1', 'Espressif', 'ESP32-S3', 25.5, 63, 3.3,
-    [p3v3('3V3'), ...seqPins('GPIO', 4, 18, 3.3), gnd('GND1')],
-    [{ ...g3('GPIO1', 'GPIO1') }, { ...g3('GPIO2', 'GPIO2') }, ...seqPins('GPIO', 38, 48, 3.3), g3('TX0', 'TX0'), g3('RX0', 'RX0'), p5v('VIN_5V', '5V'), gnd('GND2')],
-    'validation', { color: '#12262e', usb: 'usb-c' },
+    [
+      p3v3('3V3'), p3v3('3V3_2'), reset('RST', 'RST'),
+      a3('GPIO4', 'GPIO4'), a3('GPIO5', 'GPIO5'), a3('GPIO6', 'GPIO6'), a3('GPIO7', 'GPIO7'),
+      a3('GPIO15', 'GPIO15'), a3('GPIO16', 'GPIO16'), a3('GPIO17', 'GPIO17'), a3('GPIO18', 'GPIO18'),
+      { ...a3('GPIO8', 'GPIO8'), caps: ['digital-in', 'digital-out', 'analog-in', 'pwm', 'i2c-sda'] },
+      { ...a3('GPIO3', 'GPIO3'), description: 'GPIO3 — strapping pin (JTAG source)' },
+      g3('GPIO46', 'GPIO46', { description: 'GPIO46 — strapping pin' }),
+      { ...a3('GPIO9', 'GPIO9'), caps: ['digital-in', 'digital-out', 'analog-in', 'pwm', 'i2c-scl'] },
+      { ...a3('GPIO10', 'GPIO10'), caps: ['digital-in', 'digital-out', 'analog-in', 'pwm', 'spi-ss'] },
+      { ...a3('GPIO11', 'GPIO11'), caps: ['digital-in', 'digital-out', 'analog-in', 'pwm', 'spi-mosi'] },
+      { ...a3('GPIO12', 'GPIO12'), caps: ['digital-in', 'digital-out', 'analog-in', 'pwm', 'spi-sck'] },
+      { ...a3('GPIO13', 'GPIO13'), caps: ['digital-in', 'digital-out', 'analog-in', 'pwm', 'spi-miso'] },
+      a3('GPIO14', 'GPIO14'),
+      p5v('VIN_5V', '5V'), gnd('GND1'),
+    ],
+    [
+      gnd('GND2'),
+      g3('TX0', 'TX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-tx'], aliases: ['GPIO43'], description: 'GPIO43 — U0TXD: Serial, through the USB-to-UART bridge' }),
+      g3('RX0', 'RX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-rx'], aliases: ['GPIO44'], description: 'GPIO44 — U0RXD: Serial, through the USB-to-UART bridge' }),
+      a3('GPIO1', 'GPIO1'), a3('GPIO2', 'GPIO2'),
+      g3('GPIO42', 'GPIO42'), g3('GPIO41', 'GPIO41'), g3('GPIO40', 'GPIO40'), g3('GPIO39', 'GPIO39'),
+      g3('GPIO38', 'GPIO38'), g3('GPIO37', 'GPIO37'), g3('GPIO36', 'GPIO36'), g3('GPIO35', 'GPIO35'),
+      g3('GPIO0', 'GPIO0', { description: 'GPIO0 — Boot button; strapping pin' }),
+      g3('GPIO45', 'GPIO45', { description: 'GPIO45 — strapping pin' }),
+      g3('GPIO48', 'GPIO48', { description: 'GPIO48 — drives the on-board addressable RGB LED' }),
+      g3('GPIO47', 'GPIO47'),
+      g3('GPIO21', 'GPIO21'),
+      a3('GPIO20', 'GPIO20', ), a3('GPIO19', 'GPIO19'),
+      gnd('GND3'), gnd('GND4'),
+    ],
+    'simulated',
+    {
+      color: '#12262e',
+      usb: 'usb-c',
+      description:
+        'ESP32-S3-DevKitC-1 — Espressif development board with an ESP32-S3-WROOM-1 module (8 MB flash). The compiled '
+        + 'sketch runs on a simulated dual-core Xtensa LX7 ESP32-S3; Wi-Fi, Bluetooth, the native USB port and the RGB LED are not simulated.',
+    },
   ),
   // ESP32-C3-DevKitM-1, Espressif's own development board for the
   // ESP32-C3-MINI-1 module. The pin order below is the J1 and J3 headers as

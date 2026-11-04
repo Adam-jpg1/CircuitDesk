@@ -1,4 +1,4 @@
-// The ESP32-C3 and ESP32-C6 peripherals Arduino sketches reach for, on
+// The ESP32, ESP32-S3, ESP32-C3 and ESP32-C6 peripherals Arduino sketches reach for, on
 // compiled firmware.
 //
 // A feature matrix over every Simulated board found these two boards running
@@ -49,6 +49,10 @@ const BOARDS = [
     sda: 'D21', scl: 'D22', sck: 'D18', miso: 'D19', mosi: 'D23', cs: 'D5',
   },
   {
+    id: 'board.esp32-s3', fqbn: 'esp32:esp32:esp32s3', out: 'GPIO4', inA: 'GPIO5', inB: 'GPIO6', gnd: 'GND1', vcc: '3V3',
+    sda: 'GPIO8', scl: 'GPIO9', sck: 'GPIO12', miso: 'GPIO13', mosi: 'GPIO11', cs: 'GPIO10',
+  },
+  {
     id: 'board.esp32-c3', fqbn: 'esp32:esp32:esp32c3', out: 'IO4', inA: 'IO5', inB: 'IO6', gnd: 'GND1', vcc: '3V3_1',
     sda: 'IO8', scl: 'IO9', sck: 'IO4', miso: 'IO5', mosi: 'IO6', cs: 'IO7',
   },
@@ -58,7 +62,7 @@ const BOARDS = [
   },
 ] as const;
 
-const num = (label: string) => label.replace(/^(IO|D)/, '');
+const num = (label: string) => label.replace(/^(GPIO|IO|D)/, '');
 
 async function boot(boardId: string, fqbn: string, sketch: string) {
   const built = await compileProject({ fqbn, boardId: getBoardDefinition(boardId)?.serverTargetId ?? boardId, files: [{ name: 'sketch.ino', content: sketch }] }, false);

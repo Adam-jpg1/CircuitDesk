@@ -228,6 +228,9 @@ const parsed = parseNotices(NOTICES);
         // the same chip, run by the same engine.
         'board.esp32-cam',
         'board.esp32-devkit',
+        // The ESP32-S3: tests/esp32.runtime.mts, esp32.peripherals.mts and esp.adc.mts
+        // on the Xtensa core as an LX7 and the S3 model, both CPUs, with ESP32Servo on the MCPWM.
+        'board.esp32-s3',
         // Simulated on the strength of tests/microbit.runtime.mts: Arduino nRF5
         // core firmware on the ARMv7-M core and nRF52833 model — Serial, time,
         // analogRead, digital in, PWM, interrupts, the LED matrix, buttons A

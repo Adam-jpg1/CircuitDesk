@@ -13,8 +13,23 @@
 
 import type { InterruptingPeripheral, Peripheral, SimulatedClock } from '../espRiscv/peripheral';
 
-const INT_ENA = 0x98, INT_RAW = 0x9c, INT_ST = 0xa0, INT_CLR = 0xa4;
 const RTCCALICFG = 0x68, RTCCALICFG1 = 0x6c;
+
+/**
+ * Where the ESP32-S3's timer group differs: no LACT, so the interrupt
+ * registers sit at 0x70-0x7c rather than 0x98-0xa4, a counter may count the
+ * 40 MHz crystal instead of APB (USE_XTAL, bit 9), and the RC slow clock the
+ * calibration measures runs at 136 kHz rather than 150 kHz.
+ */
+export interface TimerGroupLayout {
+  intBase: number;
+  lact: boolean;
+  xtalBit: boolean;
+  slowHz: number;
+}
+
+export const ESP32_TIMG_LAYOUT: TimerGroupLayout = { intBase: 0x98, lact: true, xtalBit: false, slowHz: 150e3 };
+export const ESP32S3_TIMG_LAYOUT: TimerGroupLayout = { intBase: 0x70, lact: false, xtalBit: true, slowHz: 136e3 };
 
 /** One counter: T0 at 0x00, T1 at 0x24, LACT at 0x70, all laid out alike. */
 class Counter {
@@ -36,9 +51,13 @@ class Counter {
     return (this.config >>> 31) === 1;
   }
 
+  /** Set on chips where a counter may run from the crystal instead (USE_XTAL). */
+  xtalBit = false;
+
   tickNs(apbHz: number): number {
     const div = (this.config >>> 13) & 0xffff;
-    return (1e9 * (div === 0 ? 65536 : div < 2 ? 2 : div)) / apbHz;
+    const hz = this.xtalBit && (this.config >>> 9) & 1 ? 40e6 : apbHz;
+    return (1e9 * (div === 0 ? 65536 : div < 2 ? 2 : div)) / hz;
   }
 
   value(now: number, apbHz: number): number {
@@ -81,7 +100,7 @@ class Counter {
 
 export class Esp32TimerGroup implements Peripheral, InterruptingPeripheral {
   readonly size = 0x1000;
-  private readonly counters: Counter[] = [new Counter(0x00, 0), new Counter(0x24, 1), new Counter(0x70, 3)];
+  private readonly counters: Counter[];
   private raw = 0;
   private ena = 0;
   private readonly other = new Map<number, number>();
@@ -93,7 +112,11 @@ export class Esp32TimerGroup implements Peripheral, InterruptingPeripheral {
     /** Interrupt sources of T0, T1, WDT and LACT, in that order. */
     private readonly sources: [number, number, number, number],
     private readonly apbHz: () => number,
-  ) {}
+    private readonly layout: TimerGroupLayout = ESP32_TIMG_LAYOUT,
+  ) {
+    this.counters = [new Counter(0x00, 0), new Counter(0x24, 1), ...(layout.lact ? [new Counter(0x70, 3)] : [])];
+    for (const c of this.counters) c.xtalBit = layout.xtalBit;
+  }
 
   reset(): void {
     for (const c of this.counters) {
@@ -149,10 +172,11 @@ export class Esp32TimerGroup implements Peripheral, InterruptingPeripheral {
         default: return c.regs[r >> 2] ?? 0;
       }
     }
+    const i = this.layout.intBase;
     switch (offset) {
-      case INT_ENA: return this.ena;
-      case INT_RAW: return this.raw;
-      case INT_ST: return this.raw & this.ena;
+      case i: return this.ena;
+      case i + 4: return this.raw;
+      case i + 8: return this.raw & this.ena;
       // Calibration is always finished: RDY, with the value written on start.
       case RTCCALICFG: return ((this.other.get(offset) ?? 0) | (1 << 15)) >>> 0;
       default: return this.other.get(offset) ?? 0;
@@ -181,17 +205,18 @@ export class Esp32TimerGroup implements Peripheral, InterruptingPeripheral {
         default: c.regs[r >> 2] = value; return;
       }
     }
+    const i = this.layout.intBase;
     switch (offset) {
-      case INT_ENA: this.ena = value & 0xf; return;
-      case INT_CLR: this.raw &= ~value; return;
-      case INT_RAW: case INT_ST: return;
+      case i: this.ena = value & 0xf; return;
+      case i + 12: this.raw &= ~value; return;
+      case i + 4: case i + 8: return;
       case RTCCALICFG:
         this.other.set(offset, value);
         if (value >>> 31) {
           // XTAL cycles counted over the requested number of slow-clock
-          // cycles: the 150 kHz internal RC against a 40 MHz crystal.
+          // cycles: the internal RC oscillator against a 40 MHz crystal.
           const cycles = (value >>> 16) & 0x7fff;
-          this.other.set(RTCCALICFG1, (Math.round((cycles * 40e6) / 150e3) << 7) >>> 0);
+          this.other.set(RTCCALICFG1, (Math.round((cycles * 40e6) / this.layout.slowHz) << 7) >>> 0);
         }
         return;
       default: this.other.set(offset, value);

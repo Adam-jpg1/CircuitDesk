@@ -34,7 +34,7 @@ import { TIMER_FUNCTION_E, TIMER_FUNCTION_F } from '../simulation/samd21/timers'
  * family is carried alongside as `boardArchitecture` rather than derived by
  * string matching, so the two vocabularies stay explicitly linked.
  */
-export type ProcessorArchitecture = 'avr' | 'rp2040' | 'xtensa-esp32' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52' | 'imxrt' | 'bcm';
+export type ProcessorArchitecture = 'avr' | 'rp2040' | 'xtensa-esp32' | 'xtensa-esp32s3' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52' | 'imxrt' | 'bcm';
 
 export interface PeripheralController {
   /** Controller id as the chip's own documentation names it: `i2c0`, `usart1`. */
@@ -356,6 +356,47 @@ const ESP32: ProcessorProfile = {
   notModelled: [
     'Wi-Fi and Bluetooth',
     'touch sensing, the DACs and the hall sensor',
+    'the ADC\'s non-linearity and noise (conversions are ideal)',
+    'LEDC fades, RMT, PCNT, I2S and the motor PWM',
+    'deep sleep',
+  ],
+};
+
+/**
+ * The ESP32-S3's GPIOs a DevKitC-1 brings out. 22-25 do not exist, 26-32
+ * carry the module's flash, and 43/44 are UART0 behind the USB bridge.
+ */
+const S3_PADS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48].map((n) => `GPIO${n}`);
+
+const ESP32S3: ProcessorProfile = {
+  id: 'proc.esp32s3',
+  name: 'ESP32-S3 (Xtensa LX7, dual core)',
+  architecture: 'xtensa-esp32s3',
+  boardArchitecture: 'esp32',
+  vendor: 'Espressif',
+  clockHz: 240_000_000,
+  flashBytes: 3_342_336,
+  ramBytes: 327_680,
+  pads: S3_PADS,
+  // The runner numbers an ADC input by its GPIO (esp32/adc.ts): ADC1 on GPIO1-10, ADC2 on GPIO11-20.
+  adcChannels: Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`GPIO${i + 1}`, i + 1])),
+  pwmPads: S3_PADS,
+  uarts: [],
+  i2c: [{ id: 'i2c0', arduinoName: 'Wire', signals: { sda: S3_PADS, scl: S3_PADS }, defaults: { sda: 'GPIO8', scl: 'GPIO9' } }],
+  spi: [
+    {
+      id: 'fspi',
+      arduinoName: 'SPI',
+      signals: { sck: S3_PADS, mosi: S3_PADS, miso: S3_PADS },
+      defaults: { sck: 'GPIO12', mosi: 'GPIO11', miso: 'GPIO13' },
+    },
+  ],
+  interruptPads: S3_PADS,
+  logicVolts: 3.3,
+  notModelled: [
+    'Wi-Fi and Bluetooth',
+    'the native USB port (USB-OTG and USB Serial/JTAG) and the on-board RGB LED, which needs the RMT',
+    'PSRAM, touch sensing and the camera/LCD interface',
     'the ADC\'s non-linearity and noise (conversions are ideal)',
     'LEDC fades, RMT, PCNT, I2S and the motor PWM',
     'deep sleep',
@@ -698,6 +739,7 @@ export const PROCESSOR_PROFILES: ProcessorProfile[] = [
   ESP32C3,
   ESP32C6,
   ESP32,
+  ESP32S3,
   SAMD21,
   SAM3X8E,
   STM32F401RE,

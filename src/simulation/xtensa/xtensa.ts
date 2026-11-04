@@ -827,6 +827,9 @@ export class Xtensa {
     const a = this.a(s);
     const b = this.a(t);
     switch (op2) {
+      // LX7 (the ESP32-S3): set if less than, signed and unsigned.
+      case 6: this.setA(r, a < b ? 1 : 0); return; // SALTU
+      case 7: this.setA(r, (a | 0) < (b | 0) ? 1 : 0); return; // SALT
       case 8: this.setA(r, Math.imul(a, b) >>> 0); return; // MULL
       case 10: this.setA(r, Number((BigInt(a) * BigInt(b)) >> 32n)); return; // MULUH
       case 11: this.setA(r, Number(((BigInt(a | 0) * BigInt(b | 0)) >> 32n) & 0xffffffffn)); return; // MULSH

@@ -39,6 +39,12 @@ export interface Esp32RomHost {
   softwareReset(cpuOnly: boolean): void;
   /** PS, for the routines that raise the interrupt level. */
   ps: number;
+  /** The calling core, for the routines that read or set its special registers. */
+  readonly core: import('../xtensa/xtensa').Xtensa;
+  /** Address of the word holding this CPU's syscall_stub_table pointer. */
+  readonly syscallTablePointer: number;
+  /** Where this chip's machine code for `withReent` lives (REENT_TRAMPOLINE_CODE). */
+  readonly reentTrampoline: number;
 }
 
 export interface Esp32RomState {
@@ -245,7 +251,8 @@ function romPrintf(h: Esp32RomHost, fmtAddr: number, firstArg: number): void {
  * The forwarding is reproduced exactly; what runs is the firmware's own VFS,
  * heap and locks.
  */
-const SYSCALL_TABLE_PTR = [0x3ffae024, 0x3ffae020];
+/** The ESP32's syscall_table_ptr_pro and syscall_table_ptr_app. */
+export const ESP32_SYSCALL_TABLE_PTR = [0x3ffae024, 0x3ffae020];
 /**
  * A routine the ROM implements in firmware terms: entered with the original
  * call's arguments, it calls `__getreent()`, then `fn(reent, a2, a3, a4, a5)`,
@@ -257,9 +264,9 @@ export const REENT_TRAMPOLINE_CODE = [
   0x36, 0x41, 0x00, 0xe0, 0x06, 0x00, 0x20, 0xb2, 0x20, 0x30, 0xc3, 0x20, 0x40, 0xd4, 0x20, 0x50, 0xe5, 0x20,
   0xe0, 0x07, 0x00, 0xa0, 0x2a, 0x20, 0xb0, 0x3b, 0x20, 0x90, 0x00, 0x00,
 ];
-const stub = (h: Esp32RomHost, index: number) => h.read32(h.read32(SYSCALL_TABLE_PTR[h.cpu & 1]) + index * 4);
+const stub = (h: Esp32RomHost, index: number) => h.read32(h.read32(h.syscallTablePointer) + index * 4);
 const direct = (index: number): Handler => (h) => ({ jump: stub(h, index) });
-const withReent = (index: number): Handler => (h) => ({ jump: REENT_TRAMPOLINE, a6: stub(h, 0), a7: stub(h, index) });
+const withReent = (index: number): Handler => (h) => ({ jump: h.reentTrampoline, a6: stub(h, 0), a7: stub(h, index) });
 
 const ROUTINES: [number, string, Handler][] = [
   // ------------------------------------------------------------- newlib glue
@@ -527,6 +534,10 @@ export interface Esp32RomEntry {
 }
 
 export const ESP32_ROM = new Map<number, Esp32RomEntry>(ROUTINES.map(([a, name, handler]) => [a, { name, handler }]));
+
+/** Every routine above by name, for chips whose ROM publishes the same functions at other addresses. */
+export const ROM_HANDLERS = new Map<string, Handler>(ROUTINES.map(([, name, handler]) => [name, handler]));
+export type { Handler as RomHandler };
 
 /** The name of a ROM address with no implementation, for an honest error message. */
 export const ESP32_ROM_START = 0x40000000;

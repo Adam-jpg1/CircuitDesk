@@ -36,10 +36,10 @@
       "id": "esp32:esp32",
       "version": "3.3.11",
       "additionalUrl": "https://espressif.github.io/arduino-esp32/package_esp32_index.json",
-      "targets": ["esp32:esp32:esp32", "esp32:esp32:esp32c3", "esp32:esp32:esp32c6"],
+      "targets": ["esp32:esp32:esp32", "esp32:esp32:esp32s3", "esp32:esp32:esp32c3", "esp32:esp32:esp32c6"],
       "required": true,
-      "keepChips": ["esp32", "esp32c3", "esp32c6"],
-      "note": "Arduino-ESP32. CircuitDesk compiles only the parts it can execute (the Xtensa ESP32 and the RISC-V C3 and C6), so the per-chip libraries for the others are pruned after install — see installCores.mjs."
+      "keepChips": ["esp32", "esp32s3", "esp32c3", "esp32c6"],
+      "note": "Arduino-ESP32. CircuitDesk compiles only the parts it can execute (the Xtensa ESP32 and S3 and the RISC-V C3 and C6), so the per-chip libraries for the others are pruned after install — see installCores.mjs."
     },
     {
       "id": "arduino:sam",

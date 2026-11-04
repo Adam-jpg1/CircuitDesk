@@ -246,7 +246,7 @@ async function toolchainOverride(fqbn: string): Promise<string[]> {
 
 /** The Espressif targets, whose builds produce an application image plus bootloader and partitions. */
 function isEspArch(arch: BoardTarget['arch']): boolean {
-  return arch === 'esp32' || arch === 'esp32c3' || arch === 'esp32c6';
+  return arch === 'esp32' || arch === 'esp32s3' || arch === 'esp32c3' || arch === 'esp32c6';
 }
 
 export async function cliCompile(

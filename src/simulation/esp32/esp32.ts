@@ -28,7 +28,7 @@ import { Esp32Ledc } from './ledc';
 import { Esp32Spi } from './spi';
 import { Esp32Sens } from './adc';
 import { EspI2c } from '../espRiscv/i2c';
-import { ESP32_ROM, ESP32_ROM_END, REENT_TRAMPOLINE, REENT_TRAMPOLINE_CODE, ESP32_ROM_START, esp32MacCrc8, type Esp32RomHost } from './rom';
+import { ESP32_ROM, ESP32_ROM_END, ESP32_SYSCALL_TABLE_PTR, REENT_TRAMPOLINE, REENT_TRAMPOLINE_CODE, ESP32_ROM_START, esp32MacCrc8, type Esp32RomHost } from './rom';
 
 /** Interrupt level of each CPU interrupt number on the ESP32 (XCHAL_INT*_LEVEL). */
 export const ESP32_INT_LEVEL = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 7, 3, 5, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 3, 4, 3, 4, 5];
@@ -601,6 +601,9 @@ export class Esp32Machine extends EspXtensaMachine {
       padPull: (gpio, up, down) => machine.setMux(gpio, (v) => (v & ~(3 << 7)) | (up ? 1 << 8 : 0) | (down ? 1 << 7 : 0)),
       padDrive: (gpio, strength) => machine.setMux(gpio, (v) => (v & ~(3 << 10)) | ((strength & 3) << 10)),
       softwareReset: () => machine.softwareReset(),
+      core: cpu,
+      syscallTablePointer: ESP32_SYSCALL_TABLE_PTR[i & 1],
+      reentTrampoline: REENT_TRAMPOLINE,
       get ps() {
         return cpu.ps;
       },
