@@ -28,6 +28,12 @@ export interface EspI2cLayout {
   /** Matrix signals of SCL and SDA (in and out share a number). */
   sclSignal: number;
   sdaSignal: number;
+  /**
+   * Where the classic ESP32 differs, from its i2c_ll.h: other command opcodes
+   * (RSTART 0, WRITE 1, READ 2, STOP 3, END 4), sixteen command slots rather
+   * than eight, and SCL periods counted at the 80 MHz APB with no divider.
+   */
+  classic?: { name: string; commands: number; apbHz: () => number };
 }
 
 export const ESP32C3_I2C0: EspI2cLayout = { base: 0x60013000, interruptSource: 29, sclSignal: 53, sdaSignal: 54 };
@@ -90,9 +96,11 @@ export interface EspBusPorts {
 }
 
 export class EspI2c implements Peripheral, InterruptingPeripheral {
-  readonly name = 'i2c0';
+  readonly name: string;
   readonly size = 0x1000;
   readonly base: number;
+  private readonly ops: { write: number; stop: number; read: number; end: number; rstart: number };
+  private readonly commands: number;
   private readonly registers = new Map<number, number>();
   private tx: number[] = [];
   private rx: number[] = [];
@@ -111,6 +119,11 @@ export class EspI2c implements Peripheral, InterruptingPeripheral {
     private readonly bus: () => EspI2cBus | null,
   ) {
     this.base = layout.base;
+    this.name = layout.classic?.name ?? 'i2c0';
+    this.ops = layout.classic
+      ? { rstart: 0, write: 1, read: 2, stop: 3, end: 4 }
+      : { write: OP_WRITE, stop: OP_STOP, read: OP_READ, end: OP_END, rstart: OP_RSTART };
+    this.commands = layout.classic?.commands ?? COMMANDS;
   }
 
   reset(): void {
@@ -183,6 +196,10 @@ export class EspI2c implements Peripheral, InterruptingPeripheral {
 
   /** One SCL period, from the high and low periods and the source divider. */
   private bitNs(): number {
+    if (this.layout.classic) {
+      const ns = (((this.peek(SCL_LOW_PERIOD) & 0x3fff) + (this.peek(SCL_HIGH_PERIOD) & 0x3fff)) * 1e9) / this.layout.classic.apbHz();
+      return ns >= 1000 && ns <= 1_000_000 ? ns : 10_000;
+    }
     const low = (this.peek(SCL_LOW_PERIOD) & 0x1ff) + 1;
     const high = (this.peek(SCL_HIGH_PERIOD) & 0x1ff) + 1;
     const div = (this.peek(CLK_CONF) & 0xff) + 1;
@@ -209,7 +226,8 @@ export class EspI2c implements Peripheral, InterruptingPeripheral {
     let bits = 0;
     let raised = 0;
     let addressNext = false;
-    for (let i = 0; i < COMMANDS; i++) {
+    const { write: W, stop: S, read: R, end: E, rstart: RS } = this.ops;
+    for (let i = 0; i < this.commands; i++) {
       const at = COMD0 + i * 4;
       const command = this.peek(at);
       const op = (command >>> 11) & 0x7;
@@ -218,12 +236,12 @@ export class EspI2c implements Peripheral, InterruptingPeripheral {
       const expectNack = (command & (1 << 9)) !== 0;
       const sendNack = (command & (1 << 10)) !== 0;
       let failed = false;
-      if (op === OP_RSTART) {
+      if (op === RS) {
         bus?.start(this.owned);
         this.owned = true;
         addressNext = true;
         bits += 2;
-      } else if (op === OP_WRITE) {
+      } else if (op === W) {
         for (let n = 0; n < count; n++) {
           const byte = this.tx.shift() ?? 0xff;
           const ack = addressNext ? (bus?.connect(byte >> 1, (byte & 1) === 0) ?? false) : (bus?.writeByte(byte) ?? false);
@@ -235,19 +253,19 @@ export class EspI2c implements Peripheral, InterruptingPeripheral {
             break;
           }
         }
-      } else if (op === OP_READ) {
+      } else if (op === R) {
         for (let n = 0; n < count; n++) {
           // The acknowledge sent after each byte is the command's ACK value.
           const byte = bus?.readByte(!sendNack) ?? 0xff;
           if (this.rx.length < FIFO_DEPTH) this.rx.push(byte & 0xff);
           bits += 9;
         }
-      } else if (op === OP_STOP) {
+      } else if (op === S) {
         bus?.stop();
         this.owned = false;
         bits += 2;
         raised |= INT_TRANS_COMPLETE;
-      } else if (op === OP_END) {
+      } else if (op === E) {
         raised |= INT_END_DETECT;
       }
       if (failed) {
@@ -258,7 +276,7 @@ export class EspI2c implements Peripheral, InterruptingPeripheral {
         break;
       }
       this.registers.set(at, (command | CMD_DONE) >>> 0);
-      if (op === OP_STOP || op === OP_END) break;
+      if (op === S || op === E) break;
     }
     this.pending = raised;
     this.finishAt = this.clock.nanos + Math.max(1, bits) * this.bitNs();

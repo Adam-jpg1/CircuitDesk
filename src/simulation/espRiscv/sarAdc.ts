@@ -124,6 +124,8 @@ export class EspSarAdc implements Peripheral {
  * channels 0-6 on the C6.
  */
 export function espAdcIndexForGpio(chip: string, gpio: number): number | undefined {
+  // The Xtensa ESP32's ADC1 and ADC2 inputs, by GPIO (esp32/adc.ts).
+  if (chip === 'esp32') return [36, 37, 38, 39, 32, 33, 34, 35, 4, 0, 2, 15, 13, 12, 14, 27, 25, 26].includes(gpio) ? gpio : undefined;
   if (chip === 'esp32c3') return gpio >= 0 && gpio <= 5 ? gpio : undefined;
   if (chip === 'esp32c6') return gpio >= 0 && gpio <= 6 ? gpio : undefined;
   return undefined;

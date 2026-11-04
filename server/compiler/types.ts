@@ -116,7 +116,7 @@ export interface BoardTarget {
   id: string;
   fqbn: string;
   name: string;
-  arch: 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52833' | 'nrf52840' | 'imxrt1062';
+  arch: 'avr' | 'rp2040' | 'esp32' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52833' | 'nrf52840' | 'imxrt1062';
   /** arduino-cli core that provides this target. */
   core: string;
   fCpuHz: number;
@@ -247,6 +247,20 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
   // entry ("ESP32C3 Dev Module"), which is what every Espressif C3 development
   // board is built as; the flash ceiling is that entry's own default partition
   // layout rather than the raw 4 MB the module carries.
+  // The Xtensa ESP32, as the Espressif core's "ESP32 Dev Module": the
+  // ESP32-WROOM-32 with 4 MB of flash, and that entry's default partitions.
+  {
+    id: 'board.esp32',
+    fqbn: 'esp32:esp32:esp32',
+    name: 'ESP32 (Xtensa LX6)',
+    arch: 'esp32',
+    core: 'esp32:esp32',
+    mcu: 'esp32',
+    variant: 'esp32',
+    fCpuHz: 240_000_000,
+    flashMaxBytes: 1_310_720,
+    ramMaxBytes: 327_680,
+  },
   {
     id: 'board.esp32-c3',
     fqbn: 'esp32:esp32:esp32c3',

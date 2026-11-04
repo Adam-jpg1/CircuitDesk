@@ -24,12 +24,16 @@ function check(cond: boolean, msg: string) {
 }
 
 const boards = [
+  // GPIO34 is ADC1 channel 6; analogRead() sets 11 dB, a 3.3 V full scale here.
+  { id: 'board.esp32-devkit', pin: 'D34', gpio: 34, vcc: '3V3', gnd: 'GND1', fullScale: 3.3 },
+  // GPIO4 is ADC2 channel 0.
+  { id: 'board.esp32-devkit', pin: 'D4', gpio: 4, vcc: '3V3', gnd: 'GND1', fullScale: 3.3 },
   { id: 'board.esp32-c3', pin: 'IO1', gpio: 1, vcc: '3V3_1', gnd: 'GND1', fullScale: 2.5 },
   { id: 'board.esp32-c3-supermini', pin: 'IO0', gpio: 0, vcc: '3V3', gnd: 'GND1', fullScale: 2.5 },
   { id: 'board.esp32-c6-devkitc-1', pin: 'IO2', gpio: 2, vcc: '3V3_1', gnd: 'GND1', fullScale: 3.3 },
 ] as const;
 
-for (const b of boards) {
+for (const b of boards.filter((x) => !process.env.ONLY || x.id === process.env.ONLY)) {
   console.log(`\n--- ${b.id}`);
   const p = emptyProject(`adc ${b.id}`);
   const board = inst(b.id, 0, 0);

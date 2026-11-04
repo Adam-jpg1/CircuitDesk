@@ -71,6 +71,12 @@ export interface UartLayout {
   fsmStatus: number;
   /** The UART's own clock-configuration register, where the chip keeps it there. */
   clockConf?: number;
+  /**
+   * MEM_RX_STATUS, where the chip reports the RX FIFO's read and write
+   * pointers (the classic ESP32: RD_ADDR in bits 12:2, WR_ADDR in 23:13).
+   * ESP-IDF computes the RX length from these rather than from STATUS there.
+   */
+  memRxStatus?: number;
 }
 
 export const ESP32C3_UART_LAYOUT: UartLayout = {
@@ -106,6 +112,9 @@ export class EspUart implements Peripheral, InterruptingPeripheral {
   /** When the byte at the head of the TX FIFO finishes, in simulated ns. */
   private txHeadDoneAt = 0;
   private rx: number[] = [];
+  /** Bytes ever taken out of and put into the RX FIFO: its pointers, modulo its size. */
+  private rxReadTotal = 0;
+  private rxWriteTotal = 0;
   private lastRxAt = 0;
   private raw = 0;
 
@@ -135,7 +144,11 @@ export class EspUart implements Peripheral, InterruptingPeripheral {
   /** Bytes typed into the monitor, for Serial.read(). */
   receive(bytes: Iterable<number>): void {
     this.drain();
-    for (const b of bytes) if (this.rx.length < FIFO_LEN) this.rx.push(b & 0xff);
+    for (const b of bytes) {
+      if (this.rx.length >= FIFO_LEN) break;
+      this.rx.push(b & 0xff);
+      this.rxWriteTotal++;
+    }
     this.lastRxAt = this.clock.nanos;
     this.updateRx();
   }
@@ -202,8 +215,12 @@ export class EspUart implements Peripheral, InterruptingPeripheral {
     this.drain();
     this.updateRx();
     switch (offset) {
-      case FIFO:
-        return this.rx.shift() ?? 0;
+      case FIFO: {
+        const b = this.rx.shift();
+        if (b === undefined) return 0;
+        this.rxReadTotal++;
+        return b;
+      }
       case INT_RAW:
         return this.raw >>> 0;
       case INT_ST:
@@ -214,6 +231,7 @@ export class EspUart implements Peripheral, InterruptingPeripheral {
         return ((Math.min(this.rx.length, mask)) | (1 << 15) | (Math.min(this.tx.length, mask) << 16) | (1 << 31)) >>> 0;
       }
       default:
+        if (offset === this.layout.memRxStatus) return (((this.rxReadTotal % FIFO_LEN) << 2) | ((this.rxWriteTotal % FIFO_LEN) << 13)) >>> 0;
         if (offset === this.layout.fsmStatus) return 0;
         if (this.layout.selfClearing.includes(offset)) return 0;
         return this.registers.get(offset) ?? 0;
@@ -241,7 +259,10 @@ export class EspUart implements Peripheral, InterruptingPeripheral {
       case STATUS:
         return;
       case CONF0:
-        if ((value >>> this.layout.conf0RxfifoRst) & 1) this.rx = [];
+        if ((value >>> this.layout.conf0RxfifoRst) & 1) {
+          this.rx = [];
+          this.rxReadTotal = this.rxWriteTotal;
+        }
         if ((value >>> this.layout.conf0TxfifoRst) & 1) this.tx = [];
         this.registers.set(offset, value >>> 0);
         return;
@@ -260,6 +281,11 @@ export class EspUart implements Peripheral, InterruptingPeripheral {
     if (this.tx.length > 0) return this.txHeadDoneAt;
     if (this.rx.length > 0 && this.timeoutEnabled() && (this.raw & RXFIFO_TOUT) === 0) return this.timeoutAt();
     return undefined;
+  }
+
+  /** A register's stored value, without the side effects of a firmware read. */
+  peek(offset: number): number {
+    return (this.registers.get(offset) ?? 0) >>> 0;
   }
 
   /** Lets the transmitter catch up with simulated time; call between slices. */

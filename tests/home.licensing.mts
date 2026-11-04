@@ -221,6 +221,13 @@ const parsed = parseNotices(NOTICES);
         'board.esp32-c3',
         'board.esp32-c3-supermini',
         'board.esp32-c6-devkitc-1',
+        // Simulated on the strength of tests/esp32.runtime.mts, esp32.peripherals.mts
+        // and esp.adc.mts: Arduino-ESP32 firmware on the Xtensa core and ESP32 model,
+        // both CPUs under ESP-IDF's FreeRTOS — Serial, time, floating point, GPIO,
+        // interrupts, analogRead, PWM, tone, servos, Wire and SPI. The CAM board is
+        // the same chip, run by the same engine.
+        'board.esp32-cam',
+        'board.esp32-devkit',
         // Simulated on the strength of tests/microbit.runtime.mts: Arduino nRF5
         // core firmware on the ARMv7-M core and nRF52833 model — Serial, time,
         // analogRead, digital in, PWM, interrupts, the LED matrix, buttons A

@@ -109,10 +109,14 @@ for (const id of NO_PIN_UART) {
   );
 }
 
+/** Boards whose first UART pads are not Serial's: the DevKit lists RX2/TX2 (Serial2) first. */
+const CONSOLE_PADS: Record<string, { rx: string; tx: string }> = { 'board.esp32-devkit': { rx: 'RX0', tx: 'TX0' } };
+
 for (const def of simulated) {
   console.log(`\n--- ${def.id}`);
-  const tx = def.pins.find((p) => p.capabilities.includes('uart-tx' as never));
-  const rx = def.pins.find((p) => p.capabilities.includes('uart-rx' as never));
+  const pads = CONSOLE_PADS[def.id];
+  const tx = pads ? def.pins.find((p) => p.id === pads.tx) : def.pins.find((p) => p.capabilities.includes('uart-tx' as never));
+  const rx = pads ? def.pins.find((p) => p.id === pads.rx) : def.pins.find((p) => p.capabilities.includes('uart-rx' as never));
   const power = def.pins.find((p) => p.type === 'power-3v3') ?? def.pins.find((p) => p.type === 'power-5v');
   const ground = def.pins.find((p) => p.type === 'ground');
   if (!tx || !rx || !power || !ground) {
@@ -156,14 +160,19 @@ const MEGA_PORTS = [
   { port: 'Serial2', rx: 'D17', tx: 'D16' },
   { port: 'Serial3', rx: 'D15', tx: 'D14' },
 ];
-for (const { port, rx, tx } of MEGA_PORTS) {
-  console.log(`\n--- board.arduino-mega2560 ${port}`);
-  const p = emptyProject(`gps-mega-${port}`);
-  const board = inst('board.arduino-mega2560');
+// And the ESP32 DevKit's Serial2, on the pads printed RX2/TX2 (UART2).
+const EXTRA_PORTS = [
+  ...MEGA_PORTS.map((m) => ({ ...m, board: 'board.arduino-mega2560', vcc: '5V', others: MEGA_PORTS.map((x) => x.port) })),
+  { port: 'Serial2', rx: 'RX2', tx: 'TX2', board: 'board.esp32-devkit', vcc: '3V3', others: ['Serial2'] },
+];
+for (const { port, rx, tx, board: boardId, vcc, others: portsOnBoard } of EXTRA_PORTS) {
+  console.log(`\n--- ${boardId} ${port}`);
+  const p = emptyProject(`gps-${boardId}-${port}`);
+  const board = inst(boardId);
   const gps = inst('comp.gps', { latitude: 48.8584, longitude: 2.2945, satellites: 9, baud: 9600 });
   p.boardInstances.push(board);
   p.componentInstances.push(gps);
-  const others = ['Serial', ...MEGA_PORTS.map((m) => m.port).filter((x) => x !== port)];
+  const others = ['Serial', ...portsOnBoard.filter((x) => x !== port)];
   const sketch = sketchFor(port, false).replace(
     `  ${port}.begin(9600);`,
     `  Serial.begin(9600);\n  ${port}.begin(9600);\n${others.filter((o) => o !== 'Serial').map((o) => `  ${o}.begin(9600);`).join('\n')}`,
@@ -172,14 +181,14 @@ for (const { port, rx, tx } of MEGA_PORTS) {
     `\n${others.filter((o) => o !== 'Serial').map((o) => `  while (${o}.available()) { ${o}.read(); Serial.println("LEAK ${o}"); }`).join('\n')}\n}`,
   );
   p.codeFiles = [{ id: 'c', name: 'sketch.ino', content: sketch, language: 'cpp' }];
-  wire(p, board.id, '5V', gps.id, 'vcc');
+  wire(p, board.id, vcc, gps.id, 'vcc');
   wire(p, board.id, 'GND1', gps.id, 'gnd');
   wire(p, board.id, rx, gps.id, 'tx');
   wire(p, board.id, tx, gps.id, 'rx');
   simulationController.stop();
   const report = await simulationController.build(p);
   if (!report.anyRunnable || !(await simulationController.start())) {
-    console.log(`SKIP: the Mega did not build or start here (${report.builds.map((b) => b.detail).join('; ')})`);
+    console.log(`SKIP: ${boardId} did not build or start here (${report.builds.map((b) => b.detail).join('; ')})`);
     skipped++;
     continue;
   }

@@ -529,6 +529,8 @@ export const BOARDS_WITH_UART = new Set([
   'board.raspberry-pi-pico',
   'board.raspberry-pi-pico-w',
   'board.seeed-xiao-rp2040',
+  'board.esp32-devkit',
+  'board.esp32-cam',
   'board.esp32-c3',
   'board.esp32-c3-supermini',
   'board.esp32-c6-devkitc-1',
@@ -1264,7 +1266,11 @@ export class CircuitBinding {
 
     // The board's own UART pads, by capability rather than by pin name — a
     // Pico's are GP0/GP1 and an Uno's are D0/D1.
+    // Pads that belong to one of the further UARTs below are not the console's:
+    // an ESP32 DevKit lists RX2/TX2 (Serial2) before RX0/TX0 (Serial).
+    const extraPads = new Set((runner.extraUarts ?? []).flatMap((port) => [port.rxPin, port.txPin]));
     const padWithCap = (cap: string): string | undefined =>
+      board.pins.find((p) => p.capabilities.includes(cap as never) && !extraPads.has(runnerPinIndex(board, p.id) ?? -1))?.id ??
       board.pins.find((p) => p.capabilities.includes(cap as never))?.id;
     const boardRxPin = padWithCap('uart-rx');
     const boardTxPin = padWithCap('uart-tx');

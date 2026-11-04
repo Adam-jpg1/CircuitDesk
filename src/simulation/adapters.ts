@@ -31,7 +31,7 @@ export interface FirmwareArtifact {
 }
 
 export interface BoardSimulatorAdapter {
-  engine: 'avr8js' | 'rp2040js' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python';
+  engine: 'avr8js' | 'rp2040js' | 'esp32' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python';
   /**
    * Processor profiles this adapter genuinely executes.
    *
@@ -132,6 +132,32 @@ const esp32c3Adapter: BoardSimulatorAdapter = {
     );
   },
 };
+
+const esp32Adapter: BoardSimulatorAdapter = {
+  engine: 'esp32',
+  processorProfileIds: ['proc.esp32'],
+  firmwareFormat: 'esp-image',
+  async createRunner(firmware, board) {
+    assertFormat(this, firmware, board);
+    // The image header names its chip, so a C3 or S3 build is refused here,
+    // before the Xtensa engine is downloaded.
+    const bytes = decodeBase64Image(firmware.data);
+    parseEspApplicationImage(bytes, { expectChip: 'esp32', regions: ESP32_IMAGE_REGIONS });
+    const { createEsp32Runner } = await import('./esp32Runner');
+    const { decodeRegion } = await import('./espRiscvRunner');
+    return createEsp32Runner(bytes, (firmware.regions ?? []).map((r) => ({ offset: r.offset, data: decodeRegion(r.data) })));
+  },
+};
+
+/** Where an ESP32 image may place segments; repeated here so validation needs no engine chunk. */
+const ESP32_IMAGE_REGIONS = [
+  { start: 0x3f400000, end: 0x3f800000, name: 'DROM (flash-mapped constants)' },
+  { start: 0x3ff80000, end: 0x3ff82000, name: 'RTC fast memory' },
+  { start: 0x3ffae000, end: 0x40000000, name: 'DRAM' },
+  { start: 0x40070000, end: 0x400c2000, name: 'IRAM' },
+  { start: 0x400d0000, end: 0x40400000, name: 'IROM (flash-mapped code)' },
+  { start: 0x50000000, end: 0x50002000, name: 'RTC slow memory' },
+];
 
 const esp32c6Adapter: BoardSimulatorAdapter = {
   engine: 'esp32c6',
@@ -314,7 +340,7 @@ const pythonAdapter: BoardSimulatorAdapter = {
   },
 };
 
-const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32c3Adapter, esp32c6Adapter, samd21Adapter, armv7mAdapter, pythonAdapter];
+const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32Adapter, esp32c3Adapter, esp32c6Adapter, samd21Adapter, armv7mAdapter, pythonAdapter];
 
 /**
  * The adapter for a board, or null when the board is not genuinely simulated.

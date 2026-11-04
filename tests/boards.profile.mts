@@ -118,6 +118,13 @@ function projectWith(boardDefId: string): CircuitProject {
         // adapter; two instances proven independent; and firmware-to-firmware
         // communication with a Pico over a shared net, in both directions.
         'board.esp32-c6-devkitc-1',
+        // Simulated on the strength of tests/esp32.runtime.mts, esp32.peripherals.mts
+        // and esp.adc.mts: Arduino-ESP32 firmware on the Xtensa core and ESP32 model,
+        // both CPUs under ESP-IDF's FreeRTOS — Serial, time, floating point, GPIO,
+        // interrupts, analogRead, PWM, tone, servos, Wire and SPI. The CAM board is
+        // the same chip, run by the same engine.
+        'board.esp32-cam',
+        'board.esp32-devkit',
         // Simulated on the strength of tests/microbit.runtime.mts: Arduino nRF5
         // core firmware on the ARMv7-M core and nRF52833 model — Serial, time,
         // analogRead, digital in, PWM, interrupts, the LED matrix, buttons A
@@ -249,7 +256,11 @@ function projectWith(boardDefId: string): CircuitProject {
   const nodemcu = getBoardDefinition('board.esp8266-nodemcu')!;
   check(esp32.metadata.variant === 'esp32' && s3.metadata.variant === 'esp32s3' && c3.metadata.variant === 'esp32c3', 'ESP32 variants are tracked distinctly (esp32/esp32s3/esp32c3)');
   check(nodemcu.architecture === 'esp8266' && Number(nodemcu.metadata.logicVoltage) === 3.3, 'ESP8266: own architecture, 3.3 V');
-  check(!esp32.compiler?.supported && !esp32.simulation?.supported, 'ESP32 honestly reports no compile/simulation support');
+  check(
+    esp32.compiler?.supported === true && esp32.compiler.fqbn === 'esp32:esp32:esp32' && esp32.simulation?.engine === 'esp32',
+    'ESP32: compiled for the Xtensa ESP32 and run on its own engine, never a RISC-V one',
+  );
+  check(!s3.compiler?.supported && !s3.simulation?.supported, 'ESP32-S3 honestly reports no compile/simulation support');
   // The Pi headers are simulated by running their Python GPIO script — and say
   // plainly that this is not Linux being emulated.
   for (const id of ['board.rpi-zero-gpio', 'board.rpi4-gpio']) {
@@ -267,8 +278,8 @@ function projectWith(boardDefId: string): CircuitProject {
   check(resolveDefinition('board.does-not-exist', null) === undefined, 'unknown board id resolves to undefined, not a default profile');
   const emptyRes = resolveCompileTarget(emptyProject('t'));
   check(!emptyRes.ok, 'project without a board has NO default compile target');
-  const espRes = resolveCompileTarget(projectWith('board.esp32-devkit'));
-  check(!espRes.ok && espRes.reason.includes('never compiled as a different board'), 'ESP32 compile refused with explicit no-fallback message');
+  const espRes = resolveCompileTarget(projectWith('board.esp32-s3'));
+  check(!espRes.ok && espRes.reason.includes('never compiled as a different board'), 'ESP32-S3 compile refused with explicit no-fallback message');
   const unknownRes = resolveCompileTarget(projectWith('board.does-not-exist'));
   check(!unknownRes.ok, 'unknown board compile refused');
   // server-side allowlist
@@ -360,8 +371,8 @@ function projectWith(boardDefId: string): CircuitProject {
       })
     ).json()) as { success: boolean; errorCode?: string; error?: string; toolchain?: string };
 
-  const unknown = await compileAs('board.esp32-devkit', 'esp32:esp32:esp32');
-  check(!unknown.success && unknown.errorCode === 'UNSUPPORTED_BOARD', 'server compile: ESP32 → UNSUPPORTED_BOARD (never compiled as Uno)');
+  const unknown = await compileAs('board.esp32-s3', 'esp32:esp32:esp32s3');
+  check(!unknown.success && unknown.errorCode === 'UNSUPPORTED_BOARD', 'server compile: ESP32-S3 → UNSUPPORTED_BOARD (never compiled as another board)');
   const picoCompile = await compileAs('board.raspberry-pi-pico', 'rp2040:rp2040:rpipico');
   check(
     !picoCompile.success

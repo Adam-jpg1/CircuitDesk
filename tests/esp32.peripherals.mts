@@ -45,6 +45,10 @@ type Runner = any;
 
 const BOARDS = [
   {
+    id: 'board.esp32-devkit', fqbn: 'esp32:esp32:esp32', out: 'D4', inA: 'D5', inB: 'D18', gnd: 'GND1', vcc: '3V3',
+    sda: 'D21', scl: 'D22', sck: 'D18', miso: 'D19', mosi: 'D23', cs: 'D5',
+  },
+  {
     id: 'board.esp32-c3', fqbn: 'esp32:esp32:esp32c3', out: 'IO4', inA: 'IO5', inB: 'IO6', gnd: 'GND1', vcc: '3V3_1',
     sda: 'IO8', scl: 'IO9', sck: 'IO4', miso: 'IO5', mosi: 'IO6', cs: 'IO7',
   },
@@ -54,10 +58,10 @@ const BOARDS = [
   },
 ] as const;
 
-const num = (label: string) => label.replace(/^IO/, '');
+const num = (label: string) => label.replace(/^(IO|D)/, '');
 
 async function boot(boardId: string, fqbn: string, sketch: string) {
-  const built = await compileProject({ fqbn, boardId, files: [{ name: 'sketch.ino', content: sketch }] }, false);
+  const built = await compileProject({ fqbn, boardId: getBoardDefinition(boardId)?.serverTargetId ?? boardId, files: [{ name: 'sketch.ino', content: sketch }] }, false);
   if (!built.firmware) {
     console.log(`SKIP: ${boardId} did not build here (${built.errors?.[0]?.message ?? ''})`);
     skipped++;
@@ -85,7 +89,7 @@ function edges(r: Runner, pad: number) {
 
 const median = (xs: number[]) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : NaN);
 
-for (const b of BOARDS) {
+for (const b of BOARDS.filter((x) => !process.env.ONLY || x.id === process.env.ONLY)) {
   console.log(`\n=== ${b.id}`);
 
   // ------------------------------------------------------------ analogWrite

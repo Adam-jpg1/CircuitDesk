@@ -107,6 +107,7 @@
       "unavailable": [
         {
           "targets": [
+            "esp32:esp32:esp32",
             "esp32:esp32:esp32c3",
             "esp32:esp32:esp32c6"
           ],
@@ -122,6 +123,7 @@
         {
           "source": "library:ESP32Servo",
           "targets": [
+            "esp32:esp32:esp32",
             "esp32:esp32:esp32c3",
             "esp32:esp32:esp32c6"
           ],
@@ -176,6 +178,7 @@
         {
           "source": "core:esp32:esp32",
           "targets": [
+            "esp32:esp32:esp32",
             "esp32:esp32:esp32c3",
             "esp32:esp32:esp32c6"
           ],
@@ -227,6 +230,7 @@
         {
           "source": "core:esp32:esp32",
           "targets": [
+            "esp32:esp32:esp32",
             "esp32:esp32:esp32c3",
             "esp32:esp32:esp32c6"
           ],

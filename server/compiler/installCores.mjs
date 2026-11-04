@@ -100,13 +100,45 @@ function pruneEspToolchains(keepChips) {
       }
       continue;
     }
-    // The Xtensa toolchain, when only RISC-V parts are kept. Both ESP targets
-    // CircuitDesk supports are RISC-V; if that ever changes, keepChips changes
-    // with it and this stops matching.
+    // The Xtensa toolchain, when only RISC-V parts are kept.
     const allRiscv = [...keep].every((c) => /^esp32(c|h|p)\d/.test(c));
     if (entry === 'esp-x32' && allRiscv) {
       rmSync(join(tools, entry), { recursive: true, force: true });
       removed.push(entry);
+      continue;
+    }
+    // When it is kept, only the kept Xtensa chips' multilibs are: the
+    // toolchain carries esp32, esp32s2 and esp32s3 builds of libc, libstdc++
+    // and libgcc side by side. picolibc goes too unless a kept chip's libraries
+    // were configured for it — Arduino-ESP32's are built with newlib
+    // (CONFIG_LIBC_NEWLIB in each esp*-libs/sdkconfig). A build with these
+    // removed was checked to produce a byte-identical image.
+    if (entry === 'esp-x32') {
+      for (const version of readdirSync(join(tools, entry))) {
+        const root = join(tools, entry, version);
+        const multilibDirs = [join(root, 'xtensa-esp-elf', 'lib')];
+        const gccLib = join(root, 'lib', 'gcc', 'xtensa-esp-elf');
+        if (existsSync(gccLib)) for (const v of readdirSync(gccLib)) multilibDirs.push(join(gccLib, v));
+        for (const dir of multilibDirs) {
+          for (const chip of ['esp32', 'esp32s2', 'esp32s3']) {
+            if (keep.has(chip) || !existsSync(join(dir, chip))) continue;
+            rmSync(join(dir, chip), { recursive: true, force: true });
+            removed.push(`${entry}/${version}: ${chip} multilib`);
+          }
+        }
+        const picolibcWanted = [...keep].some((chip) => {
+          const config = join(tools, `${chip}-libs`);
+          if (!existsSync(config)) return false;
+          return readdirSync(config).some((v) => {
+            const sdk = join(config, v, 'sdkconfig');
+            return existsSync(sdk) && /^CONFIG_LIBC_PICOLIBC=y$/m.test(readFileSync(sdk, 'utf8'));
+          });
+        });
+        if (!picolibcWanted && existsSync(join(root, 'picolibc'))) {
+          rmSync(join(root, 'picolibc'), { recursive: true, force: true });
+          removed.push(`${entry}/${version}: picolibc`);
+        }
+      }
       continue;
     }
     // Debuggers. A build server compiles; it does not attach to a target.

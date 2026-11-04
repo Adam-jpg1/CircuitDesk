@@ -244,6 +244,11 @@ async function toolchainOverride(fqbn: string): Promise<string[]> {
   return existsSync(bin) ? ['--build-property', `compiler.path=${bin}${path.sep}`] : [];
 }
 
+/** The Espressif targets, whose builds produce an application image plus bootloader and partitions. */
+function isEspArch(arch: BoardTarget['arch']): boolean {
+  return arch === 'esp32' || arch === 'esp32c3' || arch === 'esp32c6';
+}
+
 export async function cliCompile(
   sketchDir: string,
   outputDir: string,
@@ -252,7 +257,7 @@ export async function cliCompile(
   arch: BoardTarget['arch'] = 'avr',
 ): Promise<CliBuildOutput> {
   const jobs = ['--jobs', String(COMPILE_JOBS)];
-  const skip = arch === 'esp32c3' || arch === 'esp32c6' ? SKIP_MERGED_IMAGE : [];
+  const skip = isEspArch(arch) ? SKIP_MERGED_IMAGE : [];
   // Syntax-only is a real compile with the artifacts thrown away, not a flag.
   // It used to pass `--dry-run`, which arduino-cli 1.5.1 does not have: every
   // call to /api/compiler/validate failed with "unknown flag: --dry-run" and
@@ -274,7 +279,7 @@ export async function cliCompile(
   // A data directory holding only this core's package, so arduino-cli does not
   // parse every other installed platform before compiling — see coreDataDirs.
   const dataDir = await dataDirFor(fqbn);
-  const isEsp = arch === 'esp32c3' || arch === 'esp32c6';
+  const isEsp = isEspArch(arch);
   const stockBootloader = isEsp && !syntaxOnly ? stockBootloaders.get(fqbn) : undefined;
   if (stockBootloader) await writeFile(path.join(sketchDir, BOOTLOADER_FILE), stockBootloader);
   const env = dataDir ? { ...CLI_ENV, ARDUINO_DIRECTORIES_DATA: dataDir } : CLI_ENV;
@@ -303,7 +308,7 @@ export async function cliCompile(
           binaryBase64 = (await readFile(path.join(outputDir, chosen))).toString('base64');
           binaryFormat = uf2 ? 'uf2' : 'bin';
         }
-      } else if (arch === 'esp32c3' || arch === 'esp32c6') {
+      } else if (isEspArch(arch)) {
         // An ESP build writes several .bin files: the application image, the
         // second-stage bootloader, the partition table and a merged 4 MB flash
         // image. The application image is the one that is executed, and it is
@@ -331,7 +336,8 @@ export async function cliCompile(
             const image = await readFile(path.join(outputDir, bootloader));
             // Learnt only from a build where esptool made it.
             if (!stockBootloader && image.length > 0) stockBootloaders.set(fqbn, image);
-            binaryRegions.push({ offset: 0x0, data: image.toString('base64') });
+            // The classic ESP32's ROM loads the bootloader from 0x1000; the C3 and C6 from 0.
+            binaryRegions.push({ offset: arch === 'esp32' ? 0x1000 : 0x0, data: image.toString('base64') });
           }
           if (partitions) {
             binaryRegions.push({ offset: 0x8000, data: (await readFile(path.join(outputDir, partitions))).toString('base64') });

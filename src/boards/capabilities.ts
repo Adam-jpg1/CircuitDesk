@@ -133,6 +133,28 @@ const AVR_SIM_PERIPHERALS = ['GPIO ports', 'Timer0/1/2', 'USART0', 'ADC'];
  * against real compiled firmware; anything absent is absent because it is not
  * modelled, not because it was forgotten.
  */
+/** DevKit V1 silkscreen labels to ESP32 GPIOs. */
+export const ESP32_DEVKIT_PADS: Record<string, string> = {
+  VP: 'GPIO36', VN: 'GPIO39', D34: 'GPIO34', D35: 'GPIO35', D32: 'GPIO32', D33: 'GPIO33', D25: 'GPIO25', D26: 'GPIO26',
+  D27: 'GPIO27', D14: 'GPIO14', D12: 'GPIO12', D13: 'GPIO13', D15: 'GPIO15', D2: 'GPIO2', D4: 'GPIO4', RX2: 'GPIO16',
+  TX2: 'GPIO17', D5: 'GPIO5', D18: 'GPIO18', D19: 'GPIO19', D21: 'GPIO21', RX0: 'GPIO3', TX0: 'GPIO1', D22: 'GPIO22',
+  D23: 'GPIO23',
+};
+
+/** What the ESP32 runtime executes and has been checked to work. */
+const ESP32_SIM_APIS = [
+  'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'delay/millis/micros', 'Serial (UART0)', 'floating point',
+  'analogWrite (PWM)', 'tone()', 'Servo pulses through the ESP32Servo library', 'attachInterrupt', 'Wire (I2C)', 'SPI',
+];
+const ESP32_SIM_PERIPHERALS = [
+  'both Xtensa LX6 cores under FreeRTOS', 'GPIO matrix and interrupts', 'timer groups', 'UART0', 'SAR ADC1/ADC2',
+  'LED PWM controller', 'I2C0/I2C1 (master)', 'HSPI/VSPI (master)',
+];
+const ESP32_LIMITATION =
+  'Real Xtensa execution of the compiled image on both cores, under ESP-IDF\'s own startup and FreeRTOS: GPIO and '
+  + 'interrupts, timing, Serial, floating point, analogRead(), PWM/tone()/servos, Wire and SPI. The ADC converts '
+  + 'ideally (no noise or curve). Wi-Fi and Bluetooth are not simulated — sketches using them compile, run, and do nothing.';
+
 const ESP32C3_SIM_APIS = [
   'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
   'digitalWrite',
@@ -939,7 +961,26 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     architecture: 'esp32',
     variant: 'esp32',
     aliases: ['esp32-devkit-v1', 'esp32'],
-    limitation: 'Xtensa LX6 execution is not simulated and the ESP32 core is not installed on the compiler service; wiring + 3.3 V validation only.',
+    processorProfileId: 'proc.esp32',
+    compileProfileId: 'compile.esp32-arduino',
+    runtimeProfileId: 'runtime.esp32',
+    serverTargetId: 'board.esp32',
+    // Every label and the GPIO behind it, as the DevKit V1 silkscreen prints them.
+    padMap: ESP32_DEVKIT_PADS,
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'esp32:esp32:esp32',
+      requiredCore: 'esp32:esp32',
+      supported: true,
+      note: 'Built as the Espressif core\'s "ESP32 Dev Module" — the ESP32-WROOM-32 with 4 MB of flash that the DevKit V1 carries.',
+    },
+    simulation: {
+      engine: 'esp32',
+      supported: true,
+      supportedApis: ESP32_SIM_APIS,
+      supportedPeripherals: ESP32_SIM_PERIPHERALS,
+    },
+    limitation: ESP32_LIMITATION,
   },
   'board.esp32-s3': {
     manufacturer: 'Espressif',
@@ -1018,7 +1059,28 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     architecture: 'esp32',
     variant: 'esp32',
     aliases: ['esp32-cam'],
-    limitation: 'Visual reference; camera and execution are not modeled.',
+    processorProfileId: 'proc.esp32',
+    compileProfileId: 'compile.esp32-arduino',
+    runtimeProfileId: 'runtime.esp32',
+    serverTargetId: 'board.esp32',
+    padMap: { IO0: 'GPIO0', IO2: 'GPIO2', IO4: 'GPIO4', IO12: 'GPIO12', IO13: 'GPIO13', IO14: 'GPIO14', IO15: 'GPIO15', IO16: 'GPIO16', U0R: 'GPIO3', U0T: 'GPIO1' },
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'esp32:esp32:esp32',
+      requiredCore: 'esp32:esp32',
+      supported: true,
+      note: 'Built as the Espressif core\'s "ESP32 Dev Module": the same ESP32 chip and 4 MB flash, without the board\'s PSRAM.',
+    },
+    simulation: {
+      engine: 'esp32',
+      supported: true,
+      supportedApis: ESP32_SIM_APIS,
+      supportedPeripherals: ESP32_SIM_PERIPHERALS,
+    },
+    limitation:
+      'The ESP32 runs the compiled sketch exactly as on the DevKit: GPIO, timing, Serial, analogRead(), PWM, Wire and SPI '
+      + 'on the pins the module brings out. The OV2640 camera, the microSD slot and the PSRAM are not simulated, so the '
+      + 'camera library cannot be used; IO4 drives the module\'s flash LED on the real board. Wi-Fi and Bluetooth are not simulated.',
   },
 
   // ---------------- STM32 / imxrt / nRF52 ----------------

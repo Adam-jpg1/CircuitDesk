@@ -312,11 +312,11 @@ export const ESP32_DEVKIT = headerBoard({
   processor: 'ESP32-WROOM-32',
   widthMm: 28.5,
   heightMm: 52,
-  supportLevel: 'validation',
+  supportLevel: 'simulated',
   logicVoltage: 3.3,
   color: '#12262e',
   description:
-    '3.3 V logic Wi-Fi/BT board. Wiring and electrical validation are supported; firmware simulation for the Xtensa core is not implemented, so it is honestly labeled validation-level.',
+    '3.3 V logic Wi-Fi/BT board with an ESP32-WROOM-32. The compiled firmware runs on a simulated dual-core Xtensa ESP32; Wi-Fi and Bluetooth are not simulated.',
   left: [
     { id: 'EN', label: 'EN', type: 'reset' as const, caps: [] },
     a3('VP', 'VP'), a3('VN', 'VN'), a3('D34', 'D34'), a3('D35', 'D35'),
@@ -658,7 +658,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     'board.esp32-cam', 'ESP32-CAM', 'Espressif', 'ESP32 + OV2640', 27, 40.5, 3.3,
     [p5v('5V'), gnd('GND1'), g3('IO12', 'IO12'), g3('IO13', 'IO13'), g3('IO15', 'IO15'), g3('IO14', 'IO14'), g3('IO2', 'IO2'), g3('IO4', 'IO4')],
     [p3v3('3V3'), g3('IO16', 'IO16'), g3('IO0', 'IO0'), gnd('GND2'), { id: 'VOR', label: 'VOR', type: 'nc' as const, caps: [] }, g3('U0R', 'U0R', { caps: ['digital-in', 'uart-rx'] }), g3('U0T', 'U0T', { caps: ['digital-out', 'uart-tx'] }), gnd('GND3')],
-    'visual-only', { usb: 'none', color: '#12262e', description: 'ESP32-CAM — visual reference with pin metadata. Camera behavior is not modeled.' },
+    'simulated', { usb: 'none', color: '#12262e', description: 'ESP32-CAM (Ai-Thinker design). The ESP32 on it runs the compiled sketch; the OV2640 camera, microSD slot and PSRAM are not simulated.' },
   ),
   PICO,
   { ...PICO, id: 'board.raspberry-pi-pico-w', name: 'Raspberry Pi Pico W', description: 'Pico W (wireless). The RP2040 side runs real firmware exactly as the Pico does; the CYW43 Wi-Fi radio is not simulated.', metadata: { ...PICO.metadata } },

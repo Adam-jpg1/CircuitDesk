@@ -34,7 +34,7 @@ import { TIMER_FUNCTION_E, TIMER_FUNCTION_F } from '../simulation/samd21/timers'
  * family is carried alongside as `boardArchitecture` rather than derived by
  * string matching, so the two vocabularies stay explicitly linked.
  */
-export type ProcessorArchitecture = 'avr' | 'rp2040' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52' | 'imxrt' | 'bcm';
+export type ProcessorArchitecture = 'avr' | 'rp2040' | 'xtensa-esp32' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52' | 'imxrt' | 'bcm';
 
 export interface PeripheralController {
   /** Controller id as the chip's own documentation names it: `i2c0`, `usart1`. */
@@ -316,6 +316,50 @@ const ESP32C3: ProcessorProfile = {
   interruptPads: Array.from({ length: 22 }, (_, i) => `IO${i}`),
   logicVolts: 3.3,
   notModelled: ['Wi-Fi and Bluetooth', 'USB Serial/JTAG', 'LEDC hardware fades'],
+};
+
+/**
+ * The ESP32's bonded GPIOs. 6-11 carry the module's flash and 20, 24 and
+ * 28-31 are not bonded out, so none of those is offered; 34-39 are input-only.
+ */
+export const ESP32_GPIO_PADS = [0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33, 34, 35, 36, 37, 38, 39].map((n) => `GPIO${n}`);
+const ESP32_OUTPUT_PADS = ESP32_GPIO_PADS.filter((p) => Number(p.slice(4)) < 34);
+
+const ESP32: ProcessorProfile = {
+  id: 'proc.esp32',
+  name: 'ESP32 (Xtensa LX6, dual core)',
+  architecture: 'xtensa-esp32',
+  boardArchitecture: 'esp32',
+  vendor: 'Espressif',
+  clockHz: 240_000_000,
+  flashBytes: 1_310_720,
+  ramBytes: 327_680,
+  pads: ESP32_GPIO_PADS,
+  // The runner numbers an ADC input by its GPIO (esp32/adc.ts): ADC1 on 32-39, ADC2 on 0, 2, 4, 12-15, 25-27.
+  adcChannels: Object.fromEntries([36, 37, 38, 39, 32, 33, 34, 35, 4, 0, 2, 15, 13, 12, 14, 27, 25, 26].map((n) => [`GPIO${n}`, n])),
+  // The GPIO matrix carries LEDC, both I2C controllers and both SPI masters to any output pad.
+  pwmPads: ESP32_OUTPUT_PADS,
+  uarts: [],
+  i2c: [
+    { id: 'i2c0', arduinoName: 'Wire', signals: { sda: ESP32_OUTPUT_PADS, scl: ESP32_OUTPUT_PADS }, defaults: { sda: 'GPIO21', scl: 'GPIO22' } },
+  ],
+  spi: [
+    {
+      id: 'vspi',
+      arduinoName: 'SPI',
+      signals: { sck: ESP32_OUTPUT_PADS, mosi: ESP32_OUTPUT_PADS, miso: ESP32_GPIO_PADS },
+      defaults: { sck: 'GPIO18', mosi: 'GPIO23', miso: 'GPIO19' },
+    },
+  ],
+  interruptPads: ESP32_GPIO_PADS,
+  logicVolts: 3.3,
+  notModelled: [
+    'Wi-Fi and Bluetooth',
+    'touch sensing, the DACs and the hall sensor',
+    'the ADC\'s non-linearity and noise (conversions are ideal)',
+    'LEDC fades, RMT, PCNT, I2S and the motor PWM',
+    'deep sleep',
+  ],
 };
 
 const ESP32C6: ProcessorProfile = {
@@ -653,6 +697,7 @@ export const PROCESSOR_PROFILES: ProcessorProfile[] = [
   RP2040,
   ESP32C3,
   ESP32C6,
+  ESP32,
   SAMD21,
   SAM3X8E,
   STM32F401RE,

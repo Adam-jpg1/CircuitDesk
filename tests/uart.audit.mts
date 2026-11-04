@@ -54,6 +54,8 @@ const UART_SUPPORT: Record<string, { tx: boolean; rx: boolean; note: string }> =
   'board.arduino-leonardo': { tx: true, rx: true, note: 'AVRUSART; Serial1 on D0/D1' },
   'board.raspberry-pi-pico': { tx: true, rx: true, note: 'RP2040 UART0; UART1 exists in the emulator and is not wired' },
   'board.raspberry-pi-pico-w': { tx: true, rx: true, note: 'RP2040 UART0; UART1 not wired' },
+  'board.esp32-devkit': { tx: true, rx: true, note: 'ESP32 UART0 behind Serial on TX0/RX0; UART2 behind Serial2 on TX2/RX2' },
+  'board.esp32-cam': { tx: true, rx: true, note: 'ESP32 UART0 behind Serial, on U0T/U0R' },
   'board.esp32-c3': { tx: true, rx: true, note: 'ESP32-C3 UART0 behind Serial, on IO21/IO20' },
   'board.esp32-c6-devkitc-1': { tx: true, rx: true, note: 'ESP32-C6 UART0 behind Serial, on IO16/IO17' },
   // The boards that carry a chip already executed here. The peripheral belongs
@@ -145,7 +147,7 @@ section('4. the boards that do have a UART have both directions');
     check(!(claim.rx && !claim.tx), `${boardId} does not claim receive without transmit`);
   }
   const withUart = Object.entries(UART_SUPPORT).filter(([, c]) => c.tx && c.rx);
-  check(withUart.length === 19, `nineteen boards carry a real UART today (${withUart.length})`);
+  check(withUart.length === 21, `twenty-one boards carry a real UART today (${withUart.length})`);
 }
 
 
@@ -168,12 +170,14 @@ section('5. a UART part on a board without one blames the board');
     } as CircuitProject['connections'][number]);
   };
 
-  const boardDef = BOARD_DEFINITIONS.find((b) => b.id === 'board.esp32-devkit');
+  // A board with UART pads and no UART simulation: the Pi header, whose
+  // Python runtime has no serial port library.
+  const boardDef = BOARD_DEFINITIONS.find((b) => b.id === 'board.rpi4-gpio');
   const txPad = boardDef?.pins.find((p) => p.capabilities.includes('uart-tx'));
   const rxPad = boardDef?.pins.find((p) => p.capabilities.includes('uart-rx'));
 
-  const project = emptyProject('esp32-gps');
-  const board = mk('board.esp32-devkit');
+  const project = emptyProject('pi-gps');
+  const board = mk('board.rpi4-gpio');
   const gps = mk('comp.gps');
   project.boardInstances.push(board);
   project.componentInstances.push(gps);
@@ -187,7 +191,7 @@ section('5. a UART part on a board without one blames the board');
   if (found) {
     console.log(`   title: ${found.title}`);
     check(
-      found.title === 'ESP32 DevKit V1 physical UART simulation is not yet supported.',
+      found.title === `${boardDef?.name} physical UART simulation is not yet supported.`,
       'and the title names the board and the capability',
     );
     check(!/NEO-6M unsupported/.test(found.title), 'rather than calling the part unsupported');
