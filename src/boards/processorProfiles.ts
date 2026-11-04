@@ -34,7 +34,7 @@ import { TIMER_FUNCTION_E, TIMER_FUNCTION_F } from '../simulation/samd21/timers'
  * family is carried alongside as `boardArchitecture` rather than derived by
  * string matching, so the two vocabularies stay explicitly linked.
  */
-export type ProcessorArchitecture = 'avr' | 'rp2040' | 'xtensa-esp32' | 'xtensa-esp32s3' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52' | 'imxrt' | 'bcm';
+export type ProcessorArchitecture = 'avr' | 'rp2040' | 'xtensa-esp32' | 'xtensa-esp32s3' | 'xtensa-esp8266' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52' | 'imxrt' | 'bcm';
 
 export interface PeripheralController {
   /** Controller id as the chip's own documentation names it: `i2c0`, `usart1`. */
@@ -403,6 +403,44 @@ const ESP32S3: ProcessorProfile = {
   ],
 };
 
+/** The ESP8266's GPIO0-16; 6-11 carry the flash on every module. */
+const ESP8266_PADS = [0, 1, 2, 3, 4, 5, 9, 10, 12, 13, 14, 15, 16].map((n) => `GPIO${n}`);
+
+const ESP8266: ProcessorProfile = {
+  id: 'proc.esp8266',
+  name: 'ESP8266 (Xtensa LX106)',
+  architecture: 'xtensa-esp8266',
+  boardArchitecture: 'esp8266',
+  vendor: 'Espressif',
+  clockHz: 80_000_000,
+  flashBytes: 1_044_464,
+  ramBytes: 81_920,
+  pads: [...ESP8266_PADS, 'A0'],
+  adcChannels: { A0: 0 },
+  // The core's waveform generator: any pad but GPIO16.
+  pwmPads: ESP8266_PADS.filter((p) => p !== 'GPIO16'),
+  uarts: [],
+  // Wire is software I2C on any two pads; the variant's defaults are GPIO4/GPIO5.
+  i2c: [{ id: 'si2c', arduinoName: 'Wire', signals: { sda: ESP8266_PADS, scl: ESP8266_PADS }, defaults: { sda: 'GPIO4', scl: 'GPIO5' } }],
+  spi: [
+    {
+      id: 'hspi',
+      arduinoName: 'SPI',
+      signals: { sck: ['GPIO14'], mosi: ['GPIO13'], miso: ['GPIO12'] },
+      defaults: { sck: 'GPIO14', mosi: 'GPIO13', miso: 'GPIO12' },
+    },
+  ],
+  interruptPads: ESP8266_PADS.filter((p) => p !== 'GPIO16'),
+  logicVolts: 3.3,
+  notModelled: [
+    'Wi-Fi: the SDK starts and calibrates a radio that is not there, and nothing reaches the air',
+    'the ADC\'s non-linearity and noise (conversions are ideal, to the SDK\'s 0..1024)',
+    'Serial.swap(), UART1 (Serial1, TX only on GPIO2) and I2S',
+    'deep sleep and the RTC timer',
+    'Wire.begin() on pads other than GPIO4/GPIO5',
+  ],
+};
+
 const ESP32C6: ProcessorProfile = {
   id: 'proc.esp32c6',
   name: 'ESP32-C6',
@@ -740,6 +778,7 @@ export const PROCESSOR_PROFILES: ProcessorProfile[] = [
   ESP32C6,
   ESP32,
   ESP32S3,
+  ESP8266,
   SAMD21,
   SAM3X8E,
   STM32F401RE,

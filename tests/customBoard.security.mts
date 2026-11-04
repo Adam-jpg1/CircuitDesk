@@ -76,7 +76,7 @@ section('1. a build target is a name from a list, not a string to run');
   }
 
   // Nor may it be a target this service is not built against, even a real one.
-  check('error' in resolveRequestedFqbn(uno, 'esp8266:esp8266:generic', ALLOWED), 'a core we do not ship is refused');
+  check('error' in resolveRequestedFqbn(uno, 'esp8266:esp8266:generic', ALLOWED), 'a target this service is not built for is refused, even in a core it ships');
   check(
     'error' in resolveRequestedFqbn(pico, 'arduino:avr:uno', ALLOWED),
     'and a target from another core is refused even though it is on the allowlist',

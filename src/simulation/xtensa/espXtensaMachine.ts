@@ -194,6 +194,8 @@ export abstract class EspXtensaMachine implements SimulatedClock {
 
   // ------------------------------------------------------------- ROM
 
+  private readonly hosts: Esp32RomHost[] = [];
+
   protected romCall(i: number, pc: number): boolean {
     for (const r of this.romCode) if (pc >= r.start && pc < r.end) return false;
     const entry = this.romTable.get(pc);
@@ -203,7 +205,8 @@ export abstract class EspXtensaMachine implements SimulatedClock {
       const caller = ((cpu.a(n * 4) & 0x3fffffff) | 0x40000000) >>> 0;
       throw new UnimplementedEsp32RomError(pc, caller, this.romName);
     }
-    const host = this.romHost(i);
+    // Built once per core: it only refers to the core's slot and the machine.
+    const host = (this.hosts[i] ??= this.romHost(i));
     const result = entry.handler(host);
     if (result && typeof result === 'object' && !Array.isArray(result)) {
       // Forwarded into firmware: the callee runs as though called directly.
@@ -322,13 +325,17 @@ export abstract class EspXtensaMachine implements SimulatedClock {
         if (at !== undefined) horizon = Math.min(horizon, Math.max(at, slot.ns + period));
       }
       for (let k = 0; k < 4096; k++) {
+        // Time follows the cycles the core counted, so CCOUNT and the clock
+        // every peripheral reads never drift apart (a native ROM call costs
+        // several cycles, not one).
+        const before = slot.cpu.cycles;
         try {
           slot.cpu.step();
         } catch (e) {
           this.fault = e instanceof Error ? e.message : String(e);
           return executed;
         }
-        slot.ns += period;
+        slot.ns += (slot.cpu.cycles - before) * period;
         executed++;
         if (slot.cpu.halted) {
           this.fault = slot.cpu.halted;

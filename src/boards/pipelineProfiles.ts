@@ -84,7 +84,7 @@ export interface RuntimeProfile {
   id: string;
   name: string;
   /** The emulator that executes the artifact. */
-  engine: 'avr8js' | 'rp2040js' | 'esp32' | 'esp32s3' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python' | 'none';
+  engine: 'avr8js' | 'rp2040js' | 'esp32' | 'esp32s3' | 'esp8266' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python' | 'none';
   /** Processor profiles this runtime can genuinely execute. */
   processorProfileIds: string[];
   /** Formats the engine accepts. An artifact of any other format is refused. */
@@ -292,6 +292,18 @@ export const COMPILE_PROFILES: CompileProfile[] = [
     artifactFormat: 'esp-image',
     libraries: [],
     description: 'The Espressif Arduino core built for the ESP32-S3 (ESP32S3 Dev Module). Emits an ESP application image.',
+  },
+  {
+    id: 'compile.esp8266-arduino',
+    name: 'Arduino ESP8266',
+    adapter: 'arduino-cli',
+    processorProfileIds: ['proc.esp8266'],
+    requiredCore: 'esp8266:esp8266',
+    fqbn: 'esp8266:esp8266:nodemcuv2',
+    serverTargetId: 'board.esp8266-nodemcu',
+    artifactFormat: 'esp-image',
+    libraries: [],
+    description: 'The ESP8266 Arduino core built for the NodeMCU 1.0 (ESP-12E). Emits the flash image: the core\'s bootloader and the application.',
   },
   {
     id: 'compile.esp32c6-arduino',
@@ -521,6 +533,19 @@ export const RUNTIME_PROFILES: RuntimeProfile[] = [
     ],
     supportedPeripherals: ['both Xtensa LX7 cores', 'GPIO matrix', 'GPIO interrupts', 'system timer', 'timer groups', 'UART0/UART1', 'SAR ADC1/ADC2 (one-shot)', 'LED PWM controller', 'I2C0/I2C1 (master)', 'GP-SPI2/SPI3 (master)'],
     description: 'Executes ESP32-S3 application images on the CircuitDesk Xtensa core, both CPUs, under ESP-IDF\'s own FreeRTOS.',
+  },
+  {
+    id: 'runtime.esp8266',
+    name: 'CircuitDesk ESP8266',
+    engine: 'esp8266',
+    processorProfileIds: ['proc.esp8266'],
+    acceptsFormats: ['esp-image'],
+    supportedApis: [
+      'pinMode', 'digitalWrite', 'digitalRead', 'analogRead (A0)', 'delay/millis/micros', 'Serial (UART0)',
+      'floating point', 'analogWrite (PWM)', 'tone()', 'Servo', 'attachInterrupt', 'Wire', 'SPI',
+    ],
+    supportedPeripherals: ['Xtensa LX106 core', 'GPIO and GPIO interrupts', 'FRC1/FRC2 timers', 'UART0', 'SAR ADC (A0)', 'software I2C', 'HSPI (master)'],
+    description: 'Executes ESP8266 firmware on the CircuitDesk Xtensa core under Espressif\'s own NONOS SDK, with the mask ROM\'s routines provided natively.',
   },
   {
     id: 'runtime.esp32c6',

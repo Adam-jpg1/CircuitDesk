@@ -42,6 +42,14 @@
       "note": "Arduino-ESP32. CircuitDesk compiles only the parts it can execute (the Xtensa ESP32 and S3 and the RISC-V C3 and C6), so the per-chip libraries for the others are pruned after install — see installCores.mjs."
     },
     {
+      "id": "esp8266:esp8266",
+      "version": "3.1.2",
+      "additionalUrl": "https://arduino.esp8266.com/stable/package_esp8266com_index.json",
+      "targets": ["esp8266:esp8266:nodemcuv2"],
+      "required": true,
+      "note": "The ESP8266 Arduino core, on Espressif's NONOS SDK. The runtime is validated against this release's SDK start-up and ROM linkage."
+    },
+    {
       "id": "arduino:sam",
       "version": "1.6.12",
       "targets": ["arduino:sam:arduino_due_x_dbg"],

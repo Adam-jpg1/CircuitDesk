@@ -343,6 +343,15 @@ export async function cliCompile(
             binaryRegions.push({ offset: 0x8000, data: (await readFile(path.join(outputDir, partitions))).toString('base64') });
           }
         }
+      } else if (arch === 'esp8266') {
+        // The ESP8266 core writes one .bin that is the whole flash image —
+        // its eboot bootloader at 0 and the application at 0x1000 — in the
+        // chip's original image format, which is what the runtime loads.
+        const bin = files.find((f) => f.endsWith('.ino.bin'));
+        if (bin) {
+          binaryBase64 = (await readFile(path.join(outputDir, bin))).toString('base64');
+          binaryFormat = 'esp-image';
+        }
       } else if (arch === 'imxrt1062') {
         // The Teensy core writes only Intel HEX, of the flash from 0x60000000;
         // the chip model takes it as a raw image of that flash.

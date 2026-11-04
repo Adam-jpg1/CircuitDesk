@@ -691,7 +691,11 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     'board.esp8266-nodemcu', 'ESP8266 NodeMCU', 'Espressif', 'ESP8266', 25.6, 48.5, 3.3,
     [{ id: 'A0', label: 'A0', type: 'analog' as const, caps: ['analog-in' as const], voltage: 3.3 }, gnd('GND1'), g3('D0', 'D0'), g3('D1', 'D1', { caps: ['digital-in', 'digital-out', 'i2c-scl'] }), g3('D2', 'D2', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }), g3('D3', 'D3'), g3('D4', 'D4'), p3v3('3V3_1')],
     [g3('D5', 'D5', { caps: ['digital-in', 'digital-out', 'spi-sck'] }), g3('D6', 'D6', { caps: ['digital-in', 'digital-out', 'spi-miso'] }), g3('D7', 'D7', { caps: ['digital-in', 'digital-out', 'spi-mosi'] }), g3('D8', 'D8'), g3('RX', 'RX', { caps: ['digital-in', 'uart-rx'] }), g3('TX', 'TX', { caps: ['digital-out', 'uart-tx'] }), gnd('GND2'), p5v('VIN_5V', 'VIN')],
-    'wiring', { color: '#1a1a24' },
+    'simulated', {
+      color: '#1a1a24',
+      description:
+        'NodeMCU 1.0 (ESP-12E module, 4 MB flash). The ESP8266 runs the compiled firmware under Espressif\'s SDK; the on-board LED is on D4 (GPIO2, lit low). Wi-Fi is not simulated.',
+    },
   ),
   simpleWiringBoard(
     'board.esp32-cam', 'ESP32-CAM', 'Espressif', 'ESP32 + OV2640', 27, 40.5, 3.3,

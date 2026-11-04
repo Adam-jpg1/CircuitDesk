@@ -57,7 +57,7 @@ export interface PinSnapshot {
 }
 
 export interface BoardRunner {
-  readonly engine: 'avr8js' | 'rp2040js' | 'esp32' | 'esp32s3' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python';
+  readonly engine: 'avr8js' | 'rp2040js' | 'esp32' | 'esp32s3' | 'esp8266' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python';
 
   /** Advances the simulation by a slice of simulated time. Always bounded. */
   runFor(simMs: number): void;
@@ -174,6 +174,12 @@ export function runnerPinIndex(board: BoardDefinition, pinId: string): number | 
     const m = /^GPIO(\d{1,2})$/.exec(pad);
     return m && Number(m[1]) <= 27 ? Number(m[1]) : undefined;
   }
+  // The ESP8266: GPIO<n> is pad n, and A0, which has no GPIO, is 17.
+  if (espVariant(board) === 'esp8266') {
+    if (pad === 'A0') return 17;
+    const m = /^GPIO(\d{1,2})$/.exec(pad);
+    return m && Number(m[1]) <= 16 ? Number(m[1]) : undefined;
+  }
   // The Xtensa ESP32: GPIO<n> is pad n.
   if (espVariant(board) === 'esp32' || espVariant(board) === 'esp32s3') {
     const m = /^GPIO(\d{1,2})$/.exec(pad);
@@ -247,6 +253,7 @@ function espVariant(board: BoardDefinition): string {
   const architecture = processor?.architecture;
   if (architecture === 'xtensa-esp32') return 'esp32';
   if (architecture === 'xtensa-esp32s3') return 'esp32s3';
+  if (architecture === 'xtensa-esp8266') return 'esp8266';
   return architecture === 'esp32c3' || architecture === 'esp32c6' ? architecture : '';
 }
 
@@ -325,6 +332,8 @@ export function runnerAdcChannel(board: BoardDefinition, pinId: string): number 
     const gpio = runnerPinIndex(board, pinId);
     return gpio === undefined ? undefined : espAdcIndexForGpio(espVariant(board), gpio);
   }
+  // The ESP8266's one ADC input.
+  if (espVariant(board) === 'esp8266') return (board.padMap?.[pinId] ?? pinId) === 'A0' ? 0 : undefined;
   if (board.architecture === 'samd') {
     // AIN<n> behind the pad the label reaches, from the chip's mux table.
     const pad = board.padMap?.[pinId] ?? pinId;
@@ -388,6 +397,8 @@ export function runnerPinCount(board: BoardDefinition): number {
   // GPIO0-GPIO39 on the Xtensa ESP32.
   if (espVariant(board) === 'esp32') return 40;
   if (espVariant(board) === 'esp32s3') return 49;
+  // GPIO0-16 and A0.
+  if (espVariant(board) === 'esp8266') return 18;
   const espPads = ESP_RISCV_PAD_COUNT[espVariant(board)];
   if (espPads !== undefined) return espPads;
   return avrProfileFor(board)?.pinCount ?? 0;

@@ -48,6 +48,12 @@ export interface XtensaConfig {
   prid: number;
   /** Reset VECBASE. */
   vecbase: number;
+  /**
+   * The non-maskable interrupt, where the core has one (the ESP8266's, which
+   * its FRC1 timer can drive): its number and level. It is an edge, taken
+   * whatever INTENABLE and PS.INTLEVEL say, and not again until RFI leaves it.
+   */
+  nmi?: { int: number; level: number };
 }
 
 /** An exception raised while executing an instruction. */
@@ -108,6 +114,8 @@ export class Xtensa {
   intenable = 0;
   /** Latched interrupts: software (INTSET), timers, edge-triggered. */
   latched = 0;
+  /** Inside the NMI handler: a further NMI waits for its RFI. */
+  inNmi = false;
   /** Level-triggered interrupt lines, as the SoC drives them. */
   lines = 0;
   readonly ccompare = new Uint32Array(3);
@@ -154,6 +162,7 @@ export class Xtensa {
     this.vecbase = this.config.vecbase;
     this.intenable = 0;
     this.latched = 0;
+    this.inNmi = false;
     this.cpenable = 0;
     this.lcount = 0;
     this.waiting = false;
@@ -221,6 +230,8 @@ export class Xtensa {
 
   /** The highest pending enabled interrupt level above the current one, or 0. */
   pendingLevel(): number {
+    const nmi = this.config.nmi;
+    if (nmi && !this.inNmi && (this.latched >>> nmi.int) & 1) return nmi.level;
     const pending = this.interrupt & this.intenable;
     if (!pending) return 0;
     let best = 0;
@@ -233,6 +244,11 @@ export class Xtensa {
     if (level === 1) {
       this.raiseGeneral(EXC.LEVEL1_INT, 0, this.pc);
       return;
+    }
+    const nmi = this.config.nmi;
+    if (nmi && level === nmi.level && !this.inNmi && (this.latched >>> nmi.int) & 1) {
+      this.latched &= ~(1 << nmi.int);
+      this.inNmi = true;
     }
     this.epc[level] = this.pc;
     this.eps[level] = this.ps;
@@ -667,6 +683,7 @@ export class Xtensa {
         } else if (t === 1) {
           // RFI level
           const level = s;
+          if (this.config.nmi?.level === level) this.inNmi = false;
           this.ps = this.eps[level];
           return this.jump(this.epc[level]);
         }

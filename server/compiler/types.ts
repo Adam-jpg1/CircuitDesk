@@ -116,7 +116,7 @@ export interface BoardTarget {
   id: string;
   fqbn: string;
   name: string;
-  arch: 'avr' | 'rp2040' | 'esp32' | 'esp32s3' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52833' | 'nrf52840' | 'imxrt1062';
+  arch: 'avr' | 'rp2040' | 'esp32' | 'esp32s3' | 'esp8266' | 'esp32c3' | 'esp32c6' | 'samd21' | 'sam3x' | 'stm32f4' | 'ra4m1' | 'nrf52833' | 'nrf52840' | 'imxrt1062';
   /** arduino-cli core that provides this target. */
   core: string;
   fCpuHz: number;
@@ -274,6 +274,20 @@ export const SUPPORTED_TARGETS: BoardTarget[] = [
     fCpuHz: 240_000_000,
     flashMaxBytes: 1_310_720,
     ramMaxBytes: 327_680,
+  },
+  // The ESP8266, as the core's "NodeMCU 1.0 (ESP-12E Module)" with its
+  // defaults: 80 MHz, 4 MB flash with 2 MB of filesystem.
+  {
+    id: 'board.esp8266-nodemcu',
+    fqbn: 'esp8266:esp8266:nodemcuv2',
+    name: 'ESP8266 NodeMCU (Xtensa LX106)',
+    arch: 'esp8266',
+    core: 'esp8266:esp8266',
+    mcu: 'esp8266',
+    variant: 'nodemcu',
+    fCpuHz: 80_000_000,
+    flashMaxBytes: 1_044_464,
+    ramMaxBytes: 81_920,
   },
   {
     id: 'board.esp32-c3',

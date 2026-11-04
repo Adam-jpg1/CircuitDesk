@@ -532,6 +532,7 @@ export const BOARDS_WITH_UART = new Set([
   'board.esp32-devkit',
   'board.esp32-cam',
   'board.esp32-s3',
+  'board.esp8266-nodemcu',
   'board.esp32-c3',
   'board.esp32-c3-supermini',
   'board.esp32-c6-devkitc-1',

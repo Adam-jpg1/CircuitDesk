@@ -102,6 +102,14 @@
           ],
           "effect": "works",
           "note": "Drives the pin from a TC compare interrupt, which the SAMD21 model runs on the simulated clock, so the pulse is real (544-2400 µs every 20 ms) and the modelled shaft follows write() (tests/samd21.timers.mts)."
+        },
+        {
+          "source": "core:esp8266:esp8266",
+          "targets": [
+            "esp8266:esp8266:nodemcuv2"
+          ],
+          "effect": "works",
+          "note": "The ESP8266 core bundles its own Servo, which times the pulse with the core's waveform generator on FRC1's NMI. The simulator runs that timer and the NMI on the simulated clock, so the pulse is real and the modelled shaft follows write() (tests/esp8266.runtime.mts)."
         }
       ],
       "unavailable": [
@@ -146,7 +154,8 @@
             "rp2040:rp2040:seeed_xiao_rp2040",
             "adafruit:samd:adafruit_feather_m0",
             "adafruit:samd:adafruit_qtpy_m0",
-            "Seeeduino:samd:seeed_XIAO_m0"
+            "Seeeduino:samd:seeed_XIAO_m0",
+            "esp8266:esp8266:nodemcuv2"
           ],
           "alternative": "Servo.h",
           "reason": "ESP32Servo is written against the ESP32 LEDC peripheral and does not apply to other architectures."
@@ -184,6 +193,13 @@
             "esp32:esp32:esp32s3",
             "esp32:esp32:esp32c3",
             "esp32:esp32:esp32c6"
+          ],
+          "effect": "works"
+        },
+        {
+          "source": "core:esp8266:esp8266",
+          "targets": [
+            "esp8266:esp8266:nodemcuv2"
           ],
           "effect": "works"
         },
@@ -237,6 +253,13 @@
             "esp32:esp32:esp32s3",
             "esp32:esp32:esp32c3",
             "esp32:esp32:esp32c6"
+          ],
+          "effect": "works"
+        },
+        {
+          "source": "core:esp8266:esp8266",
+          "targets": [
+            "esp8266:esp8266:nodemcuv2"
           ],
           "effect": "works"
         },

@@ -1073,8 +1073,37 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       'NodeMCU is an open dev-kit and firmware project, not an Espressif product. Boards carrying the name are made by several vendors with differing layouts, so no single manufacturer is claimed.',
     architecture: 'esp8266',
     variant: 'esp8266',
-    aliases: ['nodemcu', 'esp8266'],
-    limitation: 'Single ADC (A0, 1.0 V range on the bare chip); not compiled or simulated.',
+    aliases: ['nodemcu', 'esp8266', 'esp8266:esp8266:nodemcuv2'],
+    processorProfileId: 'proc.esp8266',
+    compileProfileId: 'compile.esp8266-arduino',
+    runtimeProfileId: 'runtime.esp8266',
+    serverTargetId: 'board.esp8266-nodemcu',
+    // The NodeMCU 1.0 silkscreen (the core's nodemcu variant, pins_arduino.h).
+    padMap: {
+      D0: 'GPIO16', D1: 'GPIO5', D2: 'GPIO4', D3: 'GPIO0', D4: 'GPIO2', D5: 'GPIO14', D6: 'GPIO12', D7: 'GPIO13', D8: 'GPIO15',
+      RX: 'GPIO3', TX: 'GPIO1', A0: 'A0',
+    },
+    compiler: {
+      provider: 'arduino-cli',
+      fqbn: 'esp8266:esp8266:nodemcuv2',
+      requiredCore: 'esp8266:esp8266',
+      supported: true,
+      note: 'Built as the ESP8266 core\'s "NodeMCU 1.0 (ESP-12E Module)" with its defaults: 80 MHz, 4 MB flash.',
+    },
+    simulation: {
+      engine: 'esp8266',
+      supported: true,
+      supportedApis: [
+        'pinMode', 'digitalWrite', 'digitalRead', 'analogRead (A0)', 'delay/millis/micros', 'Serial',
+        'floating point', 'analogWrite (PWM)', 'tone()', 'Servo', 'attachInterrupt', 'Wire', 'SPI',
+      ],
+      supportedPeripherals: ['Xtensa LX106 core under the NONOS SDK', 'GPIO and interrupts', 'FRC1/FRC2 timers', 'UART0', 'SAR ADC (A0)', 'software I2C (Wire)', 'HSPI (SPI)'],
+    },
+    limitation:
+      'Real Xtensa LX106 execution of the compiled firmware under Espressif\'s NONOS SDK, as on the board: GPIO and '
+      + 'interrupts, timing, Serial, floating point, analogRead(A0) through the board\'s divider (3.3 V reads 1024), '
+      + 'analogWrite()/tone()/Servo, Wire on D2/D1 and SPI on D5-D7. Wi-Fi is not simulated: the SDK starts, but nothing '
+      + 'reaches the air, so WiFi.begin() never connects.',
   },
   'board.esp32-cam': {
     manufacturer: MULTI_VENDOR_DESIGN,

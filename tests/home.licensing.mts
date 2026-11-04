@@ -231,6 +231,10 @@ const parsed = parseNotices(NOTICES);
         // The ESP32-S3: tests/esp32.runtime.mts, esp32.peripherals.mts and esp.adc.mts
         // on the Xtensa core as an LX7 and the S3 model, both CPUs, with ESP32Servo on the MCPWM.
         'board.esp32-s3',
+        // The ESP8266 NodeMCU: tests/esp8266.runtime.mts, the core's firmware on
+        // the Xtensa core as an LX106 under Espressif's NONOS SDK — Serial, time,
+        // PWM/tone/Servo on FRC1's NMI, interrupts, A0, and Wire and SPI on the canvas.
+        'board.esp8266-nodemcu',
         // Simulated on the strength of tests/microbit.runtime.mts: Arduino nRF5
         // core firmware on the ARMv7-M core and nRF52833 model — Serial, time,
         // analogRead, digital in, PWM, interrupts, the LED matrix, buttons A

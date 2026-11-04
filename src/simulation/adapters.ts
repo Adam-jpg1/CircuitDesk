@@ -31,7 +31,7 @@ export interface FirmwareArtifact {
 }
 
 export interface BoardSimulatorAdapter {
-  engine: 'avr8js' | 'rp2040js' | 'esp32' | 'esp32s3' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python';
+  engine: 'avr8js' | 'rp2040js' | 'esp32' | 'esp32s3' | 'esp8266' | 'esp32c3' | 'esp32c6' | 'samd21' | 'armv7m' | 'python';
   /**
    * Processor profiles this adapter genuinely executes.
    *
@@ -182,6 +182,21 @@ const ESP32S3_IMAGE_REGIONS = [
   { start: 0x50000000, end: 0x50002000, name: 'RTC slow memory' },
   { start: 0x600fe000, end: 0x60100000, name: 'RTC fast memory' },
 ];
+
+const esp8266Adapter: BoardSimulatorAdapter = {
+  engine: 'esp8266',
+  processorProfileIds: ['proc.esp8266'],
+  firmwareFormat: 'esp-image',
+  async createRunner(firmware, board) {
+    assertFormat(this, firmware, board);
+    const bytes = decodeBase64Image(firmware.data);
+    // Refuses anything that is not an ESP8266 flash image before the emulator loads.
+    const { parseEsp8266Image } = await import('./esp8266/image');
+    parseEsp8266Image(bytes);
+    const { createEsp8266Runner } = await import('./esp8266Runner');
+    return createEsp8266Runner(bytes);
+  },
+};
 
 const esp32c6Adapter: BoardSimulatorAdapter = {
   engine: 'esp32c6',
@@ -364,7 +379,7 @@ const pythonAdapter: BoardSimulatorAdapter = {
   },
 };
 
-const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32Adapter, esp32s3Adapter, esp32c3Adapter, esp32c6Adapter, samd21Adapter, armv7mAdapter, pythonAdapter];
+const ADAPTERS: BoardSimulatorAdapter[] = [avr8jsAdapter, rp2040jsAdapter, esp32Adapter, esp32s3Adapter, esp8266Adapter, esp32c3Adapter, esp32c6Adapter, samd21Adapter, armv7mAdapter, pythonAdapter];
 
 /**
  * The adapter for a board, or null when the board is not genuinely simulated.

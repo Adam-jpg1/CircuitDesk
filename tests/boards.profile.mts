@@ -128,6 +128,10 @@ function projectWith(boardDefId: string): CircuitProject {
         // The ESP32-S3: tests/esp32.runtime.mts, esp32.peripherals.mts and esp.adc.mts
         // on the Xtensa core as an LX7 and the S3 model, both CPUs, with ESP32Servo on the MCPWM.
         'board.esp32-s3',
+        // The ESP8266 NodeMCU: tests/esp8266.runtime.mts, the core's firmware on
+        // the Xtensa core as an LX106 under Espressif's NONOS SDK — Serial, time,
+        // PWM/tone/Servo on FRC1's NMI, interrupts, A0, and Wire and SPI on the canvas.
+        'board.esp8266-nodemcu',
         // Simulated on the strength of tests/microbit.runtime.mts: Arduino nRF5
         // core firmware on the ARMv7-M core and nRF52833 model — Serial, time,
         // analogRead, digital in, PWM, interrupts, the LED matrix, buttons A
@@ -267,7 +271,10 @@ function projectWith(boardDefId: string): CircuitProject {
     s3.compiler?.fqbn === 'esp32:esp32:esp32s3' && s3.simulation?.engine === 'esp32s3' && esp32.simulation?.engine !== s3.simulation?.engine,
     'ESP32-S3: compiled for the S3 and run on its own engine, not the ESP32\'s',
   );
-  check(!nodemcu.compiler?.supported && !nodemcu.simulation?.supported, 'ESP8266 honestly reports no compile/simulation support');
+  check(
+    nodemcu.compiler?.fqbn === 'esp8266:esp8266:nodemcuv2' && nodemcu.simulation?.engine === 'esp8266' && nodemcu.supportLevel === 'simulated',
+    'ESP8266: compiled for the NodeMCU and run on its own LX106 engine, not an ESP32\'s',
+  );
   // The Pi headers are simulated by running their Python GPIO script — and say
   // plainly that this is not Linux being emulated.
   for (const id of ['board.rpi-zero-gpio', 'board.rpi4-gpio']) {
@@ -285,8 +292,14 @@ function projectWith(boardDefId: string): CircuitProject {
   check(resolveDefinition('board.does-not-exist', null) === undefined, 'unknown board id resolves to undefined, not a default profile');
   const emptyRes = resolveCompileTarget(emptyProject('t'));
   check(!emptyRes.ok, 'project without a board has NO default compile target');
-  const espRes = resolveCompileTarget(projectWith('board.esp8266-nodemcu'));
-  check(!espRes.ok && espRes.reason.includes('never compiled as a different board'), 'ESP8266 compile refused with explicit no-fallback message');
+  // Every built-in board now has a toolchain, so a board without one is a
+  // project's own: it must still be refused, never built as something else.
+  const toolless = projectWith('board.custom-no-toolchain');
+  const nodemcuDef = getBoardDefinition('board.esp8266-nodemcu')!;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  toolless.customDefinitions.push({ definition: { ...nodemcuDef, id: 'board.custom-no-toolchain', name: 'Hand-made board', supportLevel: 'wiring', compiler: undefined, simulation: undefined } } as any);
+  const toolRes = resolveCompileTarget(toolless);
+  check(!toolRes.ok && toolRes.reason.includes('never compiled as a different board'), 'a board with no toolchain is refused with an explicit no-fallback message');
   const unknownRes = resolveCompileTarget(projectWith('board.does-not-exist'));
   check(!unknownRes.ok, 'unknown board compile refused');
   // server-side allowlist
@@ -378,8 +391,8 @@ function projectWith(boardDefId: string): CircuitProject {
       })
     ).json()) as { success: boolean; errorCode?: string; error?: string; toolchain?: string };
 
-  const unknown = await compileAs('board.esp8266-nodemcu', 'esp8266:esp8266:nodemcuv2');
-  check(!unknown.success && unknown.errorCode === 'UNSUPPORTED_BOARD', 'server compile: ESP8266 → UNSUPPORTED_BOARD (never compiled as another board)');
+  const unknown = await compileAs('board.custom-no-toolchain', 'esp8266:esp8266:generic');
+  check(!unknown.success && unknown.errorCode === 'UNSUPPORTED_BOARD', 'server compile: a board off the allowlist → UNSUPPORTED_BOARD (never compiled as another board)');
   const picoCompile = await compileAs('board.raspberry-pi-pico', 'rp2040:rp2040:rpipico');
   check(
     !picoCompile.success
