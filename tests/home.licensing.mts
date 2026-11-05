@@ -280,7 +280,8 @@ const parsed = parseNotices(NOTICES);
     check(c6Apis.includes(claimed), `the ESP32-C6 claims ${claimed}, which tests/esp32.peripherals.mts measures`);
   }
   // Whole words: "ble" is inside "double".
-  for (const unclaimed of ['wifi', 'wi-fi', 'bluetooth', 'ble', 'zigbee', 'thread', 'usb']) {
+  check(/\bwifi \(station/.test(c6Apis), 'the ESP32-C6 claims WiFi as a station, which tests/wifi.esp32.mts connects');
+  for (const unclaimed of ['bluetooth', 'ble', 'zigbee', 'thread', 'usb']) {
     check(!new RegExp(`\\b${unclaimed}\\b`).test(c6Apis), `the ESP32-C6 does not claim ${unclaimed}`);
   }
   const c6Limitation = (c6.metadata?.limitation ?? '').toLowerCase();
@@ -292,7 +293,8 @@ const parsed = parseNotices(NOTICES);
   const apis = (c3.simulation?.supportedApis ?? []).join(' ').toLowerCase();
   check(/serial \(uart0 /.test(apis), 'the ESP32-C3 claims Serial as UART0, and only as UART0');
   check(apis.includes('analogread'), 'the ESP32-C3 claims analogRead, which tests/esp.adc.mts reads');
-  for (const unclaimed of ['wifi', 'wi-fi', 'bluetooth', 'ble']) {
+  check(/\bwifi \(station/.test(apis), 'the ESP32-C3 claims WiFi as a station, which tests/wifi.esp32.mts connects');
+  for (const unclaimed of ['bluetooth', 'ble']) {
     check(!new RegExp(`\\b${unclaimed}\\b`).test(apis), `the ESP32-C3 still does not claim ${unclaimed}`);
   }
   check(apis.includes('digitalwrite') && apis.includes('digitalread'), 'while keeping the claims it earned');

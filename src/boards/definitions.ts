@@ -316,7 +316,7 @@ export const ESP32_DEVKIT = headerBoard({
   logicVoltage: 3.3,
   color: '#12262e',
   description:
-    '3.3 V logic Wi-Fi/BT board with an ESP32-WROOM-32. The compiled firmware runs on a simulated dual-core Xtensa ESP32; Wi-Fi and Bluetooth are not simulated.',
+    '3.3 V logic Wi-Fi/BT board with an ESP32-WROOM-32. The compiled firmware runs on a simulated dual-core Xtensa ESP32, and its Wi-Fi joins a Wi-Fi Access Point on the canvas; Bluetooth is not simulated.',
   left: [
     { id: 'EN', label: 'EN', type: 'reset' as const, caps: [] },
     a3('VP', 'VP'), a3('VN', 'VN'), a3('D34', 'D34'), a3('D35', 'D35'),
@@ -443,7 +443,7 @@ export const ESP32_C3_SUPERMINI = headerBoard({
   color: '#1b2a36',
   description:
     'A widely cloned ESP32-C3 board the size of a postage stamp. The RISC-V core executes the compiled '
-    + 'application image for real, with GPIO, Serial and analogRead() on IO0-IO5; Wi-Fi, Bluetooth, PWM, I2C and SPI are not simulated.',
+    + 'application image for real: GPIO, Serial, analogRead() on IO0-IO5, PWM, I2C, SPI, and Wi-Fi to a Wi-Fi Access Point on the canvas. Bluetooth is not simulated.',
   left: [
     a3('IO5', 'IO5'), g3('IO6', 'IO6'), g3('IO7', 'IO7'),
     g3('IO8', 'IO8', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }),
@@ -592,7 +592,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
       usb: 'usb-c',
       description:
         'ESP32-S3-DevKitC-1 — Espressif development board with an ESP32-S3-WROOM-1 module (8 MB flash). The compiled '
-        + 'sketch runs on a simulated dual-core Xtensa LX7 ESP32-S3; Wi-Fi, Bluetooth, the native USB port and the RGB LED are not simulated.',
+        + 'sketch runs on a simulated dual-core Xtensa LX7 ESP32-S3, and its Wi-Fi joins a Wi-Fi Access Point on the canvas; Bluetooth, the native USB port and the RGB LED are not simulated.',
     },
   ),
   // ESP32-C3-DevKitM-1, Espressif's own development board for the
@@ -694,7 +694,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     'simulated', {
       color: '#1a1a24',
       description:
-        'NodeMCU 1.0 (ESP-12E module, 4 MB flash). The ESP8266 runs the compiled firmware under Espressif\'s SDK; the on-board LED is on D4 (GPIO2, lit low). Wi-Fi is not simulated.',
+        'NodeMCU 1.0 (ESP-12E module, 4 MB flash). The ESP8266 runs the compiled firmware under Espressif\'s SDK; the on-board LED is on D4 (GPIO2, lit low). Its Wi-Fi joins a Wi-Fi Access Point on the canvas.',
     },
   ),
   simpleWiringBoard(

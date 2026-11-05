@@ -19,6 +19,7 @@
 // trace harness or the production adapter without any of them reimplementing
 // the memory map.
 
+import type { FirmwareHandler, GuestRoutine } from '../firmwareCalls';
 import { Rv32Core, type Bus } from '../riscv/rv32Core';
 import { planIdleSkip, type TimedEventSource } from '../eventScheduler';
 import {
@@ -118,6 +119,15 @@ class SparseMemory {
   }
 }
 
+/** EBREAK, little-endian: what a firmware routine the machine provides is patched to start with. */
+const EBREAK = [0x73, 0x00, 0x10, 0x00];
+
+interface RunningRoutine {
+  routine: GuestRoutine;
+  /** Where the routine returns: the caller's ra, or the task entry for the next round. */
+  ra: number;
+}
+
 export class EspRiscvMachine implements Bus, SimulatedClock {
   readonly core: Rv32Core;
   readonly romState: RomMachineState;
@@ -187,6 +197,7 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
     this.romState = createRomMachineState(options.resetReason ?? ResetReason.PowerOn);
     this.romState.cpuFrequencyMhz = soc.cpuMhz;
     this.romState.coexVersionAddress = soc.romData.coexVersionAddress;
+    this.romState.syscallTablePointer = soc.romData.syscallTablePointer;
     // The shared esprv_* and intr_matrix_set entry points write real registers,
     // and the two parts keep those registers in different blocks. Telling the
     // ROM state which chip it is on is what stops a C6 configuring the C3's
@@ -338,6 +349,7 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
    * patched and no address is chosen by this runtime.
    */
   loadImage(image: EspApplicationImage): void {
+    this.routines.clear();
     this.image = image;
     this.memory.clear();
     this.elapsedNanos = 0;
@@ -431,6 +443,11 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
     const period = 1000 / Math.max(1, this.romState.cpuFrequencyMhz);
     const pc = this.core.pc >>> 0;
     if (this.isRomAddress(pc)) {
+      if (pc === this.routineReturn || pc === this.taskEntryAddress) {
+        this.resumeRoutine(pc);
+        this.elapsedNanos += period;
+        return 0;
+      }
       this.dispatchRomCall(pc);
       // A ROM routine runs natively in no time at all, but the firmware
       // measured a delay it asked for, so that delay is real simulated time.
@@ -548,6 +565,110 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
       pc: returnAddress,
     });
     this.core.pc = returnAddress;
+  }
+
+  // --------------------------------------------------------- firmware routines provided natively
+  //
+  // A closed library in the firmware (Espressif's Wi-Fi driver) is answered
+  // natively: each routine's first instruction becomes EBREAK, which the core
+  // hands here. A routine that must call back into the firmware returns a
+  // GuestRoutine; each call it yields runs as an ordinary call whose return
+  // address is a ROM-space address that resumes the routine, so the firmware
+  // keeps running — tasks switch, interrupts arrive — while it does. The
+  // routines under way are kept by stack pointer, which the calls they make
+  // preserve, so tasks interleave freely.
+
+  private readonly firmwareHandlers = new Map<number, { name: string; handler: FirmwareHandler }>();
+  private readonly routines = new Map<number, RunningRoutine[]>();
+  private taskRound: (() => GuestRoutine) | null = null;
+  /** ROM-space addresses no ROM routine uses: where a call made by a routine returns, and a task to run rounds. */
+  private get routineReturn(): number {
+    return (this.soc.memory.rom.end - 0x10) >>> 0;
+  }
+  private get taskEntryAddress(): number {
+    return (this.soc.memory.rom.end - 0x0c) >>> 0;
+  }
+
+  /** The address a FreeRTOS task can start at to run provideTask's rounds. */
+  get glueTaskEntry(): number {
+    return this.taskEntryAddress;
+  }
+
+  /** FreeRTOS accepts a task without a name. */
+  readonly glueTaskName = 0;
+
+  provideTask(round: () => GuestRoutine): void {
+    this.taskRound = round;
+  }
+
+  /** Answers the firmware routine at `address` natively; false if no loaded code is there. */
+  provideFirmwareRoutine(address: number, name: string, handler: FirmwareHandler): boolean {
+    const image = this.image;
+    if (!image) return false;
+    for (const seg of image.segments) {
+      const at = address - seg.loadAddress;
+      if (at < 0 || at + 4 > seg.data.length) continue;
+      EBREAK.forEach((b, k) => {
+        seg.data[at + k] = b;
+        if (this.isCacheMapped(seg.loadAddress)) {
+          const f = this.soc.applicationFlashOffset + seg.fileOffset + at + k;
+          if (this.flash && f < this.flash.bytes.length) this.flash.bytes[f] = b;
+        } else this.writeByte(address + k, b);
+      });
+      this.firmwareHandlers.set(address >>> 0, { name, handler });
+      if (!this.core.onEbreak) this.core.onEbreak = (pc) => this.firmwareCall(pc);
+      return true;
+    }
+    return false;
+  }
+
+  private firmwareCall(pc: number): boolean {
+    const entry = this.firmwareHandlers.get(pc >>> 0);
+    if (!entry) return false;
+    const regs = this.core.registers;
+    const args = [0, 1, 2, 3, 4, 5].map((i) => regs[ARG_REGISTER_BASE + i] >>> 0);
+    const result = entry.handler(args, 0);
+    const ra = regs[1] >>> 0;
+    if (typeof result === 'object' && result !== null && typeof (result as GuestRoutine).next === 'function') {
+      this.advanceRoutine({ routine: result as GuestRoutine, ra }, undefined, true);
+      return true;
+    }
+    regs[ARG_REGISTER_BASE] = typeof result === 'number' ? result | 0 : 0;
+    this.core.pc = ra;
+    return true;
+  }
+
+  private resumeRoutine(pc: number): void {
+    const sp = this.core.registers[2] >>> 0;
+    if (pc === this.taskEntryAddress) {
+      const routine = this.taskRound?.() ?? (function* (): GuestRoutine { return 0; })();
+      this.advanceRoutine({ routine, ra: this.taskEntryAddress }, undefined, true);
+      return;
+    }
+    const stack = this.routines.get(sp);
+    const running = stack?.pop();
+    if (!running) {
+      throw new GuestCallError('The simulator lost track of a firmware call it was making.');
+    }
+    if (stack && stack.length === 0) this.routines.delete(sp);
+    this.advanceRoutine(running, this.core.registers[ARG_REGISTER_BASE] >>> 0, false);
+  }
+
+  private advanceRoutine(running: RunningRoutine, value: number | undefined, first: boolean): void {
+    const regs = this.core.registers;
+    const r = first ? running.routine.next(0) : running.routine.next(value ?? 0);
+    if (r.done) {
+      regs[ARG_REGISTER_BASE] = (r.value ?? 0) | 0;
+      this.core.pc = running.ra;
+      return;
+    }
+    const sp = regs[2] >>> 0;
+    const stack = this.routines.get(sp) ?? [];
+    stack.push(running);
+    this.routines.set(sp, stack);
+    for (let i = 0; i < 8; i++) regs[ARG_REGISTER_BASE + i] = (r.value.args[i] ?? 0) | 0;
+    regs[1] = this.routineReturn | 0;
+    this.core.pc = (r.value.fn >>> 0) & ~1;
   }
 
   // --------------------------------------------------------- guest callbacks

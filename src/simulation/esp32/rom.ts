@@ -12,6 +12,8 @@
 // goes back into a10 (a10:a11 for 64-bit values). A 64-bit argument occupies
 // an aligned register pair, low word first.
 
+import type { GuestRoutine } from '../firmwareCalls';
+
 export interface Esp32RomHost {
   /** Argument register i of the routine being called. */
   arg(i: number): number;
@@ -100,7 +102,11 @@ export interface RomJump {
   a6?: number;
   a7?: number;
 }
-export type RomResult = number | [number, number] | RomJump | void;
+/**
+ * A ROM routine's answer: a value (or a 64-bit pair), a jump into firmware, or
+ * a GuestRoutine where it must call firmware first (strdup's malloc).
+ */
+export type RomResult = number | [number, number] | RomJump | GuestRoutine | void;
 type Handler = (h: Esp32RomHost) => RomResult;
 
 const scratch = new DataView(new ArrayBuffer(8));

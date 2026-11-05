@@ -24,6 +24,9 @@ import type { BoardRunner, PinLevel, PinSnapshot, UartPort } from './boardRunner
 import type { PinChange } from './gpioEvents';
 import { I2cBus } from './devices/i2cBus';
 import { SpiBus } from './devices/spiBus';
+import { IdfWifiDriver } from './wifi/idfDriver';
+import { macForBoard, type WifiNetwork } from './wifi/network';
+import type { FirmwareSymbols } from './adapters';
 
 /** Instructions one slice may retire, so a spinning sketch cannot freeze the page. */
 const MAX_INSTRUCTIONS_PER_SLICE = 8_000_000;
@@ -64,7 +67,7 @@ export const ESP32S3_REGIONS = [
   { start: 0x600fe000, end: 0x60100000, name: 'RTC fast memory' },
 ];
 
-type XtensaMachine = EspXtensaMachine & { gpio: Esp32Gpio; uarts: EspUart[]; sens: Esp32Sens };
+type XtensaMachine = EspXtensaMachine & { gpio: Esp32Gpio; uarts: EspUart[]; sens: Esp32Sens; setFactoryMac(mac: readonly number[]): void };
 
 /** What distinguishes one Xtensa Espressif part from another, from a runner's point of view. */
 export interface XtensaChip {
@@ -133,10 +136,14 @@ export class Esp32Runner implements BoardRunner {
   private readonly history: PadHistory[] = [];
   private disposed = false;
 
+  /** The Wi-Fi driver model, when the build links Espressif's driver. */
+  readonly wifi: IdfWifiDriver | null = null;
+
   constructor(
     readonly image: EspApplicationImage,
     regions: { offset: number; data: Uint8Array }[],
     private readonly chip: XtensaChip = ESP32_CHIP,
+    symbols?: FirmwareSymbols,
   ) {
     const named = (offset: number) => regions.find((r) => r.offset === offset)?.data;
     const flash = flashForImage(image, named(0x8000));
@@ -150,6 +157,18 @@ export class Esp32Runner implements BoardRunner {
     for (let i = 0; i < this.padCount; i++) this.history.push(this.freshHistory());
     this.machine.gpio.onPinChange((c) => this.recordChange(c));
     this.machine.loadImage(image);
+    if (symbols) {
+      const driver = new IdfWifiDriver(this.machine, symbols, macForBoard(chip.engine), chip.engine.toUpperCase());
+      if (driver.install()) this.wifi = driver;
+    }
+  }
+
+  /** Joins the canvas's Wi-Fi network: before the firmware first runs, so it boots with this MAC. */
+  attachWifi(network: WifiNetwork, identity: { id: string; label: string }): void {
+    if (!this.wifi) return;
+    const mac = macForBoard(identity.id);
+    this.machine.setFactoryMac(mac);
+    this.wifi.attach(network, mac, identity.label);
   }
 
   /** I2C and SPI parts on the canvas sit on these, as on every other board. */
@@ -394,7 +413,8 @@ export function createEsp32Runner(
   applicationImage: Uint8Array,
   regions: { offset: number; data: Uint8Array }[],
   chip: XtensaChip = ESP32_CHIP,
+  symbols?: FirmwareSymbols,
 ): Esp32Runner {
   const image = parseEspApplicationImage(applicationImage, { expectChip: chip.chip, regions: chip.regions });
-  return new Esp32Runner(image, regions, chip);
+  return new Esp32Runner(image, regions, chip, symbols);
 }

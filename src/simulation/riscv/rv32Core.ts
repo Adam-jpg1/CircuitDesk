@@ -116,6 +116,11 @@ export class Rv32Core {
    * the line. Returning undefined falls back to the standard ordering.
    */
   selectInterrupt?: (pendingAndEnabled: number) => number | undefined;
+  /**
+   * A routine the SoC provides natively, patched to start with EBREAK: called
+   * with the EBREAK's address before any trap; true when it has set the PC.
+   */
+  onEbreak?: (pc: number) => boolean;
 
   /**
    * Replaces the standard `mie & mip` gate.
@@ -552,6 +557,7 @@ export class Rv32Core {
           this.trap(11, 0, false, pc);
           return;
         case 0x001: // EBREAK
+          if (this.onEbreak?.(pc)) return;
           this.trap(3, 0, false, pc);
           return;
         case 0x302: {
@@ -738,6 +744,7 @@ export class Rv32Core {
         }
         if (rs2 === 0) {
           if (rd === 0) {
+            if (this.onEbreak?.(pc)) return;
             this.trap(3, 0, false, pc); // C.EBREAK
             return;
           }

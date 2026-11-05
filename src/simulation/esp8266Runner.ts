@@ -21,6 +21,12 @@ import type { BoardRunner, PinLevel, PinSnapshot } from './boardRunner';
 import type { PinChange } from './gpioEvents';
 import { I2cBus } from './devices/i2cBus';
 import { SpiBus } from './devices/spiBus';
+import type { FirmwareSymbols } from './adapters';
+import { Esp8266WifiDriver } from './wifi/esp8266Driver';
+import { macForBoard, type WifiNetwork } from './wifi/network';
+
+/** Espressif's OUI, which the ESP8266's eFuse MAC always carries. */
+const ESP8266_OUI = [0x18, 0xfe, 0x34];
 
 const MAX_INSTRUCTIONS_PER_SLICE = 8_000_000;
 const MEASURE_WINDOW_US = 50_000;
@@ -50,8 +56,10 @@ export class Esp8266Runner implements BoardRunner {
   onSerialByte: ((byte: number) => void) | null = null;
   private readonly history: PadHistory[] = [];
   private disposed = false;
+  /** The Wi-Fi model, when the build uses Wi-Fi. */
+  readonly wifi: Esp8266WifiDriver | null = null;
 
-  constructor(readonly image: EspApplicationImage) {
+  constructor(readonly image: EspApplicationImage, symbols?: FirmwareSymbols) {
     // The whole build is the flash image: the core's bootloader at 0, the application at 0x1000.
     const flash = new SerialNorFlash({
       sizeBytes: esp8266FlashBytes(image.raw),
@@ -65,6 +73,21 @@ export class Esp8266Runner implements BoardRunner {
     for (let i = 0; i < PIN_COUNT; i++) this.history.push(this.freshHistory());
     this.machine.gpio.onPinChange((c) => this.recordChange(c));
     this.machine.loadImage(image);
+    if (symbols) {
+      const driver = new Esp8266WifiDriver(this.machine, symbols, macForBoard('esp8266', ESP8266_OUI), 'ESP8266');
+      if (driver.install()) {
+        this.wifi = driver;
+        this.machine.wifiWork = driver;
+      }
+    }
+  }
+
+  /** Joins the canvas's Wi-Fi network: before the firmware first runs, so it boots with this MAC. */
+  attachWifi(network: WifiNetwork, identity: { id: string; label: string }): void {
+    if (!this.wifi) return;
+    const mac = macForBoard(identity.id, ESP8266_OUI);
+    this.machine.setFactoryMac(mac);
+    this.wifi.attach(network, mac, identity.label);
   }
 
   private attachBuses(): void {
@@ -276,6 +299,6 @@ export class Esp8266Runner implements BoardRunner {
   }
 }
 
-export function createEsp8266Runner(bin: Uint8Array): Esp8266Runner {
-  return new Esp8266Runner(parseEsp8266Image(bin));
+export function createEsp8266Runner(bin: Uint8Array, symbols?: FirmwareSymbols): Esp8266Runner {
+  return new Esp8266Runner(parseEsp8266Image(bin), symbols);
 }

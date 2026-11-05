@@ -128,6 +128,12 @@ export interface BoardRunner {
    * pin groups, and a sketch chooses with Wire.setSDA() or SPI.setSCK().
    */
   activeI2cPins?(): { sda?: number; scl?: number };
+  /**
+   * Boards with a Wi-Fi radio the simulator models: joins the canvas's
+   * network as the board instance `id`, named `label`. Called before the
+   * firmware first runs, so the MAC it is given is the one it boots with.
+   */
+  attachWifi?(network: import('./wifi/network').WifiNetwork, identity: { id: string; label: string }): void;
   activeSpiPins?(): { sck?: number; mosi?: number; miso?: number; cs?: number };
 
   /**

@@ -119,6 +119,22 @@ class Store implements Peripheral {
   }
 }
 
+class S3Rng extends Store {
+  private seed = 0x9e3779b9;
+  constructor() {
+    super('wdev', 0x60035000, 0x100);
+  }
+  override readUint32(offset: number): number {
+    if (offset !== 0x7c) return super.readUint32(offset);
+    let x = this.seed;
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    this.seed = x >>> 0;
+    return this.seed;
+  }
+}
+
 /** RTC_CNTL: reset state, the RTC timer and the store registers the bootloader fills. */
 class S3RtcCntl extends Store {
   constructor(private readonly clock: SimulatedClock) {
@@ -164,12 +180,16 @@ export class Esp32S3Machine extends EspXtensaMachine {
   readonly timerGroups: Esp32TimerGroup[];
   readonly sens = new Esp32Sens(ESP32S3_SENS);
   private readonly system = new Store('system', SYSTEM_BASE, 0x1000, [[0x00, 1 << 2]]);
+  /** eFuse: a factory MAC (RD_MAC_SPI_SYS_0/1), chip revision 0.0, nothing else burnt. */
+  private readonly efuse = new Store('efuse', 0x60007000, 0x1000, [[0x44, 0xc4123456 >>> 0], [0x48, 0x0000240a]]);
   private readonly rtc: S3RtcCntl;
   private readonly fallback = new Map<number, number>();
   private readonly sparse = new Map<number, Uint8Array>();
   private appBootAddress = 0;
   private appReleased = false;
   protected override readonly romName = 'ESP32-S3';
+  /** The guest-call glue's place: ROM space below the qsort routine that no ROM routine uses. */
+  protected override readonly glueBase = 0x4005fc00;
 
   constructor(
     flash: SerialNorFlash,
@@ -205,8 +225,11 @@ export class Esp32S3Machine extends EspXtensaMachine {
       new Store('i2c_mst', 0x6000e000, 0x1000, [], [[0x40, 1 << 24]]),
       // EXTMEM: the cache controller. CACHE_STATE reads both caches idle (its reset value).
       new Store('extmem', 0x600c4000, 0x1000, [[0x130, 0x00001001]]),
-      // eFuse: a factory MAC (RD_MAC_SPI_SYS_0/1), chip revision 0.0, nothing else burnt.
-      new Store('efuse', 0x60007000, 0x1000, [[0x44, 0xc4123456 >>> 0], [0x48, 0x0000240a]]),
+      this.efuse,
+      // The Wi-Fi block's random number generator (WDEV_RND_REG, 0x6003507C):
+      // lwIP draws its ports and sequence numbers from it and retries until
+      // they suit, so it must vary.
+      new S3Rng(),
       // USB Serial/JTAG: nothing on the other end; its IN endpoint always has room.
       new Store('usb_serial_jtag', 0x60038000, 0x1000, [[0x04, 0x2]]),
       new EspLedc(ESP32S3_LEDC, this, signals),
@@ -218,6 +241,15 @@ export class Esp32S3Machine extends EspXtensaMachine {
       new Esp32S3Mcpwm('mcpwm0', 0x6001e000, 0, this, this.gpio),
       new Esp32S3Mcpwm('mcpwm1', 0x6002c000, 1, this, this.gpio),
     ]) this.addPeripheral(p);
+  }
+
+  private factoryMac: readonly number[] | null = null;
+
+  /** Burns a factory MAC: bytes 5..2 in RD_MAC_SPI_SYS_0, 1..0 in SYS_1, as ESP-IDF reads them back reversed. */
+  setFactoryMac(mac: readonly number[]): void {
+    this.factoryMac = mac;
+    this.efuse.regs.set(0x44, ((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5]) >>> 0);
+    this.efuse.regs.set(0x48, (mac[0] << 8) | mac[1]);
   }
 
   // ------------------------------------------------------------- clocks
@@ -247,6 +279,7 @@ export class Esp32S3Machine extends EspXtensaMachine {
     this.sparse.clear();
     this.fallback.clear();
     for (const p of this.peripherals) p.reset?.();
+    if (this.factoryMac) this.setFactoryMac(this.factoryMac);
     this.pageBase.fill(-1);
     this.mmuRaw.fill(MMU_INVALID);
     for (const seg of image.segments) {
@@ -268,6 +301,7 @@ export class Esp32S3Machine extends EspXtensaMachine {
     this.romState.md5.clear();
     REENT_TRAMPOLINE_CODE.forEach((b, k) => this.write8(S3_REENT_TRAMPOLINE + k, b));
     S3_QSORT_CODE.forEach((b, k) => this.write8(S3_QSORT_AT + k, b));
+    this.installGlue();
     this.installRomData();
     this.appBootAddress = 0;
     this.appReleased = false;

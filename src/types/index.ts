@@ -391,6 +391,12 @@ export interface CompileResult {
     format: 'intel-hex' | 'uf2' | 'bin' | 'esp-image' | 'python';
     data: string;
     regions?: { offset: number; data: string }[];
+    /**
+     * Where an ESP build's closed Wi-Fi driver landed: its functions, and the
+     * open routines the simulator calls back into. Present only when the build
+     * links the driver; the simulator provides those entry points natively.
+     */
+    symbols?: { closed: [string, number][]; named: Record<string, number> };
   };
   memory?: { flashBytes: number; flashMaxBytes: number; ramBytes: number; ramMaxBytes: number };
   /**

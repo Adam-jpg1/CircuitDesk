@@ -10,6 +10,7 @@
 // This module imports the C6 emulator, so it must only ever be reached through
 // the adapter's dynamic import. Nothing in the startup bundle may import it.
 
+import type { FirmwareSymbols } from './adapters';
 import { EspRiscvRunner, type EspRunnerConfig } from './espRiscvRunner';
 import { createEsp32C6Machine } from './esp32c6/esp32c6Machine';
 import { parseEspApplicationImage, ESP32C6_REGIONS, type EspApplicationImage } from './esp32c3/espImage';
@@ -34,8 +35,8 @@ export const ESP32C6_RUNNER_CONFIG: EspRunnerConfig = {
 };
 
 export class Esp32C6Runner extends EspRiscvRunner {
-  constructor(image: EspApplicationImage, regions: { offset: number; data: Uint8Array }[]) {
-    super(image, regions, ESP32C6_RUNNER_CONFIG);
+  constructor(image: EspApplicationImage, regions: { offset: number; data: Uint8Array }[], symbols?: FirmwareSymbols) {
+    super(image, regions, ESP32C6_RUNNER_CONFIG, symbols);
   }
 }
 

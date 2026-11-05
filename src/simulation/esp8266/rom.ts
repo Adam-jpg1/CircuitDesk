@@ -33,7 +33,8 @@ export const HOOK_UNHANDLED = 0x4000f808;
  * routines. The ROM keeps it among its own data below the flash descriptor.
  */
 export const PHY_TABLE_AT = 0x3fffc300;
-export const PHY_STUBS_AT = 0x4000d000;
+/** In ROM space no routine of ESP8266_ROM_ADDRESSES occupies (0x4000e400-0x4000e800). */
+export const PHY_STUBS_AT = 0x4000e400;
 export const PHY_TABLE_ENTRIES = 256;
 
 /**
@@ -94,6 +95,14 @@ export const ROM_DATA = {
   excHandlerTable: 0x3fffc000,
   cHandlerTable: 0x3fffc100,
   flashchip: 0x3fffc714,
+  /**
+   * The digit strings the ROM's data initialisation leaves here, lower case
+   * then upper, which the SDK's own ets_vsnprintf formats numbers with: %x
+   * reads the first, %X (its LARGE flag) the second. It reaches them by
+   * address; nothing names them.
+   */
+  digitsLower: 0x3fffd848,
+  digitsUpper: 0x3fffd85c,
 } as const;
 
 /** ROM routines that are their ESP32 namesakes. */

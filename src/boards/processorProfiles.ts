@@ -315,7 +315,7 @@ const ESP32C3: ProcessorProfile = {
   ],
   interruptPads: Array.from({ length: 22 }, (_, i) => `IO${i}`),
   logicVolts: 3.3,
-  notModelled: ['Wi-Fi and Bluetooth', 'USB Serial/JTAG', 'LEDC hardware fades'],
+  notModelled: ['Bluetooth; Wi-Fi beyond station mode on the simulated network (no soft-AP, no internet)', 'USB Serial/JTAG', 'LEDC hardware fades'],
 };
 
 /**
@@ -354,7 +354,7 @@ const ESP32: ProcessorProfile = {
   interruptPads: ESP32_GPIO_PADS,
   logicVolts: 3.3,
   notModelled: [
-    'Wi-Fi and Bluetooth',
+    'Bluetooth; Wi-Fi beyond station mode on the simulated network (no soft-AP, no internet)',
     'touch sensing, the DACs and the hall sensor',
     'the ADC\'s non-linearity and noise (conversions are ideal)',
     'LEDC fades, RMT, PCNT, I2S and the motor PWM',
@@ -394,7 +394,7 @@ const ESP32S3: ProcessorProfile = {
   interruptPads: S3_PADS,
   logicVolts: 3.3,
   notModelled: [
-    'Wi-Fi and Bluetooth',
+    'Bluetooth; Wi-Fi beyond station mode on the simulated network (no soft-AP, no internet)',
     'the native USB port (USB-OTG and USB Serial/JTAG) and the on-board RGB LED, which needs the RMT',
     'PSRAM, touch sensing and the camera/LCD interface',
     'the ADC\'s non-linearity and noise (conversions are ideal)',
@@ -433,7 +433,7 @@ const ESP8266: ProcessorProfile = {
   interruptPads: ESP8266_PADS.filter((p) => p !== 'GPIO16'),
   logicVolts: 3.3,
   notModelled: [
-    'Wi-Fi: the SDK starts and calibrates a radio that is not there, and nothing reaches the air',
+    'Wi-Fi beyond station mode on the simulated network (no soft-AP, no internet)',
     'the ADC\'s non-linearity and noise (conversions are ideal, to the SDK\'s 0..1024)',
     'Serial.swap(), UART1 (Serial1, TX only on GPIO2) and I2S',
     'deep sleep and the RTC timer',
@@ -479,7 +479,7 @@ const ESP32C6: ProcessorProfile = {
   ],
   interruptPads: Array.from({ length: 31 }, (_, i) => `IO${i}`),
   logicVolts: 3.3,
-  notModelled: ['Wi-Fi, Bluetooth, 802.15.4', 'USB Serial/JTAG', 'LEDC hardware fades'],
+  notModelled: ['Bluetooth and 802.15.4; Wi-Fi beyond station mode on the simulated network (no soft-AP, no internet)', 'USB Serial/JTAG', 'LEDC hardware fades'],
 };
 
 /**

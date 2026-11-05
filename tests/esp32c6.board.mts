@@ -131,7 +131,9 @@ if (!board) {
     check(apis.includes(claim), `the API list names ${claim}, which really works`);
   }
   // Whole words: "ble" is inside "double".
-  for (const absent of ['wifi', 'wi-fi', 'bluetooth', 'ble', 'zigbee', 'thread', 'usb']) {
+  // Wi-Fi is claimed as a station on the simulated network (tests/wifi.esp32.mts).
+  check(/\bwifi \(station/.test(apis), 'the API list names WiFi as a station, which tests/wifi.esp32.mts connects');
+  for (const absent of ['bluetooth', 'ble', 'zigbee', 'thread', 'usb']) {
     check(!new RegExp(`\\b${absent}\\b`).test(apis), `and does not name ${absent}, which does not`);
   }
   const limitationText = (board.metadata?.limitation ?? '').toLowerCase();

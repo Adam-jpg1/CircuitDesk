@@ -7,6 +7,7 @@ import { resolveDefinition } from '../project/partsRegistry';
 import { buildPinStatesModel, pinStateCell } from '../simulation/pinStatesModel';
 import { CodePanel } from './CodePanel';
 import { TestsPanel } from './TestsPanel';
+import { WifiPanel } from './WifiPanel';
 import { ErrorIcon, InfoIcon, WarnIcon } from '../ui/icons';
 import type { CompilerHealth } from '../types';
 
@@ -17,6 +18,7 @@ const TABS: { id: BottomTab; label: string }[] = [
   { id: 'validation', label: 'Validation' },
   { id: 'tests', label: 'Tests' },
   { id: 'pins', label: 'Pin states' },
+  { id: 'wifi', label: 'Wi-Fi' },
   { id: 'debug', label: 'Debug' },
 ];
 
@@ -52,6 +54,7 @@ export function BottomPanel() {
         {tab === 'validation' && <ValidationPanel />}
         {tab === 'tests' && <TestsPanel />}
         {tab === 'pins' && <PinsPanel />}
+        {tab === 'wifi' && <WifiPanel />}
         {tab === 'debug' && <DebugPanel />}
       </div>
     </div>

@@ -18,6 +18,11 @@
 // This module imports the emulators, so it must only ever be reached through
 // an adapter's dynamic import. Nothing in the startup bundle may import it.
 
+import { IdfWifiDriver } from './wifi/idfDriver';
+import { macForBoard, type WifiNetwork } from './wifi/network';
+import { EfuseMac, EFUSE_BASE } from './espRiscv/efuseMac';
+import type { FirmwareHost } from './firmwareCalls';
+import type { FirmwareSymbols } from './adapters';
 import { EspUart } from './espRiscv/uart';
 import { EspSarAdc, espAdcIndexForGpio } from './espRiscv/sarAdc';
 import { Esp32C3Machine } from './esp32c3/esp32c3Machine';
@@ -124,7 +129,11 @@ export class EspRiscvRunner implements BoardRunner {
    * alone: the chip reads its partition table out of flash before it will run
    * anything, so the parts that are not executed still have to be present.
    */
-  constructor(image: EspApplicationImage, regions: { offset: number; data: Uint8Array }[], config: EspRunnerConfig) {
+  /** The Wi-Fi driver model, when the build links Espressif's driver. */
+  readonly wifi: IdfWifiDriver | null = null;
+  private readonly efuse: EfuseMac;
+
+  constructor(image: EspApplicationImage, regions: { offset: number; data: Uint8Array }[], config: EspRunnerConfig, symbols?: FirmwareSymbols) {
     this.image = image;
     this.engine = config.engine;
     this.pinCount = config.pinCount;
@@ -153,7 +162,36 @@ export class EspRiscvRunner implements BoardRunner {
     // A pad driven from the canvas can raise a GPIO interrupt with no register
     // write to prompt the machine to look.
     this.gpio.onInterruptChange = () => this.machine.interruptSourceChanged();
+    this.efuse = new EfuseMac(EFUSE_BASE[config.engine]);
+    this.machine.addPeripheral(this.efuse);
     this.machine.loadImage(image);
+    if (symbols) {
+      const m = this.machine;
+      const host: FirmwareHost = {
+        read8: (a) => m.readUint8(a),
+        read32: (a) => m.readUint32(a),
+        write8: (a, v) => m.writeUint8(a, v),
+        write32: (a, v) => m.writeUint32(a, v),
+        get nanos() {
+          return m.nanos;
+        },
+        provideFirmwareRoutine: (a, n, h) => m.provideFirmwareRoutine(a, n, h),
+        provideTask: (round) => m.provideTask(round),
+        glueTaskEntry: m.glueTaskEntry,
+        glueTaskName: m.glueTaskName,
+        fault: null,
+      };
+      const driver = new IdfWifiDriver(host, symbols, macForBoard(config.engine), config.engine.toUpperCase());
+      if (driver.install()) this.wifi = driver;
+    }
+  }
+
+  /** Joins the canvas's Wi-Fi network: before the firmware first runs, so it boots with this MAC. */
+  attachWifi(network: WifiNetwork, identity: { id: string; label: string }): void {
+    if (!this.wifi) return;
+    const mac = macForBoard(identity.id);
+    this.efuse.setMac(mac);
+    this.wifi.attach(network, mac, identity.label);
   }
 
   /**
@@ -482,8 +520,8 @@ export const ESP32C3_RUNNER: EspRunnerConfig = {
 };
 
 export class Esp32C3Runner extends EspRiscvRunner {
-  constructor(image: EspApplicationImage, regions: { offset: number; data: Uint8Array }[]) {
-    super(image, regions, ESP32C3_RUNNER);
+  constructor(image: EspApplicationImage, regions: { offset: number; data: Uint8Array }[], symbols?: FirmwareSymbols) {
+    super(image, regions, ESP32C3_RUNNER, symbols);
   }
 }
 

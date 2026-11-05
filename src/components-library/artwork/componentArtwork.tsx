@@ -2777,6 +2777,36 @@ function Esp01Art({ def }: ArtProps) {
 }
 
 /**
+ * A Wi-Fi access point: a small router with two antennas and status lights.
+ * It has no pins, because nothing is wired to a router; boards reach it over
+ * the air.
+ */
+function WifiApArt({ def }: ArtProps) {
+  const W = def.widthMm * MM;
+  const H = def.heightMm * MM;
+  const body = { x: W * 0.06, y: H * 0.42, w: W * 0.88, h: H * 0.42 };
+  return (
+    <g>
+      {[0.2, 0.8].map((fx) => (
+        <rect key={fx} x={W * fx - W * 0.025} y={H * 0.04} width={W * 0.05} height={H * 0.44} rx={W * 0.02} fill="#1d2329" stroke="#0b0e11" />
+      ))}
+      <rect x={body.x} y={body.y} width={body.w} height={body.h} rx={H * 0.08} fill="#e9edf1" stroke="#9aa4ad" />
+      <rect x={body.x} y={body.y} width={body.w} height={body.h * 0.35} rx={H * 0.08} fill="rgba(255,255,255,0.6)" />
+      {[0.3, 0.42, 0.54, 0.66].map((fx, i) => (
+        <circle key={fx} cx={W * fx} cy={body.y + body.h * 0.62} r={H * 0.025} fill={i === 0 ? '#3fbf5f' : '#2f8fd8'} />
+      ))}
+      {/* The usual radiating arcs, small, at the right of the face. */}
+      <g fill="none" stroke="#2f8fd8" strokeWidth={H * 0.018} strokeLinecap="round">
+        {[0.05, 0.09].map((r) => (
+          <path key={r} d={`M ${W * 0.8 - H * r} ${body.y + body.h * 0.66} a ${H * r} ${H * r} 0 0 1 ${2 * H * r} 0`} />
+        ))}
+      </g>
+      <text x={W / 2} y={body.y + body.h * 0.34} textAnchor="middle" fontSize={H * 0.08} fill="#5b646c" fontFamily="sans-serif">Wi-Fi AP</text>
+    </g>
+  );
+}
+
+/**
  * DFPlayer Mini: a card slot on a square board.
  *
  * The socket is nearly the whole part, which is exactly why it reads as
@@ -3334,6 +3364,7 @@ const REGISTRY: Record<string, (p: ArtProps) => JSX.Element> = {
   gps: (p) => <GpsArt {...p} />,
   hc05: (p) => <Hc05Art {...p} />,
   esp01: (p) => <Esp01Art {...p} />,
+  'wifi-ap': (p) => <WifiApArt {...p} />,
   dfplayer: (p) => <DfPlayerArt {...p} />,
   diode: (p) => <DiodeArt {...p} />,
   transistor: (p) => <TransistorArt {...p} />,

@@ -23,7 +23,7 @@
 // The interrupt controller is the core itself: each peripheral drives its
 // CPU interrupt number directly (UART 5, GPIO 4, FRC1 9, FRC2 10).
 
-import { EspXtensaMachine } from '../xtensa/espXtensaMachine';
+import { EspXtensaMachine, type CoreSlot } from '../xtensa/espXtensaMachine';
 import type { XtensaConfig } from '../xtensa/xtensa';
 import type { Peripheral, SimulatedClock } from '../espRiscv/peripheral';
 import { EspUart, type UartLayout } from '../espRiscv/uart';
@@ -196,6 +196,14 @@ export class Esp8266Machine extends EspXtensaMachine {
   /** Called with each routine the native ROM provides, for diagnosis. */
   onRomCall: ((name: string, pc: number) => void) | null = null;
   protected override readonly romName = 'ESP8266';
+  /** The guest-call glue, in ROM space below ROM_GLUE. */
+  protected override readonly glueBase = 0x4000ec00;
+  /** The flash image is the whole build, so code in the cache window is patched at its own offset. */
+  protected override readonly appFlashOffset = 0;
+  /** The Wi-Fi model's work for the scheduler, when a build uses Wi-Fi (see nextTask). */
+  wifiWork: { nextDue(): number | undefined } | null = null;
+  /** The eFuse's MAC bytes 3..5 (the first three are Espressif's 18:FE:34). */
+  private factoryMac: readonly number[] = [0x18, 0xfe, 0x34, 0x7c, 0x12, 0x5a];
 
   constructor(
     flash: SerialNorFlash,
@@ -222,6 +230,33 @@ export class Esp8266Machine extends EspXtensaMachine {
       new Store('wdt', 0x60000900, 0x100), new Store('slc', 0x60000b00, 0x100), new Store('i2s', 0x60000e00, 0x100),
       this.sar, this.dport, new Esp8266Wdev(this),
     ]) this.addPeripheral(p);
+    // The Wi-Fi model's work wakes the scheduler's wait as an interrupt would.
+    this.addEventSource({ nextEventNanos: () => this.wifiWork?.nextDue() });
+  }
+
+  /** The station MAC the SDK reads from the eFuse at start-up: bytes 3..5 are the chip's own. */
+  setFactoryMac(mac: readonly number[]): void {
+    this.factoryMac = mac;
+    this.writeFactoryMac();
+  }
+
+  private writeFactoryMac(): void {
+    const m = this.factoryMac;
+    this.dport.writeUint32(0x50, (m[5] << 24) >>> 0);
+    this.dport.writeUint32(0x54, (m[3] << 8) | m[4]);
+  }
+
+  protected override writeRomByte(a: number, v: number): void {
+    this.romBytes[a - ROM_BASE] = v & 0xff;
+  }
+
+  protected override idle(slot: CoreSlot): boolean {
+    if (!super.idle(slot)) return false;
+    const due = this.wifiWork?.nextDue();
+    if (due === undefined || due > slot.ns) return true;
+    // ets_run's wait ends, and its next step finds the work (nextTask).
+    slot.cpu.waiting = false;
+    return false;
   }
 
   // ------------------------------------------------------------- clocks
@@ -242,6 +277,7 @@ export class Esp8266Machine extends EspXtensaMachine {
     this.sparse.clear();
     this.fallback.clear();
     for (const p of this.peripherals) p.reset?.();
+    this.writeFactoryMac();
     this.isr.clear();
     this.tasks.clear();
     this.idleCb = { fn: 0, arg: 0 };
@@ -253,6 +289,7 @@ export class Esp8266Machine extends EspXtensaMachine {
       for (let i = 0; i < seg.data.length; i++) this.write8(a + i, seg.data[i]);
     }
     this.romBytes.set(ROM_GLUE, GLUE_AT - ROM_BASE);
+    this.installGlue();
     this.installRomData();
     this.romState.cpuTicksPerUs = 80;
     this.romState.md5.clear();
@@ -277,6 +314,9 @@ export class Esp8266Machine extends EspXtensaMachine {
       (v, k) => this.write32(f + k * 4, v),
     );
     for (let i = 0; i < PHY_TABLE_ENTRIES; i++) this.write32(PHY_TABLE_AT + i * 4, PHY_STUBS_AT + i * 4);
+    for (const [at, digits] of [[ROM_DATA.digitsUpper, '0123456789ABCDEF'], [ROM_DATA.digitsLower, '0123456789abcdef']] as const) {
+      [...digits, '\0'].forEach((c, k) => this.write8(at + k, c.charCodeAt(0)));
+    }
   }
 
   // ------------------------------------------------------------- ROM
@@ -444,6 +484,12 @@ export class Esp8266Machine extends EspXtensaMachine {
   /** ets_run's next step: a2 the argument, a4 the function to call, or 0 to wait for an interrupt. */
   private nextTask(h: Esp32RomHost): number {
     const cpu = h.core;
+    // The Wi-Fi model's work first, as the SDK's own radio task outranks the core's loop.
+    const due = this.wifiWork?.nextDue();
+    if (due !== undefined && due <= this.nanos && this.glueRoundEntry !== undefined) {
+      cpu.setA(4, this.glueRoundEntry);
+      return 0;
+    }
     for (let prio = 31; prio >= 0; prio--) {
       const task = this.tasks.get(prio);
       if (!task || task.events.length === 0) continue;

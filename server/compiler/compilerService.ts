@@ -24,6 +24,7 @@ import { includeWarnings } from './libraries.js';
  * a target this service is validated for.
  */
 const ALLOWED_FQBNS: string[] = PINNED_CORES.flatMap((c) => c.targets);
+import type { FirmwareSymbols } from './firmwareSymbols.js';
 import { buildKey, buildDirFor, cachedResult, rememberResult, runDeduplicated, evictBuildDirs } from './buildCache.js';
 
 export interface CompilerHealth {
@@ -311,7 +312,7 @@ function finish(
   success: boolean,
   toolchain: 'arduino-cli' | 'avr-gcc',
   version: string,
-  out: { stdout: string; stderr: string; hex?: string; binaryBase64?: string; binaryFormat?: 'uf2' | 'bin' | 'esp-image'; binaryRegions?: { offset: number; data: string }[]; flashBytes?: number; ramBytes?: number },
+  out: { stdout: string; stderr: string; hex?: string; binaryBase64?: string; binaryFormat?: 'uf2' | 'bin' | 'esp-image'; binaryRegions?: { offset: number; data: string }[]; binarySymbols?: FirmwareSymbols; flashBytes?: number; ramBytes?: number },
   diagnostics: Diagnostic[],
   target: { id: string; fqbn: string; flashMaxBytes: number; ramMaxBytes: number },
   started: number,
@@ -337,6 +338,7 @@ function finish(
       result.firmware = { format: 'intel-hex', data: out.hex };
     } else if (out.binaryBase64 && out.binaryFormat) {
       result.firmware = { format: out.binaryFormat, data: out.binaryBase64, regions: out.binaryRegions };
+      if (out.binarySymbols) result.firmware.symbols = out.binarySymbols;
     } else {
       result.success = false;
       result.error = 'Build succeeded but produced no firmware artifact for this target.';

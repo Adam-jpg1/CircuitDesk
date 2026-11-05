@@ -35,6 +35,7 @@ import { compileProjectCode } from '../compiler/compilerClient';
 import { resolveDefinition } from '../project/partsRegistry';
 import { filesForBoard, sketchIdFor } from '../project/sketches';
 import { useSimulationStore } from './simulationStore';
+import { WifiNetwork, accessPointsIn } from './wifi/network';
 import type { CompileStage } from '../app/editorStore';
 import type { BoardDefinition, CircuitProject, CompileResult, SimulationNote } from '../types';
 
@@ -124,6 +125,12 @@ export type CompileFn = (
 class SimulationController {
   private world: SimulationWorld | null = null;
   private binding: CircuitBinding | null = null;
+  /** The Wi-Fi network the canvas's access points make, for the boards with a modelled radio. */
+  private wifi = new WifiNetwork();
+  /** The network the workbench shows, for its network view and its browser. */
+  get wifiNetwork(): WifiNetwork {
+    return this.wifi;
+  }
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastTickWall = 0;
   private lastPublishWall = 0;
@@ -714,6 +721,7 @@ class SimulationController {
     }
 
     this.world = world;
+    this.wifi = new WifiNetwork();
     this.stopPreview();
     this.benchRun = false;
     this.rebind();
@@ -735,6 +743,11 @@ class SimulationController {
     if (!world || !this.project) return;
     const primary = world.boards[0]?.runner ?? null;
     this.binding = new CircuitBinding(this.project, primary, world.runnerMap());
+    // Access points follow the canvas (an edited SSID takes effect now); boards
+    // join under their own names, with MACs that stay theirs across runs.
+    this.wifi.setAccessPoints(accessPointsIn(this.project));
+    const labels = this.boardLabels();
+    for (const m of world.boards) m.runner.attachWifi?.(this.wifi, { id: m.instanceId, label: labels.get(m.instanceId) ?? m.instanceId });
     world.settle = () => this.binding?.update(this.controlsNow);
   }
 

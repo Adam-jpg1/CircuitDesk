@@ -1,3 +1,4 @@
+import { readFirmwareSymbols, type FirmwareSymbols } from './firmwareSymbols.js';
 import type { BoardTarget } from './types.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -150,6 +151,8 @@ export interface CliBuildOutput {
   binaryFormat?: 'uf2' | 'bin' | 'esp-image';
   /** Other flash regions, at their real offsets, base64 encoded. */
   binaryRegions?: { offset: number; data: string }[];
+  /** Where the closed Wi-Fi driver landed, for an ESP build that links it (firmwareSymbols.ts). */
+  binarySymbols?: FirmwareSymbols;
   flashBytes?: number;
   ramBytes?: number;
   /** Time spent reading artifacts back off disk and encoding them. */
@@ -294,6 +297,7 @@ export async function cliCompile(
     let binaryBase64: string | undefined;
     let binaryFormat: 'uf2' | 'bin' | 'esp-image' | undefined;
     let binaryRegions: { offset: number; data: string }[] | undefined;
+    let binarySymbols: FirmwareSymbols | undefined;
     const artifactStart = Date.now();
     if (!syntaxOnly) {
       const files = await readdir(outputDir);
@@ -342,6 +346,12 @@ export async function cliCompile(
           if (partitions) {
             binaryRegions.push({ offset: 0x8000, data: (await readFile(path.join(outputDir, partitions))).toString('base64') });
           }
+          binarySymbols = await readFirmwareSymbols(
+            ...(['.ino.elf', '.ino.map'].map((ext) => {
+              const f = files.find((name) => name.endsWith(ext));
+              return f ? path.join(outputDir, f) : undefined;
+            }) as [string | undefined, string | undefined]),
+          );
         }
       } else if (arch === 'esp8266') {
         // The ESP8266 core writes one .bin that is the whole flash image —
@@ -351,6 +361,12 @@ export async function cliCompile(
         if (bin) {
           binaryBase64 = (await readFile(path.join(outputDir, bin))).toString('base64');
           binaryFormat = 'esp-image';
+          binarySymbols = await readFirmwareSymbols(
+            ...(['.ino.elf', '.ino.map'].map((ext) => {
+              const f = files.find((name) => name.endsWith(ext));
+              return f ? path.join(outputDir, f) : undefined;
+            }) as [string | undefined, string | undefined]),
+          );
         }
       } else if (arch === 'imxrt1062') {
         // The Teensy core writes only Intel HEX, of the flash from 0x60000000;
@@ -387,6 +403,7 @@ export async function cliCompile(
       binaryBase64,
       binaryFormat,
       binaryRegions,
+      binarySymbols,
       flashBytes: flashMatch ? Number(flashMatch[1]) : undefined,
       ramBytes: ramMatch ? Number(ramMatch[1]) : undefined,
     };

@@ -9,6 +9,7 @@
 // S3's own are here, each implementing the documented contract of its C
 // prototype. Addresses are in ./romAddresses.
 
+import type { GuestRoutine } from '../firmwareCalls';
 import { ROM_HANDLERS, type Esp32RomHost, type RomHandler, type RomResult } from '../esp32/rom';
 
 type H = (h: Esp32RomHost) => RomResult;
@@ -23,6 +24,23 @@ function cstr(h: Esp32RomHost, a: number): number[] {
     out.push(b);
   }
   return out;
+}
+
+/**
+ * strdup/strndup: the copy needs the firmware's heap, reached as newlib does,
+ * through the syscall table's _malloc_r with the task's reent.
+ */
+function duplicate(h: Esp32RomHost, src: number, max: number): GuestRoutine {
+  return (function* (): GuestRoutine {
+    const n = Math.min(strlen(h, src), max);
+    const table = h.read32(h.syscallTablePointer);
+    const reent = yield { fn: h.read32(table), args: [] };
+    const dst = yield { fn: h.read32(table + 4), args: [reent, n + 1] };
+    if (!dst) return 0;
+    for (let i = 0; i < n; i++) h.write8(dst + i, h.read8(src + i));
+    h.write8(dst + n, 0);
+    return dst;
+  })();
 }
 
 function strlen(h: Esp32RomHost, a: number): number {
@@ -191,6 +209,8 @@ export const S3_ONLY: Record<string, H> = {
   },
   // --------------------------------------------------------------- strings
   strlen: (h) => strlen(h, h.arg(0)),
+  strdup: (h) => duplicate(h, h.arg(0), Infinity),
+  strndup: (h) => duplicate(h, h.arg(0), h.arg(1)),
   strnlen: (h) => {
     let n = 0;
     while (n < h.arg(1) && h.read8(h.arg(0) + n)) n++;

@@ -1332,6 +1332,32 @@ export const BLUETOOTH = def(
   },
 );
 
+/**
+ * A Wi-Fi access point for the ESP boards' own Wi-Fi to join. Not a part on a
+ * breadboard: a router sitting on the bench, so it has nothing to wire.
+ */
+export const WIFI_ACCESS_POINT = def(
+  'comp.wifi-ap', 'Wi-Fi Access Point', 'Modules', 40, 28, 'wifi-ap',
+  [],
+  'simulated',
+  {
+    simulationAdapterId: 'sim.wifi-ap',
+    properties: [
+      prop('ssid', 'Network name (SSID)', 'text', 'CircuitDesk'),
+      prop('password', 'Password (empty for an open network)', 'text', 'password123'),
+      prop('channel', 'Channel', 'number', 6),
+    ],
+    description:
+      'A simulated Wi-Fi access point for the ESP boards (ESP32, ESP32-S3, ESP32-CAM, ESP32-C3, ESP32-C6, ESP8266) to join with WiFi.begin(). ' +
+      'The sketch must use this SSID and password, as with a real router: a wrong SSID fails with "no AP found" and a ' +
+      'wrong password with an authentication failure. Its DHCP server hands out 192.168.1.100 onwards (the second ' +
+      'access point on a canvas is 192.168.2.0/24, and so on), its DNS resolves each board by the hostname it gave, ' +
+      'and boards on it reach each other over TCP and UDP through their own network stacks — a web server on one board ' +
+      'can be fetched by another. There is no internet behind it: other names do not resolve. Signal strength, range, ' +
+      'channels and WPA handshakes are not simulated; a scan reports every access point at the same RSSI.',
+  },
+);
+
 export const WIFI_ESP01 = def(
   'comp.esp01', 'Wi-Fi Module (ESP-01)', 'Modules', 14.5, 24.8, 'esp01',
   [
@@ -2013,7 +2039,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
   NOKIA5110, ILI9341, ST7735, ST7789, GC9A01, SSD1331, EPAPER29,
   NEOPIXEL, NEOPIXEL_RING, NEOPIXEL_STRIP, NEOPIXEL_MATRIX,
   ULTRASONIC, TMP36, LDR, BMP280, PULSE_SENSOR, MPU6050,
-  GPS, BLUETOOTH, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_LED, IR_REMOTE, NRF24L01, LORA_SX1278, RF433_TX, RF433_RX, MAX485, MCP2515,
+  GPS, BLUETOOTH, WIFI_ACCESS_POINT, WIFI_ESP01, DFPLAYER, IR_RECEIVER, IR_LED, IR_REMOTE, NRF24L01, LORA_SX1278, RF433_TX, RF433_RX, MAX485, MCP2515,
   BATTERY_9V, BATTERY_AA, REGULATOR, LEVEL_CONVERTER,
   CELL_15, COIN_CELL, DC_SUPPLY, REGULATOR_5, REGULATOR_33, LDO_33, BUCK_CONVERTER, BOOST_CONVERTER,
   HC595, HC165, SD_CARD, SPI_FLASH, EEPROM_24C, DS3231, MCP4725,

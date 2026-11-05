@@ -79,6 +79,9 @@ const IROM_END = 0x40400000;
 const MMIO_BASE = 0x3ff00000;
 const MMIO_END = 0x3ff80000;
 const AHB_ALIAS = 0x60000000;
+/** newlib's ctype table in the ESP32's ROM data (esp32.rom.newlib-data.ld). */
+const CTYPE_PTR = 0x3ff96350;
+const CTYPE_TABLE = 0x3ff96354;
 const MMU_INVALID = 0x100;
 /** Where the ROM leaves each CPU's stack before the application sets its own. */
 const PRO_ROM_STACK = 0x3ffe3f00;
@@ -100,6 +103,29 @@ class Store implements Peripheral {
 }
 
 /** SPI1, the controller ESP-IDF drives to read, erase and program the flash. */
+/**
+ * The Wi-Fi block's hardware random number generator (WDEV_RND_REG, 0x3FF75144).
+ * esp_random() reads it, and lwIP draws its DNS ports and TCP sequence numbers
+ * from esp_random(), retrying until the value suits — so a register that reads
+ * a constant hangs the network stack.
+ */
+class Esp32Rng extends Store {
+  private seed = 0x9e3779b9;
+  constructor() {
+    super('wdev', 0x3ff75000, 0x1000);
+  }
+  override readUint32(offset: number): number {
+    if (offset !== 0x144) return super.readUint32(offset);
+    // xorshift32: the hardware's is noise; firmware only needs it to vary.
+    let x = this.seed;
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    this.seed = x >>> 0;
+    return this.seed;
+  }
+}
+
 class Esp32Spi1 extends Store {
   constructor(private readonly flash: SerialNorFlash) {
     super('spi1', 0x3ff42000, 0x1000);
@@ -199,27 +225,75 @@ class RtcCntl extends Store {
 
 /** eFuse: a factory MAC with its CRC, chip revision 1, no flash encryption. */
 class Efuse extends Store {
-  constructor() {
+  constructor(private mac: readonly number[] = ESP32_DEFAULT_MAC) {
     super('efuse', 0x3ff5a000, 0x1000);
     this.reset();
   }
   override reset(): void {
     super.reset();
-    const mac = [0x24, 0x0a, 0xc4, 0x12, 0x34, 0x56];
-    // BLK0 RDATA1 holds MAC bytes 5..2, RDATA2 bytes 1..0 and the CRC.
-    this.regs.set(0x08, ((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5]) >>> 0);
-    this.regs.set(0x0c, (esp32MacCrc8([mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]]) << 16) | (mac[0] << 8) | mac[1]);
-    // RDATA3: chip revision bit 15 (rev 1), package D0WD.
-    this.regs.set(0x10, 1 << 15);
+    const mac = this.mac;
+    // BLK0 RDATA1 (0x04) holds MAC bytes 5..2, RDATA2 (0x08) bytes 1..0 and,
+    // in bits 23:16, the CRC ESP-IDF checks over the MAC in its usual order.
+    this.regs.set(0x04, ((mac[2] << 24) | (mac[3] << 16) | (mac[4] << 8) | mac[5]) >>> 0);
+    this.regs.set(0x08, (esp32MacCrc8(mac) << 16) | (mac[0] << 8) | mac[1]);
+    // RDATA3 (0x0c): chip revision bit 15 (rev 1), package D0WD.
+    this.regs.set(0x0c, 1 << 15);
+  }
+  setMac(mac: readonly number[]): void {
+    this.mac = mac;
+    this.reset();
   }
 }
 
+/** The factory MAC a board gets unless the runner gives it its own (Espressif's 24:0A:C4 OUI). */
+export const ESP32_DEFAULT_MAC: readonly number[] = [0x24, 0x0a, 0xc4, 0x12, 0x34, 0x56];
+
 export interface Esp32Options {
   onUnclaimedMmio?: (address: number, write: boolean, value: number) => void;
+  /** The factory MAC burnt into eFuse: each board on a network needs its own. */
+  mac?: readonly number[];
 }
 
 export class Esp32Machine extends EspXtensaMachine {
+  /** The factory MAC in eFuse, which the firmware reads as it boots. */
+  get factoryMac(): readonly number[] {
+    return this.efuseMac;
+  }
+
+  setFactoryMac(mac: readonly number[]): void {
+    this.efuseMac = mac;
+    this.efuse.setMac(mac);
+  }
+
+  private efuseMac: readonly number[] = ESP32_DEFAULT_MAC;
+
+  /**
+   * newlib's character classes, which the ESP32's libc takes from mask-ROM
+   * data (esp32.rom.newlib-data.ld): __ctype_ptr__ at 0x3FF96350 points at
+   * _ctype_, one entry for EOF then one per character. isspace(), isdigit()
+   * and Arduino's String::trim() read it; with nothing there every character
+   * is in no class at all.
+   */
+  private installCtype(): void {
+    const U = 0x01, L = 0x02, N = 0x04, S = 0x08, P = 0x10, C = 0x20, X = 0x40, B = 0x80;
+    const cls = (c: number): number => {
+      if (c === 32) return S | B;
+      if (c >= 9 && c <= 13) return C | S;
+      if (c < 32 || c === 127) return C;
+      if (c >= 48 && c <= 57) return N;
+      if (c >= 65 && c <= 90) return U | (c <= 70 ? X : 0);
+      if (c >= 97 && c <= 122) return L | (c <= 102 ? X : 0);
+      return c < 127 ? P : 0;
+    };
+    this.write32(CTYPE_PTR, CTYPE_TABLE);
+    this.write8(CTYPE_TABLE, 0);
+    for (let c = 0; c < 256; c++) this.write8(CTYPE_TABLE + 1 + c, cls(c));
+  }
+
+  /** The guest-call glue's place: ROM space below the newlib trampoline that no ROM routine uses. */
+  protected override readonly glueBase = 0x4006fe00;
   readonly dram = new Uint8Array(DRAM_END - DRAM_BASE);
+  private readonly efuse: Efuse;
   readonly iram = new Uint8Array(IRAM_END - IRAM_BASE);
   readonly rtcFast = new Uint8Array(RTC_SIZE);
   readonly rtcSlow = new Uint8Array(RTC_SIZE);
@@ -242,6 +316,8 @@ export class Esp32Machine extends EspXtensaMachine {
   ) {
     super(flash, [esp32CoreConfig(0xcdcd), esp32CoreConfig(0xabab)], ESP32_SOURCE.count, { start: ESP32_ROM_START, end: ESP32_ROM_END }, ESP32_ROM);
     this.romCode.push({ start: REENT_TRAMPOLINE, end: REENT_TRAMPOLINE + REENT_TRAMPOLINE_CODE.length });
+    this.efuse = new Efuse(options.mac);
+    if (options.mac) this.efuseMac = options.mac;
     this.gpio = new Esp32Gpio(this, ESP32_SOURCE.gpio);
     this.gpio.onInterruptChange = () => (this.interruptsDirty = true);
     this.rtc = new RtcCntl(this);
@@ -257,7 +333,7 @@ export class Esp32Machine extends EspXtensaMachine {
     ];
     for (const p of [
       this.dport, this.rtc, this.gpio, this.gpio.ioMux, this.gpio.rtcIo, ...this.uarts, ...this.timerGroups,
-      new Esp32Spi1(flash), new Efuse(), new Esp32Ledc(this, this.gpio, apb),
+      new Esp32Spi1(flash), this.efuse, new Esp32Rng(), new Esp32Ledc(this, this.gpio, apb),
       new EspI2c({ base: 0x3ff53000, interruptSource: ESP32_SOURCE.i2c0, sclSignal: 29, sdaSignal: 30, classic: { name: 'i2c0', commands: 16, apbHz: apb } }, this, () => this.ports.i2c),
       new EspI2c({ base: 0x3ff67000, interruptSource: ESP32_SOURCE.i2c1, sclSignal: 95, sdaSignal: 96, classic: { name: 'i2c1', commands: 16, apbHz: apb } }, this, () => this.ports.i2c),
       new Esp32Spi('hspi', 0x3ff64000, () => this.ports.spi),
@@ -320,6 +396,8 @@ export class Esp32Machine extends EspXtensaMachine {
     this.romState.regi2c.clear();
     this.romState.md5.clear();
     REENT_TRAMPOLINE_CODE.forEach((b, k) => this.write8(REENT_TRAMPOLINE + k, b));
+    this.installGlue();
+    this.installCtype();
     // g_rom_flashchip, which the ROM fills from the flash's JEDEC ID and the
     // image header: ESP-IDF's flash driver takes the chip size from it.
     const id = this.flash.id;

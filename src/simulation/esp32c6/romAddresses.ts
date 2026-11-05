@@ -90,6 +90,7 @@ export const ESP32C6_ROM_ADDRESSES: Record<string, number> = {
   srand: 0x40000594,
   strcasestr: 0x40000528,
   strcat: 0x4000052c,
+  strdup: 0x40000530,
   strchr: 0x40000534,
   strcspn: 0x40000538,
   strlcat: 0x40000540,

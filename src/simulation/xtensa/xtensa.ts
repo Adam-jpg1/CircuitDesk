@@ -56,6 +56,9 @@ export interface XtensaConfig {
   nmi?: { int: number; level: number };
 }
 
+/** BREAK 15,14: what a firmware routine the SoC provides natively is patched to start with. */
+export const FIRMWARE_HOOK_BREAK = [0xe0, 0x4f, 0x00];
+
 /** An exception raised while executing an instruction. */
 class XtensaExc {
   constructor(
@@ -140,6 +143,13 @@ export class Xtensa {
   halted: string | null = null;
   /** Called with a ROM address the PC has reached; return true if handled. */
   rom: ((pc: number) => boolean) | null = null;
+  /**
+   * A routine in the firmware the SoC provides natively, reached through the
+   * BREAK 15,14 patched over its first instruction (see FIRMWARE_HOOK_BREAK).
+   * Like `rom`, it runs before the routine's first instruction and returns
+   * true when it has set the PC.
+   */
+  firmwareHook: ((pc: number) => boolean) | null = null;
   romStart = 0;
   romEnd = 0;
   private nextPc = 0;
@@ -462,6 +472,13 @@ export class Xtensa {
   }
 
   private breakpoint(pc: number, s: number, t: number): void {
+    if (s === 15 && t === 14 && this.firmwareHook) {
+      this.pc = pc;
+      if (this.firmwareHook(pc)) {
+        this.jump(this.pc);
+        return;
+      }
+    }
     // With no debugger attached, a BREAK is an unrecoverable stop: IDF reaches
     // one from abort(). Report it rather than spin.
     this.halted = `BREAK ${s},${t} at 0x${pc.toString(16)}`;

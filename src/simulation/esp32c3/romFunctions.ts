@@ -106,6 +106,8 @@ export interface RomMachineState {
    * ends 0x10000 below the C3's, so a shared constant would be outside it.
    */
   coexVersionAddress: number;
+  /** The address of newlib's syscall table pointer on this chip. */
+  syscallTablePointer: number;
   /**
    * Where this chip's interrupt matrix and CPU interrupt controller live.
    *
@@ -146,6 +148,7 @@ export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMac
     romConsoleDivider: 0,
     randState: 1,
     coexVersionAddress: ROM_COEX_VERSION_ADDRESS,
+    syscallTablePointer: 0x3fcdffe0,
     // The C3's, which a machine replaces with its own chip's.
     interruptLayout: {
       matrixBase: ESP32C3_SOC.cpuInterrupts.base,
@@ -415,6 +418,24 @@ const bswapsi2: RomHandler = ({ args }) => {
 };
 
 /** `strlen(s)` — bytes before the first NUL. */
+/**
+ * strdup: the copy is allocated as the ROM's newlib allocates, through the
+ * syscall table's _malloc_r (index 1) with the task's reent (index 0).
+ */
+const strdup: RomHandler = ({ args, bus, callGuest, machine }) => {
+  const src = args[0] >>> 0;
+  let n = 0;
+  while (bus.readUint8((src + n) >>> 0) !== 0 && n <= 0x10000) n++;
+  const table = bus.readUint32(machine.syscallTablePointer);
+  if (!table) return 0;
+  const reent = callGuest(bus.readUint32(table), []).value >>> 0;
+  const dst = callGuest(bus.readUint32((table + 4) >>> 0), [reent, n + 1]).value >>> 0;
+  if (!dst) return 0;
+  for (let i = 0; i < n; i++) bus.writeUint8((dst + i) >>> 0, bus.readUint8((src + i) >>> 0));
+  bus.writeUint8((dst + n) >>> 0, 0);
+  return dst;
+};
+
 const strlen: RomHandler = ({ args, bus }) => {
   let length = 0;
   while (bus.readUint8((args[0] + length) >>> 0) !== 0) {
@@ -1572,6 +1593,12 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
     name: '__bswapsi2',
     handler: bswapsi2,
     rationale: '32-bit byte swap.',
+  },
+  {
+    address: 0x400003dc,
+    name: 'strdup',
+    handler: strdup,
+    rationale: 'A copy in memory from the firmware\'s own heap, allocated through newlib\'s syscall table as the ROM does.',
   },
   {
     address: 0x40000374,

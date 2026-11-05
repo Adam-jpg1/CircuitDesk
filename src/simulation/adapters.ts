@@ -28,6 +28,14 @@ export interface FirmwareArtifact {
    * anything, so the artifacts that are not executed still have to be present.
    */
   regions?: { offset: number; data: string }[];
+  /** An ESP build's closed Wi-Fi driver entry points (see CompileResult). */
+  symbols?: FirmwareSymbols;
+}
+
+/** Where an ESP build's closed Wi-Fi driver landed (server/compiler/firmwareSymbols.ts). */
+export interface FirmwareSymbols {
+  closed: [string, number][];
+  named: Record<string, number>;
 }
 
 export interface BoardSimulatorAdapter {
@@ -129,6 +137,7 @@ const esp32c3Adapter: BoardSimulatorAdapter = {
     return new Esp32C3Runner(
       image,
       (firmware.regions ?? []).map((r) => ({ offset: r.offset, data: decodeRegion(r.data) })),
+      firmware.symbols,
     );
   },
 };
@@ -145,7 +154,7 @@ const esp32Adapter: BoardSimulatorAdapter = {
     parseEspApplicationImage(bytes, { expectChip: 'esp32', regions: ESP32_IMAGE_REGIONS });
     const { createEsp32Runner } = await import('./esp32Runner');
     const { decodeRegion } = await import('./espRiscvRunner');
-    return createEsp32Runner(bytes, (firmware.regions ?? []).map((r) => ({ offset: r.offset, data: decodeRegion(r.data) })));
+    return createEsp32Runner(bytes, (firmware.regions ?? []).map((r) => ({ offset: r.offset, data: decodeRegion(r.data) })), undefined, firmware.symbols);
   },
 };
 
@@ -169,7 +178,7 @@ const esp32s3Adapter: BoardSimulatorAdapter = {
     parseEspApplicationImage(bytes, { expectChip: 'esp32s3', regions: ESP32S3_IMAGE_REGIONS });
     const { createEsp32Runner, ESP32S3_CHIP } = await import('./esp32Runner');
     const { decodeRegion } = await import('./espRiscvRunner');
-    return createEsp32Runner(bytes, (firmware.regions ?? []).map((r) => ({ offset: r.offset, data: decodeRegion(r.data) })), ESP32S3_CHIP);
+    return createEsp32Runner(bytes, (firmware.regions ?? []).map((r) => ({ offset: r.offset, data: decodeRegion(r.data) })), ESP32S3_CHIP, firmware.symbols);
   },
 };
 
@@ -194,7 +203,7 @@ const esp8266Adapter: BoardSimulatorAdapter = {
     const { parseEsp8266Image } = await import('./esp8266/image');
     parseEsp8266Image(bytes);
     const { createEsp8266Runner } = await import('./esp8266Runner');
-    return createEsp8266Runner(bytes);
+    return createEsp8266Runner(bytes, firmware.symbols);
   },
 };
 
@@ -216,6 +225,7 @@ const esp32c6Adapter: BoardSimulatorAdapter = {
     return new Esp32C6Runner(
       image,
       (firmware.regions ?? []).map((r) => ({ offset: r.offset, data: decodeRegion(r.data) })),
+      firmware.symbols,
     );
   },
 };

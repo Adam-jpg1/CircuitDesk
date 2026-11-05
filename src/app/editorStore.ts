@@ -37,7 +37,7 @@ export interface CompileStage {
   index: number;
   total: number;
 }
-export type BottomTab = 'code' | 'serial' | 'compiler' | 'validation' | 'tests' | 'pins' | 'debug';
+export type BottomTab = 'code' | 'serial' | 'compiler' | 'validation' | 'tests' | 'pins' | 'wifi' | 'debug';
 
 interface CircuitSnapshot {
   boardInstances: ComponentInstance[];
