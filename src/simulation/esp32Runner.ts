@@ -26,6 +26,8 @@ import { I2cBus } from './devices/i2cBus';
 import { SpiBus } from './devices/spiBus';
 import { IdfWifiDriver } from './wifi/idfDriver';
 import { macForBoard, type WifiNetwork } from './wifi/network';
+import { IdfBtDriver } from './bluetooth/idfBtDriver';
+import { bluetoothAddressFor, type BleAir } from './bluetooth/air';
 import type { FirmwareSymbols } from './adapters';
 
 /** Instructions one slice may retire, so a spinning sketch cannot freeze the page. */
@@ -138,6 +140,8 @@ export class Esp32Runner implements BoardRunner {
 
   /** The Wi-Fi driver model, when the build links Espressif's driver. */
   readonly wifi: IdfWifiDriver | null = null;
+  /** The Bluetooth controller model, when the build links Bluetooth. */
+  readonly bluetooth: IdfBtDriver | null = null;
 
   constructor(
     readonly image: EspApplicationImage,
@@ -160,7 +164,14 @@ export class Esp32Runner implements BoardRunner {
     if (symbols) {
       const driver = new IdfWifiDriver(this.machine, symbols, macForBoard(chip.engine), chip.engine.toUpperCase());
       if (driver.install()) this.wifi = driver;
+      const bt = new IdfBtDriver(this.machine, symbols, bluetoothAddressFor(chip.engine), chip.engine.toUpperCase());
+      if (bt.install()) this.bluetooth = bt;
     }
+  }
+
+  /** Joins the canvas's Bluetooth air, under the board's name and an address of its own. */
+  attachBluetooth(air: BleAir, identity: { id: string; label: string }): void {
+    this.bluetooth?.attach(air, bluetoothAddressFor(identity.id), identity.label);
   }
 
   /** Joins the canvas's Wi-Fi network: before the firmware first runs, so it boots with this MAC. */
@@ -398,6 +409,7 @@ export class Esp32Runner implements BoardRunner {
   reset(): void {
     if (this.disposed) return;
     this.machine.reset();
+    this.bluetooth?.reset();
     for (let i = 0; i < this.padCount; i++) this.history[i] = this.freshHistory();
   }
 

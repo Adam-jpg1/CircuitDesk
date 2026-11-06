@@ -19,7 +19,7 @@
 // trace harness or the production adapter without any of them reimplementing
 // the memory map.
 
-import type { FirmwareHandler, GuestRoutine } from '../firmwareCalls';
+import { allRounds, type FirmwareHandler, type GuestRoutine } from '../firmwareCalls';
 import { Rv32Core, type Bus } from '../riscv/rv32Core';
 import { planIdleSkip, type TimedEventSource } from '../eventScheduler';
 import {
@@ -119,8 +119,12 @@ class SparseMemory {
   }
 }
 
-/** EBREAK, little-endian: what a firmware routine the machine provides is patched to start with. */
-const EBREAK = [0x73, 0x00, 0x10, 0x00];
+/**
+ * C.EBREAK, little-endian: what a firmware routine the machine provides is
+ * patched to start with. The compressed form, so the patch fits a function
+ * that is a bare `ret` (two bytes) without running into the next one.
+ */
+const EBREAK = [0x02, 0x90];
 
 interface RunningRoutine {
   routine: GuestRoutine;
@@ -350,6 +354,7 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
    */
   loadImage(image: EspApplicationImage): void {
     this.routines.clear();
+    this.taskClaimed = false;
     this.image = image;
     this.memory.clear();
     this.elapsedNanos = 0;
@@ -580,7 +585,8 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
 
   private readonly firmwareHandlers = new Map<number, { name: string; handler: FirmwareHandler }>();
   private readonly routines = new Map<number, RunningRoutine[]>();
-  private taskRound: (() => GuestRoutine) | null = null;
+  private readonly taskRounds: (() => GuestRoutine)[] = [];
+  private taskClaimed = false;
   /** ROM-space addresses no ROM routine uses: where a call made by a routine returns, and a task to run rounds. */
   private get routineReturn(): number {
     return (this.soc.memory.rom.end - 0x10) >>> 0;
@@ -598,7 +604,14 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
   readonly glueTaskName = 0;
 
   provideTask(round: () => GuestRoutine): void {
-    this.taskRound = round;
+    this.taskRounds.push(round);
+  }
+
+  /** The task is created once per boot (a reset ends it with everything else). */
+  claimTask(): boolean {
+    if (this.taskClaimed) return false;
+    this.taskClaimed = true;
+    return true;
   }
 
   /** Answers the firmware routine at `address` natively; false if no loaded code is there. */
@@ -607,7 +620,7 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
     if (!image) return false;
     for (const seg of image.segments) {
       const at = address - seg.loadAddress;
-      if (at < 0 || at + 4 > seg.data.length) continue;
+      if (at < 0 || at + EBREAK.length > seg.data.length) continue;
       EBREAK.forEach((b, k) => {
         seg.data[at + k] = b;
         if (this.isCacheMapped(seg.loadAddress)) {
@@ -641,7 +654,7 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
   private resumeRoutine(pc: number): void {
     const sp = this.core.registers[2] >>> 0;
     if (pc === this.taskEntryAddress) {
-      const routine = this.taskRound?.() ?? (function* (): GuestRoutine { return 0; })();
+      const routine = allRounds(this.taskRounds);
       this.advanceRoutine({ routine, ra: this.taskEntryAddress }, undefined, true);
       return;
     }

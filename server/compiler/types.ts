@@ -469,6 +469,21 @@ export function findTarget(idOrFqbn: string, boardId?: string): BoardTarget | un
  * array, so a shell never sees any of this. The gates exist to keep the value
  * meaningful, not to make a dangerous string safe.
  */
+/**
+ * The Pico W links BTstack (Bluetooth) only when Arduino-Pico's "IP/Bluetooth
+ * Stack" menu selects it. A sketch that includes one of its Bluetooth
+ * libraries is built with that option; everything else keeps the default, so
+ * a Wi-Fi-only build is not made larger. The option string is this constant,
+ * never anything a request supplied.
+ */
+const PICO_W_BLUETOOTH_FQBN = 'rp2040:rp2040:rpipicow:ipbtstack=ipv4btcble';
+const PICO_W_BLUETOOTH_INCLUDE =
+  /#\s*include\s*[<"](BLE|BTstackLib|btstack|SerialBT|BluetoothHCI|BluetoothHIDMaster|BluetoothAudio|KeyboardBLE|MouseBLE|JoystickBLE|KeyboardBT|MouseBT|JoystickBT|HID_Bluetooth)\.h[>"]/;
+
+export function buildFqbnFor(fqbn: string, sources: string): string {
+  return fqbn === 'rp2040:rp2040:rpipicow' && PICO_W_BLUETOOTH_INCLUDE.test(sources) ? PICO_W_BLUETOOTH_FQBN : fqbn;
+}
+
 export function resolveRequestedFqbn(
   target: BoardTarget,
   requested: string | undefined,

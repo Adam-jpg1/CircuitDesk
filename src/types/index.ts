@@ -396,7 +396,7 @@ export interface CompileResult {
      * open routines the simulator calls back into. Present only when the build
      * links the driver; the simulator provides those entry points natively.
      */
-    symbols?: { closed: [string, number][]; named: Record<string, number> };
+    symbols?: { closed: [string, number][]; bluetooth?: [string, number][]; named: Record<string, number> };
   };
   memory?: { flashBytes: number; flashMaxBytes: number; ramBytes: number; ramMaxBytes: number };
   /**

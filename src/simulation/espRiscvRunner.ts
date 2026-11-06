@@ -20,6 +20,8 @@
 
 import { IdfWifiDriver } from './wifi/idfDriver';
 import { macForBoard, type WifiNetwork } from './wifi/network';
+import { IdfBtDriver } from './bluetooth/idfBtDriver';
+import { bluetoothAddressFor, type BleAir } from './bluetooth/air';
 import { EfuseMac, EFUSE_BASE } from './espRiscv/efuseMac';
 import type { FirmwareHost } from './firmwareCalls';
 import type { FirmwareSymbols } from './adapters';
@@ -131,6 +133,8 @@ export class EspRiscvRunner implements BoardRunner {
    */
   /** The Wi-Fi driver model, when the build links Espressif's driver. */
   readonly wifi: IdfWifiDriver | null = null;
+  /** The Bluetooth controller model, when the build links Bluetooth. */
+  readonly bluetooth: IdfBtDriver | null = null;
   private readonly efuse: EfuseMac;
 
   constructor(image: EspApplicationImage, regions: { offset: number; data: Uint8Array }[], config: EspRunnerConfig, symbols?: FirmwareSymbols) {
@@ -177,13 +181,21 @@ export class EspRiscvRunner implements BoardRunner {
         },
         provideFirmwareRoutine: (a, n, h) => m.provideFirmwareRoutine(a, n, h),
         provideTask: (round) => m.provideTask(round),
+        claimTask: () => m.claimTask(),
         glueTaskEntry: m.glueTaskEntry,
         glueTaskName: m.glueTaskName,
         fault: null,
       };
       const driver = new IdfWifiDriver(host, symbols, macForBoard(config.engine), config.engine.toUpperCase());
       if (driver.install()) this.wifi = driver;
+      const bt = new IdfBtDriver(host, symbols, bluetoothAddressFor(config.engine), config.engine.toUpperCase());
+      if (bt.install()) this.bluetooth = bt;
     }
+  }
+
+  /** Joins the canvas's Bluetooth air, under the board's name and an address of its own. */
+  attachBluetooth(air: BleAir, identity: { id: string; label: string }): void {
+    this.bluetooth?.attach(air, bluetoothAddressFor(identity.id), identity.label);
   }
 
   /** Joins the canvas's Wi-Fi network: before the firmware first runs, so it boots with this MAC. */
@@ -477,6 +489,7 @@ export class EspRiscvRunner implements BoardRunner {
   reset(): void {
     if (this.disposed) return;
     this.machine.reset();
+    this.bluetooth?.reset();
     for (let i = 0; i < this.pinCount; i++) this.history[i] = this.freshHistory();
   }
 

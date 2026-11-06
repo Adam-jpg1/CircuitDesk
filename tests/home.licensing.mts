@@ -294,9 +294,8 @@ const parsed = parseNotices(NOTICES);
   check(/serial \(uart0 /.test(apis), 'the ESP32-C3 claims Serial as UART0, and only as UART0');
   check(apis.includes('analogread'), 'the ESP32-C3 claims analogRead, which tests/esp.adc.mts reads');
   check(/\bwifi \(station/.test(apis), 'the ESP32-C3 claims WiFi as a station, which tests/wifi.esp32.mts connects');
-  for (const unclaimed of ['bluetooth', 'ble']) {
-    check(!new RegExp(`\\b${unclaimed}\\b`).test(apis), `the ESP32-C3 still does not claim ${unclaimed}`);
-  }
+  // BLE through NimBLE on the simulated controller (tests/bluetooth.esp32.mts).
+  check(/\bble \(bledevice/.test(apis), 'the ESP32-C3 claims BLE, which tests/bluetooth.esp32.mts connects to');
   check(apis.includes('digitalwrite') && apis.includes('digitalread'), 'while keeping the claims it earned');
 }
 

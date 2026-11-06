@@ -35,6 +35,8 @@ export interface FirmwareArtifact {
 /** Where an ESP build's closed Wi-Fi driver landed (server/compiler/firmwareSymbols.ts). */
 export interface FirmwareSymbols {
   closed: [string, number][];
+  /** The closed Bluetooth controller's functions, when the build links one. */
+  bluetooth?: [string, number][];
   named: Record<string, number>;
 }
 

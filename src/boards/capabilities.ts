@@ -146,6 +146,7 @@ const ESP32_SIM_APIS = [
   'pinMode', 'digitalWrite', 'digitalRead', 'analogRead', 'delay/millis/micros', 'Serial (UART0)', 'floating point',
   'analogWrite (PWM)', 'tone()', 'Servo pulses through the ESP32Servo library', 'attachInterrupt', 'Wire (I2C)', 'SPI',
   'WiFi (station: scan, connect, DHCP, TCP/UDP on the simulated network)',
+  'BLE (BLEDevice: advertising, scanning, GATT server and client, notifications)',
 ];
 const ESP32_SIM_PERIPHERALS = [
   'both Xtensa LX6 cores under FreeRTOS', 'GPIO matrix and interrupts', 'timer groups', 'UART0', 'SAR ADC1/ADC2',
@@ -154,7 +155,7 @@ const ESP32_SIM_PERIPHERALS = [
 const ESP32_LIMITATION =
   'Real Xtensa execution of the compiled image on both cores, under ESP-IDF\'s own startup and FreeRTOS: GPIO and '
   + 'interrupts, timing, Serial, floating point, analogRead(), PWM/tone()/servos, Wire and SPI. The ADC converts '
-  + 'ideally (no noise or curve). Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. Bluetooth is not simulated.';
+  + 'ideally (no noise or curve). Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated.';
 
 const ESP32C3_SIM_APIS = [
   'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
@@ -172,6 +173,7 @@ const ESP32C3_SIM_APIS = [
   'SPI (master, on SCK/MOSI/MISO or wherever SPI.begin() routes it)',
   'EEPROM and Preferences (NVS on the flash, kept for the whole run; Run and Reset start it erased)',
   'WiFi (station: scan, connect, DHCP, TCP/UDP on the simulated network)',
+  'BLE (BLEDevice: advertising, scanning, GATT server and client, notifications)',
 ];
 
 const ESP32C3_SIM_PERIPHERALS = [
@@ -195,7 +197,7 @@ const ESP32C3_LIMITATION =
   'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO and ' +
   'interrupts, floating point, Serial on UART0, analogRead(), analogWrite()/tone()/servos on the LED PWM controller, ' +
   'Wire, SPI and EEPROM/Preferences. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. ' +
-  'Bluetooth LE and USB Serial/JTAG are not simulated — sketches using them compile and run, but that radio and that port do nothing.';
+  'Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated. USB Serial/JTAG is not simulated.';
 
 /**
  * The ESP32-C6's list, which is the C3's minus the pull-down.
@@ -245,7 +247,7 @@ const ESP32C6_LIMITATION =
   'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO ' +
   'with its pulls and interrupts, floating point, Serial on UART0, analogRead(), analogWrite()/tone()/servos on the LED ' +
   'PWM controller, Wire, SPI and EEPROM/Preferences. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. ' +
-  'Bluetooth LE, Zigbee/802.15.4, Thread and USB Serial/JTAG are not simulated — sketches using them compile and run, but those radios and that port do nothing.';
+  'Bluetooth LE is not simulated: BLEDevice::init() fails plainly and the sketch carries on. Zigbee/802.15.4, Thread and USB Serial/JTAG are not simulated either — sketches using them compile and run, but those radios and that port do nothing.';
 
 const SAMD21_SIM_APIS = [
   'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
@@ -727,7 +729,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       'Real RISC-V execution of the compiled image, with the same peripherals as the DevKitM-1 entry — GPIO and '
       + 'interrupts, floating point, analogRead(), PWM/tone()/servos, Wire, SPI and EEPROM — built through the generic C3 '
       + 'target, so Serial is the UART rather than the native USB port. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. '
-      + 'Bluetooth is not simulated.',
+      + 'Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated.',
   },
   'board.arduino-due': {
     manufacturer: 'Arduino',
@@ -951,6 +953,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       supportedApis: [
         ...RP2040_SIM_APIS,
         'WiFi (station: scan, connect, DHCP, TCP/UDP on the simulated network)',
+        'BLE (BLE.h on BTstack: advertising, GATT server, notifications)',
         'LED_BUILTIN (the CYW43\'s GPIO0, set through the chip)',
       ],
       supportedPeripherals: [...RP2040_SIM_PERIPHERALS, 'CYW43439 Wi-Fi chip at its SPI bus'],
@@ -959,8 +962,8 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation:
       'The CYW43439 Wi-Fi chip is simulated at its SPI bus, with the board\'s own cyw43 driver, lwIP and WiFi library '
       + 'running as built: Wi-Fi works as a station — scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP '
-      + 'and DNS from it, and TCP/UDP to other boards on it — with no internet behind it, no soft-AP mode and no '
-      + 'Bluetooth. LED_BUILTIN is the chip\'s GPIO0 and follows the sketch, though the canvas does not draw it. '
+      + 'and DNS from it, and TCP/UDP to other boards on it — with no internet behind it and no soft-AP mode. '
+      + 'Bluetooth LE works too, through the core\'s BTstack and the chip\'s Bluetooth bus: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated. LED_BUILTIN is the chip\'s GPIO0 and follows the sketch, though the canvas does not draw it. '
       + RP2040_LIMITATION,
   },
 
@@ -1022,7 +1025,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation:
       'Real Xtensa LX7 execution of the compiled image on both cores, under ESP-IDF\'s own startup and FreeRTOS: GPIO and '
       + 'interrupts, timing, Serial and Serial1, floating point, analogRead(), PWM/tone()/servos, Wire and SPI. The ADC '
-      + 'converts ideally. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. Bluetooth, the native USB port and the on-board RGB LED are not simulated.',
+      + 'converts ideally. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated. The native USB port and the on-board RGB LED are not simulated.',
   },
   // The board is real and its pins are right; the runtime is not built yet, so
   // The compiler target is genuine — the core's generic esp32c6 target is what
@@ -1146,7 +1149,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation:
       'The ESP32 runs the compiled sketch exactly as on the DevKit: GPIO, timing, Serial, analogRead(), PWM, Wire and SPI '
       + 'on the pins the module brings out. The OV2640 camera, the microSD slot and the PSRAM are not simulated, so the '
-      + 'camera library cannot be used; IO4 drives the module\'s flash LED on the real board. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. Bluetooth is not simulated.',
+      + 'camera library cannot be used; IO4 drives the module\'s flash LED on the real board. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated.',
   },
 
   // ---------------- STM32 / imxrt / nRF52 ----------------

@@ -134,6 +134,8 @@ export interface BoardRunner {
    * firmware first runs, so the MAC it is given is the one it boots with.
    */
   attachWifi?(network: import('./wifi/network').WifiNetwork, identity: { id: string; label: string }): void;
+  /** Puts the board's Bluetooth controller on the world's air (boards with a modelled controller). */
+  attachBluetooth?(air: import('./bluetooth/air').BleAir, identity: { id: string; label: string }): void;
   activeSpiPins?(): { sck?: number; mosi?: number; miso?: number; cs?: number };
 
   /**

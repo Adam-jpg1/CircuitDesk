@@ -37,10 +37,14 @@ import type { PinSnapshot } from '../boardRunner';
 import type { FirmwareSymbols } from '../adapters';
 import { Cyw43Chip } from '../wifi/cyw43Chip';
 import { macForBoard, type WifiNetwork } from '../wifi/network';
+import { bluetoothAddressFor, type BleAir } from '../bluetooth/air';
 
 /** Breakpoints the Pico W's CYW43 bus calls are patched to (clear of the ROM's 0x10/0x11 and 0x80-0xdf). */
 const CYW43_TRANSFER_TRAP = 0x60;
 const CYW43_HOST_WAKE_TRAP = 0x61;
+const CYW43_BT_INIT_TRAP = 0x62;
+const CYW43_BT_WRITE_TRAP = 0x63;
+const CYW43_BT_READ_TRAP = 0x64;
 /** GPIO24: the CYW43's data line, and its host-wake interrupt while the bus is idle. */
 const CYW43_HOST_WAKE_PIN = 24;
 /** Infineon's OUI, which a Pico W's CYW43439 carries. */
@@ -146,7 +150,7 @@ export class Rp2040Runner {
   /** The Pico W's CYW43439, when the build drives one (see ../wifi/cyw43Chip). */
   readonly wifi: Cyw43Chip | null = null;
   /** Where the build's CYW43 bus routines are, to answer them natively. */
-  private readonly cyw43Hooks: { transfer: number; hostWake?: number } | null = null;
+  private readonly cyw43Hooks: { transfer: number; hostWake?: number; btInit?: number; btWrite?: number; btRead?: number } | null = null;
 
   /**
    * I2C and SPI devices on the canvas attach to these, exactly as they do on
@@ -179,10 +183,18 @@ export class Rp2040Runner {
     this.image = firmware instanceof Uint8Array ? parseRp2040Uf2(firmware) : firmware;
     const transfer = options.symbols?.named.cyw43_spi_transfer;
     if (transfer) {
-      this.cyw43Hooks = { transfer, hostWake: options.symbols?.named.cyw43_cb_read_host_interrupt_pin };
+      const named = options.symbols?.named ?? {};
+      this.cyw43Hooks = {
+        transfer,
+        hostWake: named.cyw43_cb_read_host_interrupt_pin,
+        btInit: named.cyw43_btbus_init,
+        btWrite: named.cyw43_btbus_write,
+        btRead: named.cyw43_btbus_read,
+      };
       const chip = new Cyw43Chip(
         { read8: (a) => this.rp.readUint8(a), write8: (a, v) => this.rp.writeUint8(a, v) },
-        () => Number((this.rp.clock as unknown as { nanos: number }).nanos),
+        // (The chip is made before the machine is built; it reads 0 until then.)
+        () => (this.rp ? Number((this.rp.clock as unknown as { nanos: number }).nanos) : 0),
         macForBoard('pico-w', CYW43_OUI),
         'Pico W',
       );
@@ -234,6 +246,14 @@ export class Rp2040Runner {
         r[0] = this.wifi.transfer(r[1] >>> 0, r[2] >>> 0, r[3] >>> 0, rp.readUint32(rp.core.SP) >>> 0);
       } else if (code === CYW43_HOST_WAKE_TRAP && this.wifi) {
         rp.core.registers[0] = this.wifi.hostWake ? 1 : 0;
+      } else if (code === CYW43_BT_INIT_TRAP && this.wifi) {
+        rp.core.registers[0] = this.wifi.btInit();
+      } else if (code === CYW43_BT_WRITE_TRAP && this.wifi) {
+        const r = rp.core.registers;
+        r[0] = this.wifi.btWrite(r[0] >>> 0, r[1] >>> 0);
+      } else if (code === CYW43_BT_READ_TRAP && this.wifi) {
+        const r = rp.core.registers;
+        r[0] = this.wifi.btRead(r[0] >>> 0, r[1] >>> 0, r[2] >>> 0);
       } else romFloatCall(code, rp.core as unknown as RomFloatCore);
     };
     this.rp = rp;
@@ -253,6 +273,10 @@ export class Rp2040Runner {
       };
       patch(this.cyw43Hooks.transfer, CYW43_TRANSFER_TRAP);
       if (this.cyw43Hooks.hostWake) patch(this.cyw43Hooks.hostWake, CYW43_HOST_WAKE_TRAP);
+      // A build with Bluetooth: BTstack's shared bus to the chip's Bluetooth core.
+      if (this.cyw43Hooks.btInit) patch(this.cyw43Hooks.btInit, CYW43_BT_INIT_TRAP);
+      if (this.cyw43Hooks.btWrite) patch(this.cyw43Hooks.btWrite, CYW43_BT_WRITE_TRAP);
+      if (this.cyw43Hooks.btRead) patch(this.cyw43Hooks.btRead, CYW43_BT_READ_TRAP);
       this.wifi?.reset();
     }
 
@@ -317,6 +341,12 @@ export class Rp2040Runner {
   /** Joins the canvas's Wi-Fi network, under this board's name and a MAC of its own. */
   attachWifi(network: WifiNetwork, identity: { id: string; label: string }): void {
     this.wifi?.attach(network, macForBoard(identity.id, CYW43_OUI), identity.label);
+  }
+
+  /** Puts the CYW43's Bluetooth core on the world's air (a build without Bluetooth never brings it up). */
+  attachBluetooth(air: BleAir, identity: { id: string; label: string }): void {
+    if (!this.cyw43Hooks?.btInit) return;
+    this.wifi?.attachBluetooth(air, bluetoothAddressFor(identity.id, CYW43_OUI), identity.label);
   }
 
   /** Rebuilds the machine in its power-on state and boots the same image. */

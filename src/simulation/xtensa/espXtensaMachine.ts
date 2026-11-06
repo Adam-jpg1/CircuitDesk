@@ -15,7 +15,7 @@ import type { EspBusPorts } from '../espRiscv/i2c';
 import type { SerialNorFlash } from '../esp32c3/spiFlash';
 import type { EspApplicationImage } from '../esp32c3/espImage';
 import { createRomState, type Esp32RomEntry, type Esp32RomHost, type Esp32RomState } from '../esp32/rom';
-import type { FirmwareHandler, GuestCall, GuestRoutine } from '../firmwareCalls';
+import { allRounds, type FirmwareHandler, type GuestCall, type GuestRoutine } from '../firmwareCalls';
 export type { FirmwareHandler, GuestCall, GuestRoutine };
 
 /** CPU interrupts wired inside the core (timers, software, profiling): not routable. Both chips agree. */
@@ -144,8 +144,9 @@ export abstract class EspXtensaMachine implements SimulatedClock {
    * task resumed on the other core.
    */
   private readonly routines = new Map<number, GuestRoutine>();
-  /** The round of work the simulator's own firmware task does each time it runs (see provideTask). */
-  private taskRound: (() => GuestRoutine) | null = null;
+  /** The work the simulator's own firmware task does each time it runs (see provideTask). */
+  private readonly taskRounds: (() => GuestRoutine)[] = [];
+  private taskClaimed = false;
   /** Where the application image sits in flash, so cache-mapped code can be patched. */
   protected readonly appFlashOffset: number = 0x10000;
   private get glueAbi(): GlueAbi {
@@ -357,11 +358,12 @@ export abstract class EspXtensaMachine implements SimulatedClock {
     this.romTable.set(base + GLUE_RUN, {
       name: 'firmware_task_round',
       handler: (h) => {
-        this.beginRoutine(h.cpu, this.taskRound?.() ?? (function* (): GuestRoutine { return 0; })());
+        this.beginRoutine(h.cpu, allRounds(this.taskRounds));
         return { jump: base + GLUE_GC_ENTRY };
       },
     });
     this.routines.clear();
+    this.taskClaimed = false;
   }
 
   /** Writes a byte of the glue into ROM space (a chip whose bus ignores writes to ROM overrides this). */
@@ -390,7 +392,14 @@ export abstract class EspXtensaMachine implements SimulatedClock {
 
   /** What the simulator's firmware task does on each round (it should end by yielding a delay). */
   provideTask(round: () => GuestRoutine): void {
-    this.taskRound = round;
+    this.taskRounds.push(round);
+  }
+
+  /** The task is created once per boot (a reset ends it with everything else). */
+  claimTask(): boolean {
+    if (this.taskClaimed) return false;
+    this.taskClaimed = true;
+    return true;
   }
 
   /** The glue's step: the routine running in this frame makes its next call, or returns. */

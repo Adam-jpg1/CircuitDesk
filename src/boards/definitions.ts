@@ -316,7 +316,7 @@ export const ESP32_DEVKIT = headerBoard({
   logicVoltage: 3.3,
   color: '#12262e',
   description:
-    '3.3 V logic Wi-Fi/BT board with an ESP32-WROOM-32. The compiled firmware runs on a simulated dual-core Xtensa ESP32, and its Wi-Fi joins a Wi-Fi Access Point on the canvas; Bluetooth is not simulated.',
+    '3.3 V logic Wi-Fi/BT board with an ESP32-WROOM-32. The compiled firmware runs on a simulated dual-core Xtensa ESP32, and its Wi-Fi joins a Wi-Fi Access Point on the canvas; Bluetooth LE advertises and connects to the workbench and to other boards.',
   left: [
     { id: 'EN', label: 'EN', type: 'reset' as const, caps: [] },
     a3('VP', 'VP'), a3('VN', 'VN'), a3('D34', 'D34'), a3('D35', 'D35'),
@@ -443,7 +443,7 @@ export const ESP32_C3_SUPERMINI = headerBoard({
   color: '#1b2a36',
   description:
     'A widely cloned ESP32-C3 board the size of a postage stamp. The RISC-V core executes the compiled '
-    + 'application image for real: GPIO, Serial, analogRead() on IO0-IO5, PWM, I2C, SPI, and Wi-Fi to a Wi-Fi Access Point on the canvas. Bluetooth is not simulated.',
+    + 'application image for real: GPIO, Serial, analogRead() on IO0-IO5, PWM, I2C, SPI, and Wi-Fi to a Wi-Fi Access Point on the canvas, and Bluetooth LE.',
   left: [
     a3('IO5', 'IO5'), g3('IO6', 'IO6'), g3('IO7', 'IO7'),
     g3('IO8', 'IO8', { caps: ['digital-in', 'digital-out', 'i2c-sda'] }),
@@ -592,7 +592,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
       usb: 'usb-c',
       description:
         'ESP32-S3-DevKitC-1 — Espressif development board with an ESP32-S3-WROOM-1 module (8 MB flash). The compiled '
-        + 'sketch runs on a simulated dual-core Xtensa LX7 ESP32-S3, and its Wi-Fi joins a Wi-Fi Access Point on the canvas; Bluetooth, the native USB port and the RGB LED are not simulated.',
+        + 'sketch runs on a simulated dual-core Xtensa LX7 ESP32-S3, and its Wi-Fi joins a Wi-Fi Access Point on the canvas, and Bluetooth LE works; the native USB port and the RGB LED are not simulated.',
     },
   ),
   // ESP32-C3-DevKitM-1, Espressif's own development board for the
@@ -704,7 +704,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     'simulated', { usb: 'none', color: '#12262e', description: 'ESP32-CAM (Ai-Thinker design). The ESP32 on it runs the compiled sketch; the OV2640 camera, microSD slot and PSRAM are not simulated.' },
   ),
   PICO,
-  { ...PICO, id: 'board.raspberry-pi-pico-w', name: 'Raspberry Pi Pico W', description: 'Pico W (wireless). The RP2040 runs the compiled firmware exactly as the Pico does, and its CYW43 Wi-Fi joins a Wi-Fi Access Point on the canvas; Bluetooth is not simulated.', metadata: { ...PICO.metadata } },
+  { ...PICO, id: 'board.raspberry-pi-pico-w', name: 'Raspberry Pi Pico W', description: 'Pico W (wireless). The RP2040 runs the compiled firmware exactly as the Pico does, and its CYW43 Wi-Fi joins a Wi-Fi Access Point on the canvas; its Bluetooth LE advertises and connects through BTstack.', metadata: { ...PICO.metadata } },
   RPI_ZERO_GPIO,
   RPI4_GPIO,
   TEENSY_41,

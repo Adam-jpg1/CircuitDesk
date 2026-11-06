@@ -6,6 +6,7 @@ import { cleanupDir, createBuildDir, validateFiles, InputValidationError } from 
 import {
   findTarget,
   resolveRequestedFqbn,
+  buildFqbnFor,
   SUPPORTED_TARGETS,
   type BoardTarget,
   type CompileRequest,
@@ -179,7 +180,7 @@ export async function compileProject(
         durationMs: Date.now() - started,
       };
     }
-    return cliBuild(req, target, fqbn, cli, syntaxOnly, notes, base, started, slot);
+    return cliBuild(req, target, buildFqbnFor(fqbn, req.files.map((f) => f.content).join('\n')), cli, syntaxOnly, notes, base, started, slot);
   }
 
   const health = await getCompilerHealth();
@@ -194,7 +195,7 @@ export async function compileProject(
   }
 
   if (health.toolchain === 'arduino-cli') {
-    return cliBuild(req, target, fqbn, cli, syntaxOnly, notes, base, started, slot);
+    return cliBuild(req, target, buildFqbnFor(fqbn, req.files.map((f) => f.content).join('\n')), cli, syntaxOnly, notes, base, started, slot);
   }
 
   // The local avr-g++ fallback. Not the deployed path, and not cached: it exists

@@ -75,7 +75,6 @@ export interface IdfWifiSymbols {
 export class IdfWifiDriver {
   private mode = 0;
   private initialised = false;
-  private taskCreated = false;
   private started = false;
   private readonly config = [new Uint8Array(LAYOUT.configSize), new Uint8Array(LAYOUT.configSize)];
   private readonly rxcb = [0, 0];
@@ -314,8 +313,7 @@ export class IdfWifiDriver {
       esp_wifi_init: () =>
         (function* (): GuestRoutine {
           d.initialised = true;
-          if (!d.taskCreated && h.glueTaskEntry !== undefined) {
-            d.taskCreated = true;
+          if (h.glueTaskEntry !== undefined && h.claimTask()) {
             // (code, name, stack bytes, param, priority, handle out, core: no affinity)
             yield call(d.named('xTaskCreatePinnedToCore'), h.glueTaskEntry, h.glueTaskName ?? 0, 4096, 0, 23, 0, 0x7fffffff);
           }

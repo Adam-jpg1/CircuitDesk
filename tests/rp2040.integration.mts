@@ -742,7 +742,8 @@ void loop() {}`;
     check(/Wi-Fi/i.test(picoWLimitation), 'the Pico W limitation text mentions Wi-Fi');
     // Wi-Fi is simulated now (the CYW43439 model, tests/wifi.esp32.mts); the text says how far.
     check(/station/i.test(picoWLimitation) && /no internet/i.test(picoWLimitation), 'the Pico W says Wi-Fi works as a station, with no internet');
-    check(/Bluetooth/.test(picoWLimitation), 'and that Bluetooth is not simulated');
+    // Bluetooth LE too, through BTstack (tests/bluetooth.esp32.mts); pairing is not.
+    check(/Bluetooth LE works/.test(picoWLimitation) && /pairing/.test(picoWLimitation), 'and that Bluetooth LE works, without pairing');
     check(
       picoW.simulation?.supported === true && picoW.simulation.engine === 'rp2040js',
       'the Pico W badge reflects genuine RP2040 simulation',

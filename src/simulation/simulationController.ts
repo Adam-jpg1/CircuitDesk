@@ -35,6 +35,8 @@ import { compileProjectCode } from '../compiler/compilerClient';
 import { resolveDefinition } from '../project/partsRegistry';
 import { filesForBoard, sketchIdFor } from '../project/sketches';
 import { useSimulationStore } from './simulationStore';
+import { BleAir } from './bluetooth/air';
+import { BleCentral } from './bluetooth/central';
 import { WifiNetwork, accessPointsIn } from './wifi/network';
 import type { CompileStage } from '../app/editorStore';
 import type { BoardDefinition, CircuitProject, CompileResult, SimulationNote } from '../types';
@@ -130,6 +132,17 @@ class SimulationController {
   /** The network the workbench shows, for its network view and its browser. */
   get wifiNetwork(): WifiNetwork {
     return this.wifi;
+  }
+  /** The Bluetooth air every board with a modelled controller is on, and the workbench's view of it. */
+  private ble = new BleAir();
+  get bluetoothAir(): BleAir {
+    return this.ble;
+  }
+  private central: BleCentral | null = null;
+  /** The workbench's own BLE central on this world's air, made when first asked for. */
+  get bluetoothCentral(): BleCentral {
+    if (!this.central || this.central.air !== this.ble) this.central = new BleCentral(this.ble);
+    return this.central;
   }
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastTickWall = 0;
@@ -722,6 +735,7 @@ class SimulationController {
 
     this.world = world;
     this.wifi = new WifiNetwork();
+    this.ble = new BleAir();
     this.stopPreview();
     this.benchRun = false;
     this.rebind();
@@ -747,7 +761,11 @@ class SimulationController {
     // join under their own names, with MACs that stay theirs across runs.
     this.wifi.setAccessPoints(accessPointsIn(this.project));
     const labels = this.boardLabels();
-    for (const m of world.boards) m.runner.attachWifi?.(this.wifi, { id: m.instanceId, label: labels.get(m.instanceId) ?? m.instanceId });
+    for (const m of world.boards) {
+      const identity = { id: m.instanceId, label: labels.get(m.instanceId) ?? m.instanceId };
+      m.runner.attachWifi?.(this.wifi, identity);
+      m.runner.attachBluetooth?.(this.ble, identity);
+    }
     world.settle = () => this.binding?.update(this.controlsNow);
   }
 

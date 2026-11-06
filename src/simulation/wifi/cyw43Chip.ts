@@ -31,6 +31,7 @@
 // at. Structure layouts are cyw43-driver's (as Arduino-Pico 6.0.0 builds it).
 
 import { WifiNetwork, type StationPort, type ScanResult } from './network';
+import { BleAir, BleController } from '../bluetooth/controller';
 
 /** Memory the chip's bus transfers read and write: the RP2040's. */
 export interface Cyw43Memory {
@@ -67,6 +68,9 @@ const SBSDIO_ALP_AVAIL = 0x40;
 const SBSDIO_HT_AVAIL = 0x80;
 const SBSDIO_SLPCSR_DEVICE_ON = 0x02;
 const BACKPLANE_ADDR_MASK = 0x7fff;
+/** The SDIO core's interrupt status; I_HMB_FC_CHANGE is what says the Bluetooth core has something. */
+const SDIO_INT_STATUS = 0x18002020;
+const I_HMB_FC_CHANGE = 1 << 5;
 /** The two cores' reset control, which starts asserted (AIRC_RESET). */
 const RESET_CONTROLS = [0x18003000 + 0x100000 + 0x800, 0x18004000 + 0x100000 + 0x800];
 
@@ -140,6 +144,8 @@ export class Cyw43Chip {
   /** Whether a frame is waiting: the host-wake line's level. */
   onHostWake: ((high: boolean) => void) | null = null;
   private lastWake = false;
+  /** The chip's Bluetooth core: a BLE controller on the air, which BTstack reaches over the shared bus. */
+  readonly bluetooth: BleController;
 
   constructor(
     private readonly memory: Cyw43Memory,
@@ -164,7 +170,50 @@ export class Cyw43Chip {
         if (chip.connected) chip.send(chip.dataFrame(frame));
       },
     };
+    this.bluetooth = new BleController(clock, [0x43, 0x43, 0xa2, 0x12, 0x1f, 0xac].reverse(), label);
+    this.bluetooth.onPending = () => this.updateWake();
     this.reset();
+  }
+
+  /** Puts the Bluetooth core on the world's air, under the board's name. */
+  attachBluetooth(air: BleAir, address: ArrayLike<number>, label: string): void {
+    this.bluetooth.attach(air, address, label);
+  }
+
+  // ------------------------------------------------------------- the Bluetooth core
+
+  /** cyw43_btbus_init: the BT firmware download and the shared bus come up; here, the controller powers on. */
+  btInit(): number {
+    this.bluetooth.powerOn();
+    return 0;
+  }
+
+  /** cyw43_btbus_write(buf, size): a 3-byte length and the H4 type, then the packet. */
+  btWrite(buf: number, size: number): number {
+    if (size < 4) return 0;
+    const packet = new Uint8Array(size - 3);
+    for (let k = 0; k < packet.length; k++) packet[k] = this.memory.read8(buf + 3 + k);
+    this.bluetooth.fromHost(packet);
+    this.updateWake();
+    return 0;
+  }
+
+  /** cyw43_btbus_read(buf, max, *size): the next packet with the same header, or a size of 0. */
+  btRead(buf: number, max: number, sizeOut: number): number {
+    const packet = this.bluetooth.hasDue() ? this.bluetooth.takeDue() : undefined;
+    if (!packet || packet.length + 3 > max) {
+      this.write32(sizeOut, 0);
+      this.updateWake();
+      return 0;
+    }
+    const len = packet.length - 1;
+    this.memory.write8(buf, len & 0xff);
+    this.memory.write8(buf + 1, (len >> 8) & 0xff);
+    this.memory.write8(buf + 2, 0);
+    for (let k = 0; k < packet.length; k++) this.memory.write8(buf + 3 + k, packet[k]);
+    this.write32(sizeOut, len + 4);
+    this.updateWake();
+    return 0;
   }
 
   attach(network: WifiNetwork, mac: ArrayLike<number>, label: string): void {
@@ -194,6 +243,7 @@ export class Cyw43Chip {
     this.pmk = '';
     this.connected = null;
     this.gpioOut = 0;
+    this.bluetooth.powerOn();
     this.updateWake();
   }
 
@@ -206,11 +256,17 @@ export class Cyw43Chip {
     return this.gpioOut;
   }
 
-  /** When the next frame becomes available, if one is queued for later. */
+  /** When the next frame (or Bluetooth packet) becomes available, if one is queued for later. */
   nextDueNs(): number | undefined {
     const now = this.clock();
-    for (const p of this.queue) if (p.at > now) return p.at;
-    return undefined;
+    let at: number | undefined;
+    for (const p of this.queue) if (p.at > now) {
+      at = p.at;
+      break;
+    }
+    const bt = this.bluetooth.nextDueNs();
+    if (bt !== undefined && bt > now && (at === undefined || bt < at)) at = bt;
+    return at;
   }
 
   /** Raises or lowers the host-wake line for the frames now due. */
@@ -224,7 +280,7 @@ export class Cyw43Chip {
   }
 
   private updateWake(): void {
-    const high = this.due() !== undefined;
+    const high = this.due() !== undefined || this.bluetooth.hasDue();
     if (high !== this.lastWake) {
       this.lastWake = high;
       this.onHostWake?.(high);
@@ -233,7 +289,7 @@ export class Cyw43Chip {
 
   /** The host-wake line, as cyw43_cb_read_host_interrupt_pin reads it. */
   get hostWake(): boolean {
-    return this.due() !== undefined;
+    return this.due() !== undefined || this.bluetooth.hasDue();
   }
 
   // ------------------------------------------------------------- the bus
@@ -288,7 +344,8 @@ export class Cyw43Chip {
       }
       const a = (this.window | (addr & BACKPLANE_ADDR_MASK)) >>> 0;
       if (size <= 4) {
-        const v = this.backplane.get(a & ~3) ?? 0;
+        let v = this.backplane.get(a & ~3) ?? 0;
+        if ((a & ~3) === SDIO_INT_STATUS && this.bluetooth.hasDue()) v |= I_HMB_FC_CHANGE;
         if (size === 4) this.write32(out, v);
         else m.write8(out, (v >>> ((a & 3) * 8)) & 0xff);
       }

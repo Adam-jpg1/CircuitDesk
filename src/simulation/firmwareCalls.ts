@@ -29,12 +29,23 @@ export interface FirmwareHost {
   readonly nanos: number;
   /** Answers the firmware routine at `address` natively; false if no loaded code is there. */
   provideFirmwareRoutine(address: number, name: string, handler: FirmwareHandler): boolean;
-  /** Creates nothing by itself: the round of work a firmware task created at glueTaskEntry runs. */
+  /**
+   * Adds to the work a firmware task created at glueTaskEntry does each round.
+   * Several models (Wi-Fi, Bluetooth) share the one task; each round runs them in turn.
+   */
   provideTask(round: () => GuestRoutine): void;
+  /** True once per boot, to whichever model should create that task; false after. */
+  claimTask(): boolean;
   /** A function address a FreeRTOS task can start at to run provideTask's rounds, and a name for it. */
   readonly glueTaskEntry: number | undefined;
   readonly glueTaskName: number | undefined;
   fault: string | null;
+}
+
+/** The rounds several models provided, as one round. */
+export function* allRounds(rounds: readonly (() => GuestRoutine)[]): GuestRoutine {
+  for (const round of rounds) yield* round();
+  return 0;
 }
 
 export function call(fn: number, ...args: number[]): GuestCall {
