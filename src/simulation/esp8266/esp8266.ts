@@ -353,7 +353,7 @@ export class Esp8266Machine extends EspXtensaMachine {
     }
   }
 
-  private ownRoutines(): Record<string, Esp8266Handler> {
+  private ownRoutines(): Partial<Record<string, Esp8266Handler>> {
     const m = this;
     return {
       _xtos_set_exception_handler: (h) => {

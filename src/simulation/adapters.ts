@@ -417,6 +417,6 @@ export function runnableProcessorProfileIds(): string[] {
 /** The artifact format a board's engine executes, for the compile pipeline. */
 export function firmwareFormatForBoard(
   board: BoardDefinition | undefined | null,
-): 'intel-hex' | 'uf2' | 'esp-image' | 'bin' | null {
+): BoardSimulatorAdapter['firmwareFormat'] | null {
   return getSimulatorAdapter(board)?.firmwareFormat ?? null;
 }

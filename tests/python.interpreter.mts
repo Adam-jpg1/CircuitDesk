@@ -59,6 +59,8 @@ const cases: [string, string, string][] = [
   ['IndexError', 'print([1][5])', '!IndexError: index out of range'],
   ['KeyError', 'print({}["k"])', "!KeyError: 'k'"],
   ['syntax error line', 'x = 1\nif x\n    pass', '!SyntaxError line 2'],
+  ['set union, intersection and difference', 'a = {1, 2, 3}\nb = {2, 3, 4}\nprint(sorted(a | b), sorted(a & b), sorted(a - b), sorted(b - a))', '[1, 2, 3, 4] [2, 3] [1] [4]\n'],
+  ['a block needs an indented body', 'if True:\nprint(1)', '!SyntaxError line 2'],
   ['time.sleep is simulated time', 'import time\nt = time.monotonic()\ntime.sleep(1.5)\nprint(round(time.monotonic() - t, 3))', '1.5\n'],
 ];
 

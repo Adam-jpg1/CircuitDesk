@@ -140,7 +140,10 @@ export function normalizeProject(raw: unknown): CircuitProject {
   // it was already doing. Idempotent, so a new-format project is untouched.
   Object.assign(
     project,
-    ensureSketchAssignments(project, (definitionId) => (resolveDefinition(definitionId, project)?.compiler?.provider === 'python' ? 'py' : 'ino')),
+    ensureSketchAssignments(project, (definitionId) => {
+      const def = resolveDefinition(definitionId, project);
+      return def && 'compiler' in def && def.compiler?.provider === 'python' ? 'py' : 'ino';
+    }),
   );
   // Drop connections that reference missing instances or pins.
   const instMap = new Map(

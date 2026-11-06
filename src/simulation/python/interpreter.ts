@@ -846,9 +846,14 @@ export class Interpreter {
       const out = new PySet();
       const lk = l.d.keys();
       const rk = r.d.keys();
-      if (op === '|') for (const x of [...lk, ...rk]) out.d.set(x, null);
-      else if (op === '&') for (const x of lk) if (r.d.has(x)) out.d.set(x, null);
-      else if (op === '-') for (const x of lk) if (!r.d.has(x)) out.d.set(x, null);
+      // Braced: unbraced, the '-' branch was the else of the '&' loop's inner if, and set difference never ran.
+      if (op === '|') {
+        for (const x of [...lk, ...rk]) out.d.set(x, null);
+      } else if (op === '&') {
+        for (const x of lk) if (r.d.has(x)) out.d.set(x, null);
+      } else if (op === '-') {
+        for (const x of lk) if (!r.d.has(x)) out.d.set(x, null);
+      }
       return out;
     }
     if (l instanceof PyInstance) {
@@ -1441,7 +1446,7 @@ export class Interpreter {
     this.types.set('object', object);
     const t = (name: string, check: (v: PyValue) => boolean, ctor: (a: CallArgs) => PyValue | Run<PyValue>, base = object) => {
       const cls = new PyClass(name, [base], check);
-      cls.dict.set('__new__', ctor instanceof Function && ctor.length >= 0 ? new PyBuiltin(name, ctor, ctor.constructor.name === 'GeneratorFunction') : ctor);
+      cls.dict.set('__new__', new PyBuiltin(name, ctor, ctor.constructor.name === 'GeneratorFunction'));
       this.types.set(name, cls);
       this.builtins.set(name, cls);
       return cls;

@@ -125,9 +125,11 @@ class Parser {
 
   private block(): Stmt[] {
     this.expectOp(':');
-    if (this.t.type !== 'newline') return this.simpleLine();
+    // A local, not this.t: TypeScript would keep this.t narrowed to 'newline' past the next() calls below.
+    const first: Token = this.t;
+    if (first.type !== 'newline') return this.simpleLine();
     this.next();
-    if (this.t.type !== 'indent') this.fail('expected an indented block');
+    if (this.peek(0).type !== 'indent') this.fail('expected an indented block');
     this.next();
     const body: Stmt[] = [];
     while (this.t.type !== 'dedent' && this.t.type !== 'eof') {

@@ -670,6 +670,8 @@ const RPI_GPIO: ProcessorProfile = {
   ramBytes: 0,
   pads: piGpio,
   pwmPads: piGpio,
+  // The Pi has no analog inputs.
+  adcChannels: {},
   uarts: [],
   i2c: [],
   spi: [],

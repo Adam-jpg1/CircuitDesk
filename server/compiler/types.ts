@@ -1,3 +1,4 @@
+import type { FirmwareSymbols } from './firmwareSymbols.js';
 export interface CodeFilePayload {
   name: string;
   content: string;
@@ -46,6 +47,11 @@ export interface CompileResult {
      * base64. Absent for targets whose firmware is the whole flash.
      */
     regions?: { offset: number; data: string }[];
+    /**
+     * Where the build's Wi-Fi driver entry points are (./firmwareSymbols), for
+     * the simulator's model of the radio. Absent when the build has no Wi-Fi.
+     */
+    symbols?: FirmwareSymbols;
   };
   memory?: MemoryUsage;
   /**
