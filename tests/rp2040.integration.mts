@@ -740,15 +740,16 @@ void loop() {}`;
     check(runner.engine === 'rp2040js', 'the Pico W runs on rp2040js');
     const picoWLimitation = String(picoW.metadata.limitation ?? '');
     check(/Wi-Fi/i.test(picoWLimitation), 'the Pico W limitation text mentions Wi-Fi');
-    check(/NOT simulated/.test(picoWLimitation), `the Pico W says plainly that Wi-Fi is NOT simulated`);
-    check(/network/i.test(picoWLimitation), 'the Pico W says network functionality is not simulated either');
+    // Wi-Fi is simulated now (the CYW43439 model, tests/wifi.esp32.mts); the text says how far.
+    check(/station/i.test(picoWLimitation) && /no internet/i.test(picoWLimitation), 'the Pico W says Wi-Fi works as a station, with no internet');
+    check(/Bluetooth/.test(picoWLimitation), 'and that Bluetooth is not simulated');
     check(
       picoW.simulation?.supported === true && picoW.simulation.engine === 'rp2040js',
       'the Pico W badge reflects genuine RP2040 simulation',
     );
     check(
-      !picoW.simulation?.supportedApis.some((a) => /wifi|udp|tcp|http/i.test(a)),
-      'the Pico W claims no network APIs',
+      picoW.simulation?.supportedApis.some((a) => /^WiFi \(station/.test(a)) === true,
+      'the Pico W claims WiFi as a station, which tests/wifi.esp32.mts connects',
     );
     runner.dispose?.();
   }

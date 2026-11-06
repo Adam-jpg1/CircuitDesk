@@ -34,6 +34,17 @@ import { I2cBus } from '../devices/i2cBus';
 import { SpiBus, type SpiController } from '../devices/spiBus';
 import type { SpiMode } from '../devices/types';
 import type { PinSnapshot } from '../boardRunner';
+import type { FirmwareSymbols } from '../adapters';
+import { Cyw43Chip } from '../wifi/cyw43Chip';
+import { macForBoard, type WifiNetwork } from '../wifi/network';
+
+/** Breakpoints the Pico W's CYW43 bus calls are patched to (clear of the ROM's 0x10/0x11 and 0x80-0xdf). */
+const CYW43_TRANSFER_TRAP = 0x60;
+const CYW43_HOST_WAKE_TRAP = 0x61;
+/** GPIO24: the CYW43's data line, and its host-wake interrupt while the bus is idle. */
+const CYW43_HOST_WAKE_PIN = 24;
+/** Infineon's OUI, which a Pico W's CYW43439 carries. */
+const CYW43_OUI = [0x28, 0xcd, 0xc1];
 
 /** The flash chip's erase unit. */
 const FLASH_SECTOR = 4096;
@@ -132,6 +143,10 @@ export class Rp2040Runner {
    * image, so EEPROM.commit() survives the reset button.
    */
   private readonly flashWrites = new Map<number, Uint8Array>();
+  /** The Pico W's CYW43439, when the build drives one (see ../wifi/cyw43Chip). */
+  readonly wifi: Cyw43Chip | null = null;
+  /** Where the build's CYW43 bus routines are, to answer them natively. */
+  private readonly cyw43Hooks: { transfer: number; hostWake?: number } | null = null;
 
   /**
    * I2C and SPI devices on the canvas attach to these, exactly as they do on
@@ -160,8 +175,21 @@ export class Rp2040Runner {
    * @param firmware Raw UF2 bytes. Already-validated images may be passed as a
    *                 parsed Uf2Image to avoid parsing twice.
    */
-  constructor(firmware: Uint8Array | Uf2Image, options: { clockHz?: number } = {}) {
+  constructor(firmware: Uint8Array | Uf2Image, options: { clockHz?: number; symbols?: FirmwareSymbols } = {}) {
     this.image = firmware instanceof Uint8Array ? parseRp2040Uf2(firmware) : firmware;
+    const transfer = options.symbols?.named.cyw43_spi_transfer;
+    if (transfer) {
+      this.cyw43Hooks = { transfer, hostWake: options.symbols?.named.cyw43_cb_read_host_interrupt_pin };
+      const chip = new Cyw43Chip(
+        { read8: (a) => this.rp.readUint8(a), write8: (a, v) => this.rp.writeUint8(a, v) },
+        () => Number((this.rp.clock as unknown as { nanos: number }).nanos),
+        macForBoard('pico-w', CYW43_OUI),
+        'Pico W',
+      );
+      // Released when low: the pad's pull-down holds it there, as on the board.
+      chip.onHostWake = (high) => this.pads.drive(CYW43_HOST_WAKE_PIN, high ? true : null);
+      this.wifi = chip;
+    }
     this.startupCycleNs = 1e9 / (options.clockHz ?? DEFAULT_CLOCK_HZ);
     // Read lazily through the runner, so the mode reflects whatever the
     // firmware has SSPCR0 set to at the moment of each transfer.
@@ -201,7 +229,12 @@ export class Rp2040Runner {
       if (code === FLASH_ERASE_TRAP) this.flashErase(rp.core.registers[0] >>> 0, rp.core.registers[1] >>> 0);
       else if (code === FLASH_PROGRAM_TRAP)
         this.flashProgram(rp.core.registers[0] >>> 0, rp.core.registers[1] >>> 0, rp.core.registers[2] >>> 0);
-      else romFloatCall(code, rp.core as unknown as RomFloatCore);
+      else if (code === CYW43_TRANSFER_TRAP && this.wifi) {
+        const r = rp.core.registers;
+        r[0] = this.wifi.transfer(r[1] >>> 0, r[2] >>> 0, r[3] >>> 0, rp.readUint32(rp.core.SP) >>> 0);
+      } else if (code === CYW43_HOST_WAKE_TRAP && this.wifi) {
+        rp.core.registers[0] = this.wifi.hostWake ? 1 : 0;
+      } else romFloatCall(code, rp.core as unknown as RomFloatCore);
     };
     this.rp = rp;
     this.clocks = new Rp2040ClockTree(rp as never);
@@ -211,6 +244,17 @@ export class Rp2040Runner {
     for (const [addr, data] of this.image.blocks) rp.flash.set(data, addr - FLASH_BASE);
     // What the sketch wrote to flash outlives the reset, as on the chip.
     for (const [sector, data] of this.flashWrites) rp.flash.set(data, sector * FLASH_SECTOR);
+    // The CYW43 driver's bus calls become `bkpt; bx lr`, answered by the chip model.
+    if (this.cyw43Hooks) {
+      const patch = (address: number, trap: number) => {
+        const at = (address & ~1) - FLASH_BASE;
+        if (at < 0 || at + 4 > rp.flash.length) return;
+        rp.flash.set([trap, 0xbe, 0x70, 0x47], at);
+      };
+      patch(this.cyw43Hooks.transfer, CYW43_TRANSFER_TRAP);
+      if (this.cyw43Hooks.hostWake) patch(this.cyw43Hooks.hostWake, CYW43_HOST_WAKE_TRAP);
+      this.wifi?.reset();
+    }
 
     this.trackers = Array.from({ length: RP2040_PIN_COUNT }, () => ({
       lastHigh: false,
@@ -270,6 +314,11 @@ export class Rp2040Runner {
     rp.core.PC = rp.readUint32(FLASH_BASE + 0x104) & ~1;
   }
 
+  /** Joins the canvas's Wi-Fi network, under this board's name and a MAC of its own. */
+  attachWifi(network: WifiNetwork, identity: { id: string; label: string }): void {
+    this.wifi?.attach(network, macForBoard(identity.id, CYW43_OUI), identity.label);
+  }
+
   /** Rebuilds the machine in its power-on state and boots the same image. */
   reset(): void {
     this.assertLive();
@@ -319,8 +368,13 @@ export class Rp2040Runner {
     if ((core.PC & ~1) < ROM_HEADER_END) this.reportUnresolvedRomCall();
     const cycleNs = this.cycleNs;
     const clock = this.rp.clock as unknown as { tick(ns: number): void; nanosToNextAlarm: number };
+    const wifi = this.wifi;
+    if (wifi) wifi.service();
     if (core.waiting) {
-      const ns = clock.nanosToNextAlarm || cycleNs;
+      let ns = clock.nanosToNextAlarm || cycleNs;
+      // A frame the Wi-Fi chip has for later raises its host-wake line then, waking the core.
+      const due = wifi?.nextDueNs();
+      if (due !== undefined) ns = Math.max(cycleNs, Math.min(ns, due - (clock as unknown as { nanos: number }).nanos));
       if (this.pioClock.active) {
         // Bounded so a sleeping core with no alarm due still comes back to
         // the run loop's time limit.

@@ -1348,7 +1348,7 @@ export const WIFI_ACCESS_POINT = def(
       prop('channel', 'Channel', 'number', 6),
     ],
     description:
-      'A simulated Wi-Fi access point for the ESP boards (ESP32, ESP32-S3, ESP32-CAM, ESP32-C3, ESP32-C6, ESP8266) to join with WiFi.begin(). ' +
+      'A simulated Wi-Fi access point for the Wi-Fi boards (ESP32, ESP32-S3, ESP32-CAM, ESP32-C3, ESP32-C6, ESP8266 and the Pico W) to join with WiFi.begin(). ' +
       'The sketch must use this SSID and password, as with a real router: a wrong SSID fails with "no AP found" and a ' +
       'wrong password with an authentication failure. Its DHCP server hands out 192.168.1.100 onwards (the second ' +
       'access point on a canvas is 192.168.2.0/24, and so on), its DNS resolves each board by the hostname it gave, ' +

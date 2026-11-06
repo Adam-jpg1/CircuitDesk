@@ -119,7 +119,7 @@ const rp2040jsAdapter: BoardSimulatorAdapter = {
     // image is refused without downloading the emulator.
     const image = parseRp2040Uf2(decodeBase64Firmware(firmware.data));
     const { Rp2040Runner } = await import('./rp2040/rp2040Runner');
-    return new Rp2040Runner(image);
+    return new Rp2040Runner(image, { symbols: firmware.symbols });
   },
 };
 

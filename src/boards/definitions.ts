@@ -704,7 +704,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     'simulated', { usb: 'none', color: '#12262e', description: 'ESP32-CAM (Ai-Thinker design). The ESP32 on it runs the compiled sketch; the OV2640 camera, microSD slot and PSRAM are not simulated.' },
   ),
   PICO,
-  { ...PICO, id: 'board.raspberry-pi-pico-w', name: 'Raspberry Pi Pico W', description: 'Pico W (wireless). The RP2040 side runs real firmware exactly as the Pico does; the CYW43 Wi-Fi radio is not simulated.', metadata: { ...PICO.metadata } },
+  { ...PICO, id: 'board.raspberry-pi-pico-w', name: 'Raspberry Pi Pico W', description: 'Pico W (wireless). The RP2040 runs the compiled firmware exactly as the Pico does, and its CYW43 Wi-Fi joins a Wi-Fi Access Point on the canvas; Bluetooth is not simulated.', metadata: { ...PICO.metadata } },
   RPI_ZERO_GPIO,
   RPI4_GPIO,
   TEENSY_41,

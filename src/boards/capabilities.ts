@@ -943,17 +943,25 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       fqbn: 'rp2040:rp2040:rpipicow',
       requiredCore: 'rp2040:rp2040',
       supported: true,
-      note: 'Built as a Pico W in its own right (rp2040:rp2040:rpipicow), not as a plain Pico. The CYW43 Wi-Fi APIs are not included in this toolchain.',
+      note: 'Built as a Pico W in its own right (rp2040:rp2040:rpipicow), not as a plain Pico, so its CYW43 driver, lwIP and the WiFi library are in the build.',
     },
     simulation: {
       engine: 'rp2040js',
       supported: true,
-      supportedApis: RP2040_SIM_APIS,
-      supportedPeripherals: RP2040_SIM_PERIPHERALS,
+      supportedApis: [
+        ...RP2040_SIM_APIS,
+        'WiFi (station: scan, connect, DHCP, TCP/UDP on the simulated network)',
+        'LED_BUILTIN (the CYW43\'s GPIO0, set through the chip)',
+      ],
+      supportedPeripherals: [...RP2040_SIM_PERIPHERALS, 'CYW43439 Wi-Fi chip at its SPI bus'],
     },
     extraPinCaps: [{ pattern: /^GP\d+$/, add: ['pwm'] }],
     limitation:
-      'The CYW43 Wi-Fi radio and all network functionality are NOT simulated. ' + RP2040_LIMITATION,
+      'The CYW43439 Wi-Fi chip is simulated at its SPI bus, with the board\'s own cyw43 driver, lwIP and WiFi library '
+      + 'running as built: Wi-Fi works as a station — scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP '
+      + 'and DNS from it, and TCP/UDP to other boards on it — with no internet behind it, no soft-AP mode and no '
+      + 'Bluetooth. LED_BUILTIN is the chip\'s GPIO0 and follows the sketch, though the canvas does not draw it. '
+      + RP2040_LIMITATION,
   },
 
   // ---------------- Espressif (variants are distinct) ----------------

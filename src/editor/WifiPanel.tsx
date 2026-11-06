@@ -89,7 +89,7 @@ export function WifiPanel() {
           <div style={{ color: 'var(--text-2)' }}>Run the simulation to see which boards join.</div>
         ) : stations.length === 0 ? (
           <div style={{ color: 'var(--text-2)' }}>
-            No board has joined yet. ESP32, ESP32-S3, ESP32-CAM, ESP32-C3, ESP32-C6 and ESP8266 sketches join with WiFi.begin(ssid, password).
+            No board has joined yet. ESP32, ESP32-S3, ESP32-CAM, ESP32-C3, ESP32-C6, ESP8266 and Pico W sketches join with WiFi.begin(ssid, password).
           </div>
         ) : (
           <table style={{ borderCollapse: 'collapse', marginTop: 4 }}>

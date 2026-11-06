@@ -1,4 +1,4 @@
-import { readFirmwareSymbols, type FirmwareSymbols } from './firmwareSymbols.js';
+import { readCyw43Symbols, readFirmwareSymbols, type FirmwareSymbols } from './firmwareSymbols.js';
 import type { BoardTarget } from './types.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -312,6 +312,8 @@ export async function cliCompile(
           binaryBase64 = (await readFile(path.join(outputDir, chosen))).toString('base64');
           binaryFormat = uf2 ? 'uf2' : 'bin';
         }
+        const elf = files.find((f) => f.endsWith('.ino.elf'));
+        binarySymbols = await readCyw43Symbols(elf ? path.join(outputDir, elf) : undefined);
       } else if (isEspArch(arch)) {
         // An ESP build writes several .bin files: the application image, the
         // second-stage bootloader, the partition table and a merged 4 MB flash

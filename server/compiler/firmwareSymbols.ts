@@ -36,7 +36,34 @@ export const NAMED_SYMBOLS = [
   // The ESP8266 core: lwIP2's glue to the SDK, both ways.
   'esp2glue_netif_set_up1down0', 'esp2glue_netif_update', 'esp2glue_ethernet_input', 'esp2glue_alloc_for_recv',
   'esp2glue_dhcp_start', 'esp2glue_dhcp_stop', 'esp2glue_pbuf_freed', 'glue2esp_linkoutput', 'glue2esp_ifupdown',
+  // The Pico W: cyw43-driver's bus transfer and host-wake read, where the CYW43439 model sits.
+  'cyw43_spi_transfer', 'cyw43_cb_read_host_interrupt_pin',
 ];
+
+/**
+ * The Pico W's: a build that drives a CYW43 carries its open driver, whose bus
+ * routine is where the simulator's chip model answers. No closed code runs on
+ * the RP2040 itself, so there is nothing else to send.
+ */
+export function cyw43SymbolsFrom(elfBytes: Uint8Array): FirmwareSymbols | undefined {
+  const elf = parseElf32(elfBytes);
+  if (!elf) return undefined;
+  const named: Record<string, number> = {};
+  for (const s of elf.symbols) {
+    if ((s.name === 'cyw43_spi_transfer' || s.name === 'cyw43_cb_read_host_interrupt_pin') && s.value) named[s.name] = s.value >>> 0;
+  }
+  return named.cyw43_spi_transfer ? { closed: [], named } : undefined;
+}
+
+/** Reads the Pico W symbols from the .elf an arduino-cli build wrote, if it is there. */
+export async function readCyw43Symbols(elfPath: string | undefined): Promise<FirmwareSymbols | undefined> {
+  if (!elfPath) return undefined;
+  try {
+    return cyw43SymbolsFrom(new Uint8Array(await readFile(elfPath)));
+  } catch {
+    return undefined;
+  }
+}
 
 /** Upper bound on what is sent, so a pathological build cannot bloat the response. */
 const MAX_CLOSED = 6000;
