@@ -95,7 +95,7 @@ export function TemplatesPage() {
           <div className="site-hero-text">
             <h1>Start from something that works</h1>
             <p>
-              Every template is wired, compiles for its real board, and runs on the emulator — and{' '}
+              Every template is wired, compiles for its real board, and runs on the emulator, and{' '}
               {testedCount === views.length ? 'every one' : `${testedCount} of ${views.length}`} carries a test bench
               that proves it still does. Open one, press Run, then make it yours.
             </p>
@@ -152,7 +152,6 @@ export function TemplatesPage() {
         {(kind === 'all' || kind === 'starter') && (
           <>
             <div className="dash-section-title">Starter templates</div>
-            <div className="dash-section-note">The smallest honest example of one idea each — read the sketch in a minute, then change it.</div>
             <div className="tpl-grid">
               {starters.map((v) => <TemplateCard key={v.template.id} view={v} onPick={() => void create(v.template.build)} />)}
               {!filtering && (
