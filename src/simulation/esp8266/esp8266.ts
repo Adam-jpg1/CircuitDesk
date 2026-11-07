@@ -126,6 +126,14 @@ class Esp8266Rtc extends Store {
     }
     return super.readUint32(offset);
   }
+  /** RTC_STORE0-3 hold their values through a reset, as the RTC domain does; only power-up clears them. */
+  private powered = false;
+  override reset(): void {
+    const kept = this.powered ? [0x30, 0x34, 0x38, 0x3c].map((o) => [o, this.regs.get(o)] as const) : [];
+    super.reset();
+    for (const [o, v] of kept) if (v !== undefined) this.regs.set(o, v);
+    this.powered = true;
+  }
   override writeUint32(offset: number, value: number): void {
     switch (offset) {
       case 0x68: this.gpio.writeGp16('out', value); return;
@@ -170,6 +178,16 @@ export interface Esp8266Options {
 }
 
 export class Esp8266Machine extends EspXtensaMachine {
+  /** After a software restart the ESP8266's ROM reports cause 2, as its boot banner prints ("rst cause:2"). */
+  protected override readonly softwareResetReason: number = 2;
+  protected override readonly clockSurvivesSoftwareReset = false;
+
+  /** The board's RST button: an external reset, which the ROM reports as cause 2 with no software marker. */
+  externalReset(): void {
+    this.romState.resetReason = 2;
+    this.reset();
+    this.romState.resetReason = 2;
+  }
   readonly dram = new Uint8Array(DRAM_END - DRAM_BASE);
   readonly iram = new Uint8Array(IRAM_END - IRAM_BASE);
   readonly romBytes = new Uint8Array(ROM_END - ROM_BASE);
@@ -269,10 +287,13 @@ export class Esp8266Machine extends EspXtensaMachine {
   // ------------------------------------------------------------- loading
 
   override loadImage(image: EspApplicationImage): void {
+    // RTC memory is kept through every reset but the first power-up: the SDK
+    // leaves the reason for a software restart there, and sketches keep data
+    // in it across ESP.restart() and deep sleep.
+    if (!this.image) this.rtcMem.fill(0);
     this.image = image;
     this.dram.fill(0);
     this.iram.fill(0);
-    this.rtcMem.fill(0);
     this.romBytes.fill(0);
     this.sparse.clear();
     this.fallback.clear();
@@ -381,6 +402,15 @@ export class Esp8266Machine extends EspXtensaMachine {
         return 0;
       },
       ets_run: () => ({ jump: ETS_RUN_LOOP_AT }),
+      // The reset vector: system_restart() and the core's crash handler jump
+      // here to reboot the chip. It restarts, keeping its flash, and the
+      // sketch runs from the top again, as on the board.
+      _ResetVector: () => {
+        m.softwareReset();
+        // Held here until the run loop carries the reset out: nothing after
+        // the caller's jump was meant to run.
+        return { jump: ESP8266_ROM_ADDRESSES._ResetVector };
+      },
       boot_from_flash: () => 0,
       ets_install_putc1: () => {},
       ets_write_char: (h) => { h.console(h.arg(0) & 0xff); },

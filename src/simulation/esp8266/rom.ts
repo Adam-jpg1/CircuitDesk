@@ -68,6 +68,7 @@ export const ROM_GLUE = new Uint8Array([
 
 /** ROM routine addresses (eagle.rom.addr.v6.ld) of everything an Arduino build links against. */
 export const ESP8266_ROM_ADDRESSES: Record<string, number> = {
+  _ResetVector: 0x40000080,
   _xtos_set_exception_handler: 0x40000454, __muldi3: 0x40000650, ets_set_idle_cb: 0x40000dc0, ets_task: 0x40000dd0,
   ets_run: 0x40000e04, ets_post_rom: 0x40000e24, ets_isr_attach: 0x40000f88, ets_isr_mask: 0x40000f98, ets_isr_unmask: 0x40000fa8,
   boot_from_flash: 0x40001308, ets_memset: 0x400018a4, ets_memcpy: 0x400018b4, ets_memmove: 0x400018c4, ets_memcmp: 0x400018d4,

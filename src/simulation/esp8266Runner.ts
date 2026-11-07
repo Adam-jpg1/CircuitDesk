@@ -68,6 +68,9 @@ export class Esp8266Runner implements BoardRunner {
       regions: [{ offset: 0, data: image.raw }],
     });
     this.machine = new Esp8266Machine(flash);
+    // The ROM's own UART output (ets_uart_putc1 and friends): the core's crash
+    // report goes out this way, straight to UART0, as it does on the board.
+    this.machine.onConsoleByte = (b) => this.onSerialByte?.(b);
     this.machine.uarts[0].onByte = (b) => this.onSerialByte?.(b);
     this.attachBuses();
     for (let i = 0; i < PIN_COUNT; i++) this.history.push(this.freshHistory());
@@ -287,7 +290,7 @@ export class Esp8266Runner implements BoardRunner {
 
   reset(): void {
     if (this.disposed) return;
-    this.machine.reset();
+    this.machine.externalReset();
     for (let i = 0; i < PIN_COUNT; i++) this.history[i] = this.freshHistory();
   }
 

@@ -296,5 +296,42 @@ void loop() {}
   }
 }
 
+section('restarts and crashes, as the board goes through them');
+// ESP.restart() and the core's crash handler both end in a jump to the ROM's
+// reset vector. The chip reboots, keeping its flash and RTC memory, and the
+// sketch starts again; the crash report the core prints goes straight out of
+// UART0 through the ROM, as on the board.
+{
+  const b = await boot(`#include <EEPROM.h>
+void setup() { Serial.begin(115200); EEPROM.begin(16);
+  int n = EEPROM.read(0) == 0xff ? 1 : EEPROM.read(0) + 1; EEPROM.write(0, n); EEPROM.commit();
+  Serial.printf("boot %d: %s\\n", n, ESP.getResetReason().c_str()); delay(200); if (n < 3) ESP.restart(); }
+void loop() { delay(100); }`);
+  if (b) {
+    run(b.r, 1500);
+    check(b.r.fault == null, `a restart is carried out, not reported as a fault (${b.r.fault ?? 'no fault'})`);
+    check(/boot 1: Power On[\s\S]*boot 2: Software\/System restart[\s\S]*boot 3: Software\/System restart/.test(b.out()), `ESP.restart() reboots it, flash and the reset reason kept (${JSON.stringify(b.out().match(/boot \d: [^\r\n]*/g))})`);
+    b.r.reset();
+    run(b.r, 600);
+    check(/boot 4: /.test(b.out()), `the board's Reset button reboots it too, flash kept (${last(b.out(), /(boot 4: [^\r\n]*)/g) ?? 'nothing'})`);
+  }
+  const fresh = await boot(`void setup() { Serial.begin(115200); Serial.printf("reason: %s\\n", ESP.getResetReason().c_str()); }
+void loop() { delay(100); }`);
+  if (fresh) {
+    run(fresh.r, 400);
+    fresh.r.reset();
+    run(fresh.r, 400);
+    check(/reason: Power On[\s\S]*reason: External System/.test(fresh.out()), `power-up, then the Reset button, report as the board does (${JSON.stringify(fresh.out().match(/reason: [^\r\n]*/g))})`);
+  }
+  const c = await boot(`void isr() {}
+void setup() { Serial.begin(115200); Serial.println("up"); delay(100); attachInterrupt(digitalPinToInterrupt(D6), isr, FALLING); }
+void loop() { delay(100); }`);
+  if (c) {
+    run(c.r, 800);
+    check(/ISR not in IRAM![\s\S]*Abort called/.test(c.out()), 'an interrupt handler without IRAM_ATTR stops with the core\'s own message, as on the board');
+    check((c.out().match(/\bup\b/g) ?? []).length >= 2, 'and the board reboots after it, and runs the sketch again');
+  }
+}
+
 console.log(`\n--- ${failures} failing, ${skipped} skipped`);
 process.exit(failures ? 1 : 0);

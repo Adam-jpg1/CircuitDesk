@@ -130,6 +130,14 @@ export abstract class EspXtensaMachine implements SimulatedClock {
   /** The core whose instruction is executing, for bus accesses that depend on it. */
   protected current = 0;
   protected pendingReset = false;
+  /** What the ROM's rtc_get_reset_reason reports after softwareReset(): the ESP32's SW_CPU_RESET. */
+  protected readonly softwareResetReason: number = 12;
+  /**
+   * Whether the chip's clock carries on through a software reset. The ESP8266's
+   * timers are rebuilt from zero by its reset, as the board's Reset does, so
+   * its clock starts again too; the run that was in progress ends there.
+   */
+  protected readonly clockSurvivesSoftwareReset: boolean = true;
   protected readonly romName: string = 'ESP32';
   protected readonly romTable: Map<number, Esp32RomEntry>;
   /** Machine code placed in ROM space that runs as firmware rather than natively. */
@@ -516,10 +524,20 @@ export abstract class EspXtensaMachine implements SimulatedClock {
       if (this.pendingReset) {
         this.pendingReset = false;
         const ns = this.nanos;
-        this.romState.resetReason = 12;
+        // The RTC domain is not reset by a software restart: ESP-IDF leaves
+        // the reason (ESP.restart(), a panic) in RTC_CNTL's store registers
+        // for esp_reset_reason() to read after the reboot.
+        const kept = this.peripherals
+          .filter((p) => p.name === 'rtc_cntl' && (p as { regs?: unknown }).regs instanceof Map)
+          .map((p) => [p as unknown as { regs: Map<number, number> }, new Map((p as unknown as { regs: Map<number, number> }).regs)] as const);
+        this.romState.resetReason = this.softwareResetReason;
         this.reset();
-        this.romState.resetReason = 12;
-        for (const s of this.slots) s.ns = ns;
+        for (const [p, saved] of kept) {
+          p.regs.clear();
+          for (const [offset, value] of saved) p.regs.set(offset, value);
+        }
+        this.romState.resetReason = this.softwareResetReason;
+        if (this.clockSurvivesSoftwareReset) for (const s of this.slots) s.ns = ns;
         return executed;
       }
       // The core that is behind runs next, so the two share one timeline.
