@@ -205,7 +205,7 @@ export class Pcd8544Device implements SpiDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `PCD8544 84x48 — ${this.powerDown ? 'powered down' : this.mode}, ` +
+        `PCD8544 84x48: ${this.powerDown ? 'powered down' : this.mode}, ` +
         `${this.panel.dataBytes} data byte(s), ${this.litPixels} lit` +
         (this.unknown.length ? `, ${this.unhandledCommands.length} unhandled command(s)` : ''),
       log: [...this.log],

@@ -183,7 +183,7 @@ export class GpsNeo6mDevice implements UartPeripheral {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `NEO-6M — ${this.fix.hasFix ? `fix, ${this.fix.satellites} sats` : 'no fix'}, ` +
+        `NEO-6M: ${this.fix.hasFix ? `fix, ${this.fix.satellites} sats` : 'no fix'}, ` +
         `${this.fix.latitude.toFixed(5)}, ${this.fix.longitude.toFixed(5)}, ` +
         `${this.config.baud} baud, ${this.sentences} sentence(s) sent`,
       log: [...this.log],

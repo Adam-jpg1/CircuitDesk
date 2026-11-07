@@ -101,7 +101,7 @@ export const ARDUINO_UNO: BoardDefinition = {
   supportLevel: 'simulated',
   isBoard: true,
   description:
-    'Arduino Uno R3 — ATmega328P at 16 MHz. Fully simulated: real compiled firmware runs on an AVR emulator with GPIO, UART, timers, PWM and ADC.',
+    'Arduino Uno R3: ATmega328P at 16 MHz. Fully simulated: real compiled firmware runs on an AVR emulator with GPIO, UART, timers, PWM and ADC.',
   metadata: {
     logicVoltage: 5,
     maxPinCurrentMa: 20,

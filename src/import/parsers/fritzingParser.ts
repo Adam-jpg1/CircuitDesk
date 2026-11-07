@@ -92,7 +92,7 @@ function parseFzp(fzpText: string, svgFiles: Map<string, string>, fileName: stri
     widthMm = parseLen(svgEl?.getAttribute('width')) ?? widthMm;
     heightMm = parseLen(svgEl?.getAttribute('height')) ?? heightMm;
   } else {
-    warnings.push('No SVG artwork found in the archive — the part will use a generic body.');
+    warnings.push('No SVG artwork found in the archive: the part will use a generic body.');
   }
 
   // connectors → pins, mapped to SVG element positions where possible
@@ -138,7 +138,7 @@ function parseFzp(fzpText: string, svgFiles: Map<string, string>, fileName: stri
 
   if (connectors.length > 0 && mapped < connectors.length) {
     warnings.push(
-      `${mapped}/${connectors.length} connectors were located in the SVG; the rest were placed along the edge — adjust them in the mapping step.`,
+      `${mapped}/${connectors.length} connectors were located in the SVG; the rest were placed along the edge: adjust them in the mapping step.`,
     );
   }
   if (connectors.length === 0) warnings.push('The part defines no connectors.');

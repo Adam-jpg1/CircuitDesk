@@ -238,7 +238,7 @@ export class Ads1115Device implements I2cDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `ADS1115 @0x${this.address.toString(16)} — ±${this.fullScaleRange} V, ` +
+        `ADS1115 @0x${this.address.toString(16)}: ±${this.fullScaleRange} V, ` +
         `${this.isContinuous ? 'continuous' : 'single-shot'}, ${this.dataRate} SPS, ` +
         `last ${this.lastCounts} (${this.lastVolts.toFixed(3)} V)` +
         (this.saturations ? `, ${this.saturations} saturated` : ''),

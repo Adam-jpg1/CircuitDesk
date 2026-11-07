@@ -51,7 +51,7 @@ export function parseRp2040Uf2(buf: Uint8Array): Uf2Image {
     const looksLikeHex = buf[0] === ':'.charCodeAt(0);
     throw new FirmwareRejectedError(
       looksLikeHex
-        ? 'This is an AVR Intel HEX file, not an RP2040 UF2. CircuitDesk will not run AVR firmware on an RP2040 — recompile for the board on the canvas.'
+        ? 'This is an AVR Intel HEX file, not an RP2040 UF2. CircuitDesk will not run AVR firmware on an RP2040: recompile for the board on the canvas.'
         : `A UF2 file is a whole number of 512-byte blocks; this one is ${buf.length} bytes.`,
     );
   }
@@ -64,7 +64,7 @@ export function parseRp2040Uf2(buf: Uint8Array): Uf2Image {
     const block = off / BLOCK_SIZE;
     const dv = new DataView(buf.buffer, buf.byteOffset + off, BLOCK_SIZE);
     if (dv.getUint32(0, true) !== MAGIC_START0 || dv.getUint32(4, true) !== MAGIC_START1) {
-      throw new FirmwareRejectedError(`Block ${block} does not start with the UF2 magic — this is not a UF2 file.`);
+      throw new FirmwareRejectedError(`Block ${block} does not start with the UF2 magic: this is not a UF2 file.`);
     }
     if (dv.getUint32(508, true) !== MAGIC_END) {
       throw new FirmwareRejectedError(`Block ${block} has a corrupt UF2 trailer.`);
@@ -93,7 +93,7 @@ export function parseRp2040Uf2(buf: Uint8Array): Uf2Image {
     );
   }
   if (blocks.size === 0) {
-    throw new FirmwareRejectedError('This UF2 contains no flash data — there is nothing to execute.');
+    throw new FirmwareRejectedError('This UF2 contains no flash data: there is nothing to execute.');
   }
   if (byteLength > FLASH_SIZE) {
     throw new FirmwareRejectedError(`The firmware is ${byteLength} bytes, larger than the RP2040's ${FLASH_SIZE} byte flash.`);
@@ -114,6 +114,6 @@ export function decodeBase64Firmware(data: string): Uint8Array {
     for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
     return out;
   } catch {
-    throw new FirmwareRejectedError('The compiled firmware could not be decoded — the compiler response was corrupt.');
+    throw new FirmwareRejectedError('The compiled firmware could not be decoded: the compiler response was corrupt.');
   }
 }

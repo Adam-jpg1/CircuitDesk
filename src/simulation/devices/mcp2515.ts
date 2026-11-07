@@ -306,7 +306,7 @@ export class Mcp2515Device implements SpiDevice {
       // Both buffers full. A real chip sets an overflow bit in EFLG and drops
       // the frame; so does this, and the frame is gone.
       this.regs[MCP_REG.EFLG] |= 0x40;
-      this.note('both receive buffers were full — a frame was dropped');
+      this.note('both receive buffers were full: a frame was dropped');
       return;
     }
     const base = free === 0 ? MCP_REG.RXB0CTRL : MCP_REG.RXB1CTRL;
@@ -413,7 +413,7 @@ export class Mcp2515Device implements SpiDevice {
     const modeName = ['normal', 'sleep', 'loopback', 'listen-only', 'config'][this.mode] ?? 'unknown';
     return {
       status:
-        `MCP2515 — ${modeName} mode, ${this.bitrate} bit/s from CNF1-3, ` +
+        `MCP2515: ${modeName} mode, ${this.bitrate} bit/s from CNF1-3, ` +
         `${this.node.sentCount} frame(s) sent, ${this.node.receivedCount} received` +
         (this.node.arbitrationLosses ? `, ${this.node.arbitrationLosses} arbitration loss(es)` : ''),
       log: [...this.log],

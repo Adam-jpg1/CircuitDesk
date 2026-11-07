@@ -356,7 +356,7 @@ export class Ssd1331Device implements SpiDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `SSD1331 96x64 — ${this.displayOn ? this.mode : 'off'}, ` +
+        `SSD1331 96x64: ${this.displayOn ? this.mode : 'off'}, ` +
         `${this.fb.written} pixel(s) written` +
         (this.unknown.length ? `, ${this.unknownCommands.length} unknown command(s)` : ''),
       log: [...this.log],

@@ -210,7 +210,7 @@ export class Bmp280Device extends RegisterI2cDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `BMP280 @0x${this.address.toString(16)} — ${this.isMeasuring ? 'measuring' : 'sleep'}, ` +
+        `BMP280 @0x${this.address.toString(16)}: ${this.isMeasuring ? 'measuring' : 'sleep'}, ` +
         `${this.temperatureC.toFixed(1)} °C, ${this.pressureHpa.toFixed(1)} hPa`,
       log: [...this.log],
     };

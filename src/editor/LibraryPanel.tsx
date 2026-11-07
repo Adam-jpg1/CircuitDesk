@@ -141,7 +141,7 @@ export function LibraryPanel() {
       <div className="library-search">
         <input
           type="search"
-          placeholder="Search parts — name, part number or what it does…"
+          placeholder="Search parts by name, part number or what it does…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -212,10 +212,10 @@ export function LibraryPanel() {
         ))}
         <div style={{ padding: '10px 12px', color: 'var(--text-2)', fontSize: 11 }}>
           {query.trim()
-            ? `${totalShown} part${totalShown === 1 ? '' : 's'} match “${query.trim()}”. Search by what a part does — “accelerometer”, “shift register”, “distance” — as well as by part number.`
+            ? `${totalShown} part${totalShown === 1 ? '' : 's'} match “${query.trim()}”. Search by what a part does (“accelerometer”, “shift register”, “distance”) as well as by part number.`
             : isPhone()
-              ? 'Tap a part to place it on the canvas. Badges show honest support levels.'
-              : 'Drag a part onto the canvas. Right-click a part to pin it to Favorites. Badges show honest support levels.'}
+              ? 'Tap a part to place it on the canvas. Badges show what each part supports.'
+              : 'Drag a part onto the canvas. Right-click a part to pin it to Favorites. Badges show what each part supports.'}
         </div>
       </div>
     </>

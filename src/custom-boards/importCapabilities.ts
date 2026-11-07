@@ -55,7 +55,7 @@ export const IMPORT_CAPABILITIES: ImportCapability[] = [
     level: 'pins-geometry',
     produces:
       'Pins with their labels and, where the file has a processor-pin column, their pads. ' +
-      'A label column alone is enough — the pins are stacked for you to place.',
+      'A label column alone is enough: the pins are stacked for you to place.',
     limitation:
       'A pin table says nothing about the chip, so the processor is yours to choose. ' +
       'Without x/y columns the positions are yours to place.',
@@ -107,14 +107,14 @@ export const IMPORT_CAPABILITIES: ImportCapability[] = [
     produces: 'A layer-by-layer rendering of the copper, silkscreen, mask and drill data, with toggles.',
     limitation:
       'Gerber describes manufacturing, not connectivity. A flashed pad is not distinguishable from a via or ' +
-      'a fiducial, so CircuitDesk does not infer pins from it — use it as the artwork and bring a pin map.',
+      'a fiducial, so CircuitDesk does not infer pins from it: use it as the artwork and bring a pin map.',
   },
   {
     format: 'zip-bundle',
     name: 'Zipped part bundle',
     level: 'pins-geometry',
     produces: 'metadata.json, board.svg and pinmap.csv read together into one part.',
-    limitation: 'The processor is whatever the metadata names, confirmed by you — never assumed.',
+    limitation: 'The processor is whatever the metadata names, confirmed by you, never assumed.',
   },
 ];
 

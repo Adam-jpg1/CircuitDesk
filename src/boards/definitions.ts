@@ -81,7 +81,7 @@ export const ARDUINO_NANO = headerBoard({
   color: '#0b3d5e',
   usb: 'mini',
   description:
-    'Arduino Nano — ATmega328P board. Fully simulated with its own pin profile (A6/A7 are ADC-only, as on real hardware) and compiled as arduino:avr:nano.',
+    'Arduino Nano: ATmega328P board. Fully simulated with its own pin profile (A6/A7 are ADC-only, as on real hardware) and compiled as arduino:avr:nano.',
   left: [
     gpio('D1', 'TX1', ['digital-in', 'digital-out', 'uart-tx']),
     gpio('D0', 'RX0', ['digital-in', 'digital-out', 'uart-rx']),
@@ -258,7 +258,7 @@ function j8Header(ids: { power: string[]; ground: string[] }): { left: PinSpec[]
     const n = entry as number;
     const role = J8_ROLES[n];
     return gpio(`GPIO${n}`, `GPIO${n}`, ['digital-in', 'digital-out', 'pwm', 'interrupt', ...(role?.caps ?? [])], 3.3, {
-      description: `Pin ${physical}: GPIO${n}${role ? ` — ${role.note}` : ''}`,
+      description: `Pin ${physical}: GPIO${n}${role ? `${role.note}` : ''}`,
       aliases: [`BOARD${physical}`],
     });
   };
@@ -269,7 +269,7 @@ function j8Header(ids: { power: string[]; ground: string[] }): { left: PinSpec[]
 }
 
 const PI_DESCRIPTION =
-  "Simulated by running main.py's GPIO in CircuitDesk's Python interpreter — RPi.GPIO and gpiozero on the header's BCM " +
+  "Simulated by running main.py's GPIO in CircuitDesk's Python interpreter. RPi.GPIO and gpiozero on the header's BCM " +
   'GPIO 0-27, with print() and input() on the Serial Monitor. Not a Linux emulator: the script runs, the Pi does not.';
 
 // Portrait: the header runs along the long edge.
@@ -350,7 +350,7 @@ export const PICO = headerBoard({
   logicVoltage: 3.3,
   color: '#1a4232',
   description:
-    'RP2040 board with 3.3 V logic and GP0-GP28 pins (GP26-28 are the ADC channels). Compiles for the real RP2040 target — never through the AVR toolchain — and runs that firmware instruction by instruction, including GPIO, ADC, UART0, I2C and SPI.',
+    'RP2040 board with 3.3 V logic and GP0-GP28 pins (GP26-28 are the ADC channels). Compiles for the real RP2040 target (never through the AVR toolchain) and runs that firmware instruction by instruction, including GPIO, ADC, UART0, I2C and SPI.',
   left: [
     g3('GP0', 'GP0', { caps: ['digital-in', 'digital-out', 'uart-tx', 'i2c-sda', 'pwm'] }),
     g3('GP1', 'GP1', { caps: ['digital-in', 'digital-out', 'uart-rx', 'i2c-scl', 'pwm'] }),
@@ -527,7 +527,7 @@ function simpleWiringBoard(
     id, name, family, processor, widthMm, heightMm, left, right, supportLevel, logicVoltage,
     description:
       extra.description ??
-      `${name} — visual and wiring support with pin metadata. Firmware simulation is not implemented for this board; the support badge reflects that honestly.`,
+      `${name}: visual and wiring support with pin metadata. Firmware simulation is not implemented for this board.`,
     ...extra,
   });
 }
@@ -561,8 +561,8 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
       a3('GPIO4', 'GPIO4'), a3('GPIO5', 'GPIO5'), a3('GPIO6', 'GPIO6'), a3('GPIO7', 'GPIO7'),
       a3('GPIO15', 'GPIO15'), a3('GPIO16', 'GPIO16'), a3('GPIO17', 'GPIO17'), a3('GPIO18', 'GPIO18'),
       { ...a3('GPIO8', 'GPIO8'), caps: ['digital-in', 'digital-out', 'analog-in', 'pwm', 'i2c-sda'] },
-      { ...a3('GPIO3', 'GPIO3'), description: 'GPIO3 — strapping pin (JTAG source)' },
-      g3('GPIO46', 'GPIO46', { description: 'GPIO46 — strapping pin' }),
+      { ...a3('GPIO3', 'GPIO3'), description: 'GPIO3: strapping pin (JTAG source)' },
+      g3('GPIO46', 'GPIO46', { description: 'GPIO46: strapping pin' }),
       { ...a3('GPIO9', 'GPIO9'), caps: ['digital-in', 'digital-out', 'analog-in', 'pwm', 'i2c-scl'] },
       { ...a3('GPIO10', 'GPIO10'), caps: ['digital-in', 'digital-out', 'analog-in', 'pwm', 'spi-ss'] },
       { ...a3('GPIO11', 'GPIO11'), caps: ['digital-in', 'digital-out', 'analog-in', 'pwm', 'spi-mosi'] },
@@ -573,14 +573,14 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     ],
     [
       gnd('GND2'),
-      g3('TX0', 'TX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-tx'], aliases: ['GPIO43'], description: 'GPIO43 — U0TXD: Serial, through the USB-to-UART bridge' }),
-      g3('RX0', 'RX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-rx'], aliases: ['GPIO44'], description: 'GPIO44 — U0RXD: Serial, through the USB-to-UART bridge' }),
+      g3('TX0', 'TX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-tx'], aliases: ['GPIO43'], description: 'GPIO43. U0TXD: Serial, through the USB-to-UART bridge' }),
+      g3('RX0', 'RX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-rx'], aliases: ['GPIO44'], description: 'GPIO44. U0RXD: Serial, through the USB-to-UART bridge' }),
       a3('GPIO1', 'GPIO1'), a3('GPIO2', 'GPIO2'),
       g3('GPIO42', 'GPIO42'), g3('GPIO41', 'GPIO41'), g3('GPIO40', 'GPIO40'), g3('GPIO39', 'GPIO39'),
       g3('GPIO38', 'GPIO38'), g3('GPIO37', 'GPIO37'), g3('GPIO36', 'GPIO36'), g3('GPIO35', 'GPIO35'),
-      g3('GPIO0', 'GPIO0', { description: 'GPIO0 — Boot button; strapping pin' }),
-      g3('GPIO45', 'GPIO45', { description: 'GPIO45 — strapping pin' }),
-      g3('GPIO48', 'GPIO48', { description: 'GPIO48 — drives the on-board addressable RGB LED' }),
+      g3('GPIO0', 'GPIO0', { description: 'GPIO0. Boot button; strapping pin' }),
+      g3('GPIO45', 'GPIO45', { description: 'GPIO45: strapping pin' }),
+      g3('GPIO48', 'GPIO48', { description: 'GPIO48: drives the on-board addressable RGB LED' }),
       g3('GPIO47', 'GPIO47'),
       g3('GPIO21', 'GPIO21'),
       a3('GPIO20', 'GPIO20', ), a3('GPIO19', 'GPIO19'),
@@ -591,7 +591,7 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
       color: '#12262e',
       usb: 'usb-c',
       description:
-        'ESP32-S3-DevKitC-1 — Espressif development board with an ESP32-S3-WROOM-1 module (8 MB flash). The compiled '
+        'ESP32-S3-DevKitC-1: Espressif development board with an ESP32-S3-WROOM-1 module (8 MB flash). The compiled '
         + 'sketch runs on a simulated dual-core Xtensa LX7 ESP32-S3, and its Wi-Fi joins a Wi-Fi Access Point on the canvas, and Bluetooth LE works; the native USB port and the RGB LED are not simulated.',
     },
   ),
@@ -622,12 +622,12 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
     'board.esp32-c6-devkitc-1', 'ESP32-C6-DevKitC-1', 'Espressif', 'ESP32-C6 (RISC-V RV32IMC)', 25.4, 58.4, 3.3,
     [
       p3v3('3V3_1'), reset('RST', 'RST'),
-      { ...a3('IO4', 'IO4'), description: 'GPIO4 — ADC1 channel; MTMS strapping pin' },
-      { ...a3('IO5', 'IO5'), description: 'GPIO5 — ADC1 channel; MTDI strapping pin' },
-      { ...a3('IO6', 'IO6'), description: 'GPIO6 — ADC1 channel; MTCK' },
-      g3('IO7', 'IO7', { description: 'GPIO7 — MTDO' }),
+      { ...a3('IO4', 'IO4'), description: 'GPIO4: ADC1 channel; MTMS strapping pin' },
+      { ...a3('IO5', 'IO5'), description: 'GPIO5: ADC1 channel; MTDI strapping pin' },
+      { ...a3('IO6', 'IO6'), description: 'GPIO6: ADC1 channel; MTCK' },
+      g3('IO7', 'IO7', { description: 'GPIO7. MTDO' }),
       a3('IO0', 'IO0'), a3('IO1', 'IO1'),
-      g3('IO8', 'IO8', { description: 'GPIO8 — drives the on-board RGB LED; strapping pin' }),
+      g3('IO8', 'IO8', { description: 'GPIO8: drives the on-board RGB LED; strapping pin' }),
       g3('IO10', 'IO10'), g3('IO11', 'IO11'),
       a3('IO2', 'IO2'), a3('IO3', 'IO3'),
       p5v('5V_1', '5V'), gnd('GND1'),
@@ -636,20 +636,20 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
       gnd('GND2'),
       g3('IO16', 'TX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-tx'] }),
       g3('IO17', 'RX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-rx'] }),
-      g3('IO15', 'IO15', { description: 'GPIO15 — strapping pin' }),
+      g3('IO15', 'IO15', { description: 'GPIO15: strapping pin' }),
       g3('IO23', 'IO23'), g3('IO22', 'IO22'), g3('IO21', 'IO21'), g3('IO20', 'IO20'),
       g3('IO19', 'IO19'), g3('IO18', 'IO18'),
-      g3('IO9', 'IO9', { description: 'GPIO9 — Boot button; strapping pin' }),
+      g3('IO9', 'IO9', { description: 'GPIO9. Boot button; strapping pin' }),
       gnd('GND3'),
-      g3('IO13', 'IO13', { description: 'GPIO13 — native USB D+' }),
-      g3('IO12', 'IO12', { description: 'GPIO12 — native USB D-' }),
+      g3('IO13', 'IO13', { description: 'GPIO13: native USB D+' }),
+      g3('IO12', 'IO12', { description: 'GPIO12: native USB D-' }),
       gnd('GND4'),
     ],
     'wiring',
     {
       color: '#1f3b52',
       description:
-        'ESP32-C6-DevKitC-1 — Espressif development board carrying an ESP32-C6-WROOM-1 module with 8 MB flash. ' +
+        'ESP32-C6-DevKitC-1: Espressif development board carrying an ESP32-C6-WROOM-1 module with 8 MB flash. ' +
         'Two USB Type-C ports (one to the native USB peripheral, one through the USB-to-UART bridge), Boot and Reset buttons, ' +
         'and an addressable RGB LED on GPIO8. Wiring and pin metadata only at present; firmware execution is not implemented for this board.',
     },
@@ -670,13 +670,13 @@ const RAW_BOARD_DEFINITIONS: BoardDefinition[] = [
       g3('IO20', 'RX', { caps: ['digital-in', 'digital-out', 'pwm', 'uart-rx'], aliases: ['RX0'] }),
       gnd('GND7'),
       { ...g3('IO9', 'IO9'), aliases: ['GPIO9'] },
-      g3('IO8', 'IO8', { aliases: ['GPIO8'], description: 'GPIO8 — also drives the on-board RGB LED' }),
+      g3('IO8', 'IO8', { aliases: ['GPIO8'], description: 'GPIO8: also drives the on-board RGB LED' }),
       gnd('GND8'),
       { ...g3('IO7', 'IO7'), aliases: ['GPIO7'] }, { ...g3('IO6', 'IO6'), aliases: ['GPIO6'] },
       { ...a3('IO5', 'IO5'), aliases: ['GPIO5'] }, { ...a3('IO4', 'IO4'), aliases: ['GPIO4'] },
       gnd('GND9'),
-      g3('IO18', 'IO18', { aliases: ['GPIO18'], description: 'GPIO18 — also USB D-' }),
-      g3('IO19', 'IO19', { aliases: ['GPIO19'], description: 'GPIO19 — also USB D+' }),
+      g3('IO18', 'IO18', { aliases: ['GPIO18'], description: 'GPIO18: also USB D-' }),
+      g3('IO19', 'IO19', { aliases: ['GPIO19'], description: 'GPIO19: also USB D+' }),
       gnd('GND10'),
     ],
     'validation',

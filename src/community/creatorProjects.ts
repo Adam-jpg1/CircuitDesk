@@ -167,7 +167,7 @@ const logicComputer: BuiltinProject = {
   description:
     'A real accumulator machine on the bench: a 74HC161 program counter that jumps by loading itself from the ' +
     'bus, a 74HC157 to choose LOAD or ADD, a 74HC283 adder, a 74HC574 accumulator with a carry flag, and a ' +
-    'CD4511 driving the display. The Uno is only the program memory and sequencer — it puts each instruction on ' +
+    'CD4511 driving the display. The Uno is only the program memory and sequencer: it puts each instruction on ' +
     'the bus and pulses the clock, then reads back what the chips computed. It runs forever: 3 × 3 by repeated ' +
     'addition, an overflow that lights the carry flag, a countdown from 9 that loops on the carry, then back to ' +
     'the start. Change the ROM table to write your own program.',
@@ -421,7 +421,7 @@ const snake: BuiltinProject = {
   description:
     'The whole game on a MAX7219 matrix: an analog joystick steers, the snake grows when it eats, a buzzer ' +
     'clicks on every bite and sounds when you crash. The matrix driver is programmed register by register over ' +
-    'hardware SPI — no library — so every pixel you see is a byte the sketch sent. Press Run, then drag the ' +
+    'hardware SPI (no library) so every pixel you see is a byte the sketch sent. Press Run, then drag the ' +
     'joystick on the canvas to start and steer; it springs back to centre when you let go.',
   author: 'creator',
   tags: ['game', 'max7219', 'spi', 'joystick'],
@@ -634,8 +634,8 @@ const keypadSafe: BuiltinProject = {
   title: 'Keypad combination safe',
   description:
     'A 4×4 keypad scanned by hand, a servo as the bolt, a 16×2 LCD on an I2C backpack driven straight from the ' +
-    'HD44780 datasheet, and LEDs and a buzzer for right and wrong. Type 1234 then # on the keypad — click the ' +
-    'keys on the canvas — and the bolt swings open for three seconds. Get it wrong and it tells you.',
+    'HD44780 datasheet, and LEDs and a buzzer for right and wrong. Type 1234 then # on the keypad: click the ' +
+    'keys on the canvas, and the bolt swings open for three seconds. Get it wrong and it tells you.',
   author: 'creator',
   tags: ['keypad', 'servo', 'lcd', 'i2c'],
   baseLikes: 73,
@@ -1427,7 +1427,7 @@ const tetris: BuiltinProject = {
   description:
     'The full game on a 1.8" ST7735 colour display: seven pieces in their colours, rotation with wall kicks, ' +
     'hard drop, line clears with a buzzer chirp, a next-piece preview and a score that speeds the game up. The ' +
-    'display is driven straight from its datasheet over hardware SPI — no graphics library — and only the cells ' +
+    'display is driven straight from its datasheet over hardware SPI (no graphics library) and only the cells ' +
     'that change are redrawn, which is what keeps an Uno fast enough to play on. Press Run, then click the four ' +
     'buttons on the canvas: left, rotate, right, drop.',
   author: 'creator',

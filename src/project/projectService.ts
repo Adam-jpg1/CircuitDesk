@@ -127,7 +127,7 @@ export function normalizeProject(raw: unknown): CircuitProject {
     console.warn(
       `[CircuitDesk] ${boards.disarmed.length} custom board(s) in this project no longer describe a valid board ` +
       'and have been reduced to wiring only: ' +
-      boards.disarmed.map((d) => `${d.boardId} — ${d.reason}`).join('; '),
+      boards.disarmed.map((d) => `${d.boardId}: ${d.reason}`).join('; '),
     );
   }
 

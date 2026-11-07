@@ -148,11 +148,11 @@ export const GATE_DEFS: ComponentDefinition[] = [
   gateSymbol(LOGIC_PARTS['comp.gate-and'], 'AND gate', 'and', 'Two-input AND. Output is high only when both inputs are high; an undriven input makes the result unknown rather than low.'),
   gateSymbol(LOGIC_PARTS['comp.gate-or'], 'OR gate', 'or', 'Two-input OR. Output is high when either input is high.'),
   gateSymbol(LOGIC_PARTS['comp.gate-not'], 'NOT gate (inverter)', 'not', 'Inverter. Output is the opposite of the input.'),
-  gateSymbol(LOGIC_PARTS['comp.gate-nand'], 'NAND gate', 'nand', 'Two-input NAND — AND followed by an inversion, and the gate every other gate can be built from.'),
-  gateSymbol(LOGIC_PARTS['comp.gate-nor'], 'NOR gate', 'nor', 'Two-input NOR — OR followed by an inversion. A pair of these cross-coupled makes an SR latch.'),
+  gateSymbol(LOGIC_PARTS['comp.gate-nand'], 'NAND gate', 'nand', 'Two-input NAND. AND followed by an inversion, and the gate every other gate can be built from.'),
+  gateSymbol(LOGIC_PARTS['comp.gate-nor'], 'NOR gate', 'nor', 'Two-input NOR. OR followed by an inversion. A pair of these cross-coupled makes an SR latch.'),
   gateSymbol(LOGIC_PARTS['comp.gate-xor'], 'XOR gate', 'xor', 'Two-input exclusive OR. Output is high when exactly one input is high, which makes it the core of an adder.'),
-  gateSymbol(LOGIC_PARTS['comp.gate-xnor'], 'XNOR gate', 'xnor', 'Two-input exclusive NOR — high when the inputs agree.'),
-  gateSymbol(LOGIC_PARTS['comp.buffer-tristate'], 'Tri-state buffer', 'tristate', 'Buffer with an output enable. With OE low the output is genuinely disconnected from the wire — high impedance, not low — so several can share one bus.'),
+  gateSymbol(LOGIC_PARTS['comp.gate-xnor'], 'XNOR gate', 'xnor', 'Two-input exclusive NOR: high when the inputs agree.'),
+  gateSymbol(LOGIC_PARTS['comp.buffer-tristate'], 'Tri-state buffer', 'tristate', 'Buffer with an output enable. With OE low the output is disconnected from the wire (high impedance, not low), so several can share one bus.'),
   gateSymbol(LOGIC_PARTS['comp.schmitt-trigger'], 'Schmitt inverter', 'schmitt', 'Inverting Schmitt trigger. The switching threshold depends on which way the input is moving, so a slow or noisy edge produces one clean transition instead of several.'),
 ];
 
@@ -167,7 +167,7 @@ export const LOGIC_IC_DEFS: ComponentDefinition[] = [
   dip(
     LOGIC_PARTS['comp.74hc02'], '74HC02 (quad NOR)',
     ['1y', '1a', '1b', '2y', '2a', '2b', 'gnd', '3a', '3b', '3y', '4a', '4b', '4y', 'vcc'],
-    'Four two-input NOR gates. Note the outputs come first on this part — the 02 pinout is not the 00 pinout.',
+    'Four two-input NOR gates. Note the outputs come first on this part: the 02 pinout is not the 00 pinout.',
   ),
   dip(
     LOGIC_PARTS['comp.74hc04'], '74HC04 (hex inverter)',
@@ -254,7 +254,7 @@ export const LOGIC_IC_DEFS: ComponentDefinition[] = [
   dip(
     LOGIC_PARTS['comp.cd4017'], 'CD4017 (decade counter)',
     ['q5', 'q1', 'q0', 'q2', 'q6', 'q7', 'q3', 'gnd', 'q8', 'q4', 'q9', 'co', 'inh', 'clk', 'rst', 'vcc'],
-    'Decade counter with ten decoded outputs — exactly one is high at a time, which is why it turns up in every chaser and sequencer.',
+    'Decade counter with ten decoded outputs: exactly one is high at a time, which is why it turns up in every chaser and sequencer.',
   ),
   dip(
     LOGIC_PARTS['comp.cd4026'], 'CD4026 (counter + 7-seg driver)',
@@ -269,7 +269,7 @@ export const LOGIC_IC_DEFS: ComponentDefinition[] = [
   dip(
     LOGIC_PARTS['comp.cd4040'], 'CD4040 (12-stage ripple counter)',
     ['q12', 'q6', 'q5', 'q7', 'q4', 'q3', 'q2', 'gnd', 'q1', 'clk', 'rst', 'q9', 'q8', 'q10', 'q11', 'vcc'],
-    'Twelve-stage binary ripple counter, clocked on the falling edge. Useful as a clock divider — each output is half the frequency of the one before it.',
+    'Twelve-stage binary ripple counter, clocked on the falling edge. Useful as a clock divider: each output is half the frequency of the one before it.',
   ),
   dip(
     LOGIC_PARTS['comp.74hc138'], '74HC138 (3-to-8 decoder)',
@@ -294,7 +294,7 @@ export const LOGIC_IC_DEFS: ComponentDefinition[] = [
   dip(
     LOGIC_PARTS['comp.74hc157'], '74HC157 (quad 2-to-1 mux)',
     ['sel', '1a', '1b', '1y', '2a', '2b', '2y', 'gnd', '3y', '3b', '3a', '4y', '4b', '4a', 'ne', 'vcc'],
-    'Four two-to-one multiplexers switched together — one select line chooses between two nibbles.',
+    'Four two-to-one multiplexers switched together: one select line chooses between two nibbles.',
   ),
   dip(
     LOGIC_PARTS['comp.74hc283'], '74HC283 (4-bit adder)',
@@ -313,12 +313,12 @@ export const LOGIC_IC_DEFS: ComponentDefinition[] = [
     LOGIC_PARTS['comp.cd4511'], 'CD4511 (BCD to 7-segment)',
     // Pins 1-16 as printed: BCD in on the left, segments out on the right.
     ['b', 'c', 'nlt', 'nbi', 'le', 'd', 'a', 'gnd', 'se', 'sd', 'sc', 'sb', 'sa', 'sg', 'sf', 'vcc'],
-    'BCD input to seven-segment outputs, with a store latch, lamp test and blanking. Inputs above nine blank the display rather than showing hex — the behaviour that distinguishes a 4511 from a 7447.',
+    'BCD input to seven-segment outputs, with a store latch, lamp test and blanking. Inputs above nine blank the display rather than showing hex: the behaviour that distinguishes a 4511 from a 7447.',
   ),
   dip(
     LOGIC_PARTS['comp.74hc164'], '74HC164 (8-bit shift register)',
     ['a', 'b', 'q1', 'q2', 'q3', 'q4', 'gnd', 'clk', 'nclr', 'q5', 'q6', 'q7', 'q8', 'vcc'],
-    'Serial-in, parallel-out shift register with no output latch — the outputs ripple as bits shift through, which is the difference from a 74HC595.',
+    'Serial-in, parallel-out shift register with no output latch: the outputs ripple as bits shift through, which is the difference from a 74HC595.',
   ),
 ];
 
@@ -345,7 +345,7 @@ export const DISCRETE_LOGIC_DEFS: ComponentDefinition[] = [
     simulationAdapterId: 'sim.logic',
     supportLevel: 'simulated',
     description:
-      'Set-reset latch built from cross-coupled NOR gates. Setting both inputs at once is the genuinely invalid state and both outputs go low, rather than the model picking a winner.',
+      'Set-reset latch built from cross-coupled NOR gates. Setting both inputs at once is the invalid state, and both outputs go low.',
     isBoard: false,
   },
   {

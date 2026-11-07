@@ -44,7 +44,7 @@ function describeChannelChoices(profile: BoardBusProfile, lines: readonly BusLin
     parts.push(`${channel.name} (${pins.join('/')})`);
   }
   if (parts.length === 0) return 'Move both wires onto pins belonging to the same controller.';
-  return `Put both lines on one controller — ${parts.join(' or ')}.`;
+  return `Put both lines on one controller: ${parts.join(' or ')}.`;
 }
 
 interface NetInfo {
@@ -196,7 +196,7 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
           issues.push(
             issue('led-needs-resistor', 'error', `${name}: no current-limiting resistor`,
               `${name} (${anode.label}) is driven directly with no series resistor anywhere in the path.`, {
-                why: 'Without a resistor an LED draws far more than the 20 mA pin limit — in real hardware this damages the LED and can damage the GPIO pin.',
+                why: 'Without a resistor an LED draws far more than the 20 mA pin limit: in real hardware this damages the LED and can damage the GPIO pin.',
                 suggestedFix: 'Put a 220 Ω–1 kΩ resistor in series with the LED.',
                 affectedComponentIds: [inst.id],
                 affectedConnectionIds: connectionsOf(inst.id),
@@ -305,7 +305,7 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
       if ((infoA?.boardDigitalPins.length || infoB?.boardDigitalPins.length)) {
         issues.push(
           issue('gpio-overcurrent', 'warning', `Series resistance is only ${ohms} Ω`,
-            `A GPIO pin drives through ${ohms} Ω — roughly ${(5 / ohms * 1000).toFixed(0)} mA, above the 20 mA per-pin limit.`, {
+            `A GPIO pin drives through ${ohms} Ω: roughly ${(5 / ohms * 1000).toFixed(0)} mA, above the 20 mA per-pin limit.`, {
               suggestedFix: 'Use at least 150-220 Ω for 5 V GPIO loads.',
               affectedComponentIds: [inst.id],
             }),
@@ -458,7 +458,7 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
           issues.push(
             issue(isUart ? 'uart-pins-need-config' : 'bus-pins-need-config', 'info',
               `${moduleName}: ${w.modulePin.label} is on ${where}, an alternate ${lineLabel} pin`,
-              `${where} is a valid ${lineLabel} pin on ${boardName}, but it is not the default — ` +
+              `${where} is a valid ${lineLabel} pin on ${boardName}, but it is not the default: ` +
                 `${channelDefault ? describeBusPin(profile, channelDefault) : 'another pin'} is. ` +
                 'The sketch has to select it.', {
                 affectedComponentIds: [inst.id],
@@ -485,7 +485,7 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
           .join(' and ');
         issues.push(
           issue('bus-pins-split-controller', 'warning', `${moduleName}: its ${bus.toUpperCase()} lines are on different ${bus.toUpperCase()} controllers`,
-            `${boardName} can carry ${described}, but not on the same ${bus.toUpperCase()} peripheral — ` +
+            `${boardName} can carry ${described}, but not on the same ${bus.toUpperCase()} peripheral: ` +
               `so they cannot form one bus.`, {
               affectedComponentIds: [inst.id],
               affectedConnectionIds: connectionsOf(inst.id),
@@ -507,7 +507,7 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
       if (boardPins.some((bp) => bp.pin.capabilities.includes('uart-tx'))) {
         issues.push(
           issue('uart-pins', 'warning', `${moduleName}: TX wired to TX`,
-            `The module's TX output is wired to the board's TX pin — serial lines must cross (TX→RX).`, {
+            `The module's TX output is wired to the board's TX pin: serial lines must cross (TX→RX).`, {
               affectedComponentIds: [inst.id],
               suggestedFix: 'Swap the two serial wires so module TX goes to board RX.',
             }),
@@ -565,7 +565,7 @@ export function validateProject(project: CircuitProject): ValidationIssue[] {
     const names = [...new Set(unsupported.map((i) => graph.definitions.get(i.id)?.name ?? '?'))];
     issues.push(
       issue('unsupported-simulation', 'info', `${unsupported.length} part(s) are not firmware-simulated`,
-        `${names.slice(0, 5).join(', ')}${names.length > 5 ? '…' : ''} — these parts are validated for wiring but do not react during simulation. Their support badges say so.`, {
+        `${names.slice(0, 5).join(', ')}${names.length > 5 ? '…' : ''}: these parts are validated for wiring but do not react during simulation. Their support badges say so.`, {
           affectedComponentIds: unsupported.map((i) => i.id),
         }),
     );

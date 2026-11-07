@@ -6,7 +6,7 @@ import { ImportError, type ImportParseResult, type ImportedPin, type ImportedCom
 export function parseEagle(text: string, fileName: string): ImportParseResult {
   const doc = parseXmlSafe(text, 'Eagle file');
   const eagle = doc.querySelector('eagle');
-  if (!eagle) throw new ImportError('Not an Eagle XML file (missing <eagle> root). Old binary Eagle files are not supported — re-save as XML from Eagle 6+.');
+  if (!eagle) throw new ImportError('Not an Eagle XML file (missing <eagle> root). Old binary Eagle files are not supported: re-save as XML from Eagle 6+.');
 
   const warnings: string[] = [];
   const pins: ImportedPin[] = [];
@@ -105,7 +105,7 @@ export function parseEagle(text: string, fileName: string): ImportParseResult {
 
   if (!Number.isFinite(minX)) {
     minX = 0; minY = 0; maxX = 60; maxY = 40;
-    if (pins.length > 0) warnings.push('No layer-20 outline found — board size estimated from pads.');
+    if (pins.length > 0) warnings.push('No layer-20 outline found: board size estimated from pads.');
   }
 
   // Eagle Y axis points up; flip so it matches CircuitDesk (Y down) and rebase to 0,0.

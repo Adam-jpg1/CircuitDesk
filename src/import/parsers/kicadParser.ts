@@ -148,7 +148,7 @@ export function parseKicadPcb(text: string): ImportParseResult {
   }
 
   if (!Number.isFinite(minX)) {
-    warnings.push('No Edge.Cuts outline found — using the pad bounding box for board size.');
+    warnings.push('No Edge.Cuts outline found: using the pad bounding box for board size.');
     minX = Math.min(...pins.map((p) => p.xMm), 0);
     minY = Math.min(...pins.map((p) => p.yMm), 0);
     maxX = Math.max(...pins.map((p) => p.xMm), 50);

@@ -135,7 +135,7 @@ export class Sn74hc165Device implements SpiDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `74HC165 — inputs 0b${this.inputs.toString(2).padStart(8, '0')}, ` +
+        `74HC165: inputs 0b${this.inputs.toString(2).padStart(8, '0')}, ` +
         `${this.captures} capture(s), ${this.bytesShifted} byte(s) shifted out` +
         (this.clockEnabled ? '' : ', clock inhibited (CE high)'),
       log: [...this.log],

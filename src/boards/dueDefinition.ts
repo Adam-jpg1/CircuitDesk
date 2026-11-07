@@ -127,7 +127,7 @@ export const ARDUINO_DUE: BoardDefinition = {
   supportLevel: 'simulated',
   isBoard: true,
   description:
-    'Arduino Due: a SAM3X8E Cortex-M3 at 84 MHz with 3.3 V logic — no pin tolerates 5 V. Simulated on CircuitDesk\'s ' +
+    'Arduino Due: a SAM3X8E Cortex-M3 at 84 MHz with 3.3 V logic: no pin tolerates 5 V. Simulated on CircuitDesk\'s ' +
     'ARMv7-M core and SAM3X model: 54 digital pins, 12 analog inputs, PWM on D2-D13, Serial (the programming port) and ' +
     'Serial1-Serial3, Wire on D20/D21 and Wire1 on SDA1/SCL1, SPI on the SPI header, attachInterrupt on any pin and ' +
     'Servo.',

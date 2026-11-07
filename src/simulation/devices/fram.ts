@@ -144,7 +144,7 @@ export class FramDevice implements I2cDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `FRAM @0x${this.address.toString(16)} — ${this.sizeBytes} bytes, ` +
+        `FRAM @0x${this.address.toString(16)}: ${this.sizeBytes} bytes, ` +
         `${this.usedBytes} non-zero, ${this.writes} write(s), ${this.reads} read(s)`,
       log: [...this.log],
     };

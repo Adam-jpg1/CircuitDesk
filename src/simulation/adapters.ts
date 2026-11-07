@@ -70,7 +70,7 @@ export function assertFirmwareMatchesBoard(
   if (compiledForBoardId !== board.id) {
     throw new Error(
       `Firmware was compiled for "${compiledForBoardId}" but the canvas board is "${board.id}" (${board.name}). ` +
-        'CircuitDesk will not execute firmware on a different MCU — recompile for this board.',
+        'CircuitDesk will not execute firmware on a different MCU: recompile for this board.',
     );
   }
 }
@@ -86,7 +86,7 @@ function assertFormat(adapter: BoardSimulatorAdapter, firmware: FirmwareArtifact
   if (firmware.format === adapter.firmwareFormat) return;
   throw new FirmwareRejectedError(
     `${board.name} runs ${adapter.firmwareFormat.toUpperCase()} firmware, but the compiled artifact is "${firmware.format}". ` +
-      'CircuitDesk will not execute firmware built for another architecture — recompile for this board.',
+      'CircuitDesk will not execute firmware built for another architecture: recompile for this board.',
   );
 }
 
@@ -103,7 +103,7 @@ const avr8jsAdapter: BoardSimulatorAdapter = {
     const profile = avrProfileForProcessor(board.processorProfileId);
     if (!profile) {
       throw new Error(
-        `No AVR machine profile is registered for ${board.name} (processor ${board.processorProfileId ?? 'unknown'}) — ` +
+        `No AVR machine profile is registered for ${board.name} (processor ${board.processorProfileId ?? 'unknown'}): ` +
         "refusing to run it on another processor's profile.",
       );
     }

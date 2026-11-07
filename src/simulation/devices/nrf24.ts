@@ -299,7 +299,7 @@ export class Nrf24Device implements SpiDevice {
       return;
     }
     if (this.txFifo.length >= FIFO_DEPTH) {
-      this.note('TX FIFO full — payload dropped');
+      this.note('TX FIFO full: payload dropped');
       return;
     }
     const packet = { payload, wantsAck };
@@ -590,7 +590,7 @@ export class Nrf24Device implements SpiDevice {
       const plos = Math.min(15, (this.regs[NRF_REG.OBSERVE_TX] >> 4) + 1);
       this.regs[NRF_REG.OBSERVE_TX] = (plos << 4) | (this.regs[NRF_REG.OBSERVE_TX] & 0x0f);
       this.lostPackets++;
-      this.note('MAX_RT — no acknowledgement');
+      this.note('MAX_RT: no acknowledgement');
     }
     // Anything still queued goes out while CE is held high.
     if (this.ce) this.startPendingTransmission();
@@ -636,7 +636,7 @@ export class Nrf24Device implements SpiDevice {
           continue;
         }
         if (this.rxFifo.length >= FIFO_DEPTH) {
-          this.note('RX FIFO full — packet dropped');
+          this.note('RX FIFO full: packet dropped');
           continue;
         }
         this.rxFifo.push({ pipe, payload: reception.transmission.payload });
@@ -728,7 +728,7 @@ export class Nrf24Device implements SpiDevice {
     const mode = !this.poweredUp ? 'powered down' : this.isReceiver ? 'receiving' : 'transmitting';
     return {
       status:
-        `nRF24L01+ — ${mode}, channel ${this.channel}, ${this.dataRate / 1000} kbps, ` +
+        `nRF24L01+: ${mode}, channel ${this.channel}, ${this.dataRate / 1000} kbps, ` +
         `CE ${this.ce ? 'high' : 'low'}, TX addr ${this.transmitAddress}, ` +
         `${this.sentPackets} sent, ${this.receivedPackets} received` +
         (this.lostPackets ? `, ${this.lostPackets} gave up (MAX_RT)` : ''),

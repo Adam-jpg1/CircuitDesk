@@ -213,7 +213,7 @@ export class Sx1278Device implements SpiDevice {
     const wasTx = (previous & 0x07) === SX_MODE.TX;
     const isTx = (value & 0x07) === SX_MODE.TX;
     if (!(value & LONG_RANGE_MODE)) {
-      this.note('LongRangeMode is clear — the FSK/OOK register bank is not implemented');
+      this.note('LongRangeMode is clear: the FSK/OOK register bank is not implemented');
       return;
     }
     if (isTx && !wasTx) this.beginTransmit();
@@ -329,7 +329,7 @@ export class Sx1278Device implements SpiDevice {
         // data out of two overlapping chirps.
         this.corrupted++;
         this.regs[SX_REG.IRQ_FLAGS] |= IRQ_RX_DONE | IRQ_CRC_ERROR;
-        this.note('a packet collided — CRC error raised');
+        this.note('a packet collided: CRC error raised');
         continue;
       }
       const payload = reception.transmission.payload;
@@ -419,14 +419,14 @@ export class Sx1278Device implements SpiDevice {
 
   snapshot(): DeviceSnapshot {
     if (!this.loraMode) {
-      return { status: 'SX1278 — FSK/OOK mode, which is not implemented', log: [...this.log] };
+      return { status: 'SX1278: FSK/OOK mode, which is not implemented', log: [...this.log] };
     }
     const modeName =
       ['sleep', 'standby', 'FSTX', 'transmitting', 'FSRX', 'receiving', 'receiving (single)', 'CAD'][this.mode] ??
       'unknown';
     return {
       status:
-        `SX1278 — ${modeName}, ${(this.frequencyHz / 1e6).toFixed(3)} MHz, SF${this.spreadingFactor}, ` +
+        `SX1278: ${modeName}, ${(this.frequencyHz / 1e6).toFixed(3)} MHz, SF${this.spreadingFactor}, ` +
         `BW ${this.bandwidthHz / 1000} kHz, CR 4/${this.codingRate + 4}, sync 0x${this.syncWord.toString(16)}, ` +
         `${this.sentPackets} sent, ${this.receivedPackets} received` +
         (this.corrupted ? `, ${this.corrupted} corrupted` : ''),

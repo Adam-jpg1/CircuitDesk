@@ -25,62 +25,56 @@ export function AboutPage() {
             simulating, testing, and documenting hardware projects before physically assembling them.
           </p>
 
-          <h2>The real simulation pipeline</h2>
+          <h2>Simulation Pipeline</h2>
           <p>
-            Arduino C++ source → local toolchain (<code>arduino-cli</code> when installed, otherwise{' '}
-            <code>avr-g++</code> with the Arduino AVR core) → compiled Intel HEX → <code>AVR8js</code> ATmega328P
-            emulator → AVR port registers → Arduino pin mapping → circuit graph → component behavior → canvas.
+            Your sketch is compiled with <code>arduino-cli</code> for the board you picked, and the firmware runs on a
+            simulated copy of that board's chip (Raspberry Pi boards run Python instead). The pins it drives move the parts on the canvas, and the serial
+            monitor shows what the sketch sends.
           </p>
           <p>
-            Nothing here scans your code for <code>digitalWrite</code> to fake an animation. If the LED blinks, it is
-            because the compiled firmware toggled PORTB bit 5 inside a cycle-accurate emulator. Edit the{' '}
-            <code>delay()</code> values and the blink timing changes accordingly. The serial monitor shows bytes
-            transmitted by the emulated USART at your sketch's baud rate.
+            If an LED blinks, the compiled firmware switched its pin. Change the <code>delay()</code> values and the
+            blink changes with them.
           </p>
           <p>
             Compiler status:{' '}
             {health === null ? 'checking…' : health.available ? (
-              <strong style={{ color: 'var(--ok)' }}>{health.toolchain} — {health.version}</strong>
+              <strong style={{ color: 'var(--ok)' }}>{health.toolchain} {health.version}</strong>
             ) : (
-              <strong style={{ color: 'var(--warn)' }}>unavailable — {health.detail}</strong>
+              <strong style={{ color: 'var(--warn)' }}>unavailable ({health.detail})</strong>
             )}
           </p>
 
-          <h2>Honest support levels</h2>
-          <p>Every board and component carries a badge that says what actually works:</p>
+          <h2>Support levels</h2>
+          <p>Every board and component carries a badge that says what works:</p>
           <ul>
-            <li><strong>Simulated</strong> — real firmware execution drives it (Arduino Uno R3, Nano, Mega 2560 and Leonardo on their own AVR profiles; Raspberry Pi Pico and Pico W on the RP2040; ESP32-C3-DevKitM-1 on RISC-V; plus LEDs, buttons, potentiometers, buzzer, servo, 7-segment, HC-SR04, analog sensors).</li>
-            <li><strong>Compile</strong> — code compiles for the real target, but CircuitDesk cannot execute it.</li>
-            <li><strong>Validation</strong> — wiring plus electrical rule checks (ESP32 DevKit V1, ESP32-S3-DevKitC-1, I2C modules…).</li>
-            <li><strong>Wiring</strong> — placeable with real pins and metadata, no deep checks yet.</li>
-            <li><strong>Visual only</strong> — reference artwork (imported Gerbers, ESP32-CAM…).</li>
-          </ul>
-          <p>
-            A board image never counts as board support here; unsupported boards are labeled as such rather than
-            pretending to run firmware they can't.
-          </p>
-
-          <h2>What's real in the import center</h2>
-          <ul>
-            <li><strong>CircuitDesk JSON</strong> — full project restore with schema validation.</li>
-            <li><strong>KiCad</strong> — s-expression parsing of <code>.kicad_pcb</code>: Edge.Cuts outline, footprints, pads, nets.</li>
-            <li><strong>Eagle</strong> — XML parsing of boards/libraries: outline, elements, pads/SMDs, signals.</li>
-            <li><strong>Fritzing</strong> — archive extraction, connector ids/names, SVG artwork, connector→SVG mapping.</li>
-            <li><strong>EasyEDA</strong> — JSON structure detection, pads/tracks/components with coordinates.</li>
-            <li><strong>Gerber + Excellon</strong> — aperture/draw/flash and drill parsing, rendered per-layer.</li>
-            <li><strong>CSV / SVG / ZIP bundles</strong> — pin maps with column mapping, sanitized artwork, complete part bundles.</li>
+            <li><strong>Simulated</strong>: the compiled firmware runs and drives it. Every board in the library is simulated, along with LEDs, buttons, sensors, displays, motors and the other parts marked this way.</li>
+            <li><strong>Compile</strong>: code compiles for the real target, but CircuitDesk cannot run it.</li>
+            <li><strong>Validation</strong>: wiring plus electrical rule checks.</li>
+            <li><strong>Wiring</strong>: placeable with real pins and metadata, no deeper checks yet.</li>
+            <li><strong>Visual only</strong>: reference artwork, such as imported Gerbers.</li>
           </ul>
 
-          <h2>Local-first</h2>
+          <h2>External imports</h2>
+          <ul>
+            <li><strong>CircuitDesk JSON</strong>: full project restore with schema validation.</li>
+            <li><strong>KiCad</strong>: <code>.kicad_pcb</code> outline, footprints, pads and nets.</li>
+            <li><strong>Eagle</strong>: board and library outline, elements, pads and signals.</li>
+            <li><strong>Fritzing</strong>: connector names, SVG artwork and how they map to each other.</li>
+            <li><strong>EasyEDA</strong>: pads, tracks and components with coordinates.</li>
+            <li><strong>Gerber + Excellon</strong>: copper, outline and drill layers, drawn per layer.</li>
+            <li><strong>CSV / SVG / ZIP bundles</strong>: pin maps, sanitized artwork and complete part bundles.</li>
+          </ul>
+
+          <h2>Your projects</h2>
           <p>
-            Projects live in your browser's IndexedDB; the compile server runs on your machine. Export a{' '}
-            <code>.cdproj.json</code> or ZIP package any time for backup or sharing.
+            Projects are saved in your browser. Export a <code>.cdproj.json</code> or ZIP package any time to back up
+            or share one.
           </p>
 
-          <h2>Roadmap honesty</h2>
+          <h2>Roadmap</h2>
           <p>
-            Analog (SPICE-class) simulation, ESP32/RP2040 emulation, and protocol decoding for I2C displays are
-            planned adapter slots — they are marked as not implemented wherever they would appear, never faked.
+            Analog (SPICE-class) simulation and protocol decoding for I2C displays are planned adapter slots. They are
+            marked as not implemented wherever they would appear.
           </p>
         </div>
       </div>

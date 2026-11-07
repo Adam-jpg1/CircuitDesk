@@ -144,8 +144,8 @@ export class Sn74hc595Device implements SpiDevice, AnalogDevice {
     const bits = this.storage.toString(2).padStart(8, '0');
     return {
       status: this.outputEnabled
-        ? `74HC595 — Q7..Q0 = ${bits}, ${this.bytesShifted} byte(s) shifted, ${this.latches} latch(es)`
-        : `74HC595 — outputs high-Z (OE high), storage ${bits}`,
+        ? `74HC595: Q7..Q0 = ${bits}, ${this.bytesShifted} byte(s) shifted, ${this.latches} latch(es)`
+        : `74HC595: outputs high-Z (OE high), storage ${bits}`,
       log: [...this.log],
     };
   }

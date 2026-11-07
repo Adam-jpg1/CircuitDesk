@@ -127,7 +127,7 @@ export class Lcd1602Device implements I2cDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `LCD ${this.columns}x${this.rows} @0x${this.address.toString(16)} — ${this.lcd.isDisplayOn ? 'on' : 'off'}` +
+        `LCD ${this.columns}x${this.rows} @0x${this.address.toString(16)}: ${this.lcd.isDisplayOn ? 'on' : 'off'}` +
         `${this.backlight ? ', backlit' : ''}${this.lcd.isFourBitMode ? '' : ', not initialised'}` +
         (this.lcd.isCursorOn ? ', cursor' : '') +
         (this.lcd.isBlinkOn ? ', blink' : ''),

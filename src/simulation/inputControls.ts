@@ -94,7 +94,7 @@ const FIXED: Record<string, InputControlSpec> = {
       { channel: 'x', label: 'X axis', unit: '%', min: 0, max: 1, step: 0.01, default: 0.5, precision: 0, scale: 100, store: 'pot' },
       { channel: 'y', label: 'Y axis', unit: '%', min: 0, max: 1, step: 0.01, default: 0.5, precision: 0, scale: 100, store: 'pot' },
     ],
-    note: 'The wipers are across whatever reaches VCC — a stick on 3.3 V reads 3.3 V at full scale.',
+    note: 'The wipers are across whatever reaches VCC: a stick on 3.3 V reads 3.3 V at full scale.',
   },
   'comp.tmp36': {
     kind: 'quantities',

@@ -41,7 +41,7 @@ export function parseIntelHex(hexText: string, target: Uint8Array): number {
     const checksum = bytes[4 + count];
     const sum = bytes.slice(0, 4 + count).reduce((a, b) => a + b, 0);
     if (((sum + checksum) & 0xff) !== 0) {
-      throw new Error('Intel HEX checksum error — firmware appears corrupted.');
+      throw new Error('Intel HEX checksum error: firmware appears corrupted.');
     }
     if (type === 0x00) {
       const base = extendedAddress + address;

@@ -159,7 +159,7 @@ export function checkArtifactRuntime(
       code: 'processor-mismatch',
       message:
         `${board.name} runs on ${runtime.name}, which executes ` +
-        `${runtime.processorProfileIds.join(', ') || 'nothing'} — not ${processorId ?? 'an unspecified processor'}.`,
+        `${runtime.processorProfileIds.join(', ') || 'nothing'}, not ${processorId ?? 'an unspecified processor'}.`,
     };
   }
   if (!runtime.acceptsFormats.includes(artifactFormat as CompileProfile['artifactFormat'])) {

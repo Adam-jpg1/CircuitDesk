@@ -66,7 +66,7 @@ export function buildWiringReport(project: CircuitProject): string {
     return resolvePin(def, pinId)?.label ?? pinId;
   };
   const lines: string[] = [
-    `CircuitDesk wiring report — ${project.name}`,
+    `CircuitDesk wiring report: ${project.name}`,
     `Generated ${new Date().toISOString()}`,
     '',
     `Connections (${project.connections.length}):`,
@@ -85,7 +85,7 @@ export function buildWiringReport(project: CircuitProject): string {
         const [instId, pinId] = splitNode(n);
         return `${instName(instId)}.${pinLabel(instId, pinId)}`;
       });
-      lines.push(`  net ${i + 1}: ${nodes.join(' — ')}`);
+      lines.push(`  net ${i + 1}: ${nodes.join('')}`);
     });
   return lines.join('\n');
 }
@@ -93,7 +93,7 @@ export function buildWiringReport(project: CircuitProject): string {
 export function buildValidationReport(project: CircuitProject): string {
   const issues = validateProject(project);
   const lines = [
-    `CircuitDesk validation report — ${project.name}`,
+    `CircuitDesk validation report: ${project.name}`,
     `Generated ${new Date().toISOString()}`,
     '',
     issues.length === 0 ? 'No issues found.' : `${issues.length} issue(s):`,
@@ -108,7 +108,7 @@ export function buildValidationReport(project: CircuitProject): string {
 
 export function buildTestReport(project: CircuitProject, results: Map<string, TestResult>): string {
   const lines = [
-    `CircuitDesk test report — ${project.name}`,
+    `CircuitDesk test report: ${project.name}`,
     `Generated ${new Date().toISOString()}`,
     '',
   ];
@@ -117,7 +117,7 @@ export function buildTestReport(project: CircuitProject, results: Map<string, Te
     lines.push(`${test.name}: ${r ? r.status.toUpperCase() : 'NOT RUN'}${r ? ` (${(r.durationMs / 1000).toFixed(1)} s)` : ''}`);
     if (r) {
       for (const a of r.assertionResults) {
-        lines.push(`  ${a.passed ? 'PASS' : 'FAIL'} — expected ${a.expected}; actual: ${a.actual}`);
+        lines.push(`  ${a.passed ? 'PASS' : 'FAIL'}: expected ${a.expected}; actual: ${a.actual}`);
       }
       if (r.message) lines.push(`  note: ${r.message}`);
     }

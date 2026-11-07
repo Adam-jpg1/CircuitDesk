@@ -151,7 +151,7 @@ export class Hd44780ParallelDevice implements SimDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `LCD ${this.columns}x${this.rows} (parallel, ${this.eightBitWired ? '8' : '4'}-bit) — ` +
+        `LCD ${this.columns}x${this.rows} (parallel, ${this.eightBitWired ? '8' : '4'}-bit): ` +
         `${this.lcd.isDisplayOn ? 'on' : 'off'}${this.lcd.isInitialised ? '' : ', not initialised'}, ` +
         `${this.latches} E pulse(s)`,
       log: [...this.log, ...this.lcd.notes],

@@ -196,8 +196,8 @@ export function CommunityPage() {
           <div className="site-hero-text">
             <h1>Community</h1>
             <p>
-              Circuits people built and shared. Like the ones you enjoy, open a copy of anything to run it and change it
-              — your copy is yours, and the original stays as it was.
+              Circuits people built and shared. Like the ones you enjoy, and open a copy of anything to run and change
+              it. The original stays as it was.
             </p>
             {items && !error && (
               <div className="site-stats">
@@ -262,7 +262,7 @@ export function CommunityPage() {
             ) : (
               <div className="tpl-grid">
                 {listed.map((i) => <CommunityCard key={i.id} item={i} onOpen={() => setOpen(i)} onChange={update} />)}
-                {listed.length === 0 && <div className="empty-state">Nothing matches yet — be the first to share one.</div>}
+                {listed.length === 0 && <div className="empty-state">Nothing matches yet. Be the first to share one.</div>}
               </div>
             )}
           </>
@@ -424,7 +424,7 @@ function ShareModal({
         creatorKey,
       });
       if (creatorKey.trim() && !item.creator) {
-        toast('Shared — but the creator key was not accepted, so it is posted without the Creator badge.', 'error');
+        toast('Shared, but the creator key was not accepted, so it is posted without the Creator badge.', 'error');
       } else {
         toast(`Shared “${item.title}” with the community`, 'success');
       }
@@ -453,7 +453,7 @@ function ShareModal({
       {metas === null ? (
         <div className="empty-state"><div className="spinner" /> Loading your projects…</div>
       ) : metas.length === 0 ? (
-        <p>You have no projects yet. Make one — or start from a template — and share it from here.</p>
+        <p>You have no projects yet. Make one, or start from a template, and share it from here.</p>
       ) : (
         <div className="cm-form">
           <label>
@@ -465,7 +465,7 @@ function ShareModal({
                 setTitle(metas.find((m) => m.id === e.target.value)?.name ?? '');
               }}
             >
-              {metas.map((m) => <option key={m.id} value={m.id}>{m.name} — {m.primaryBoard}</option>)}
+              {metas.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.primaryBoard})</option>)}
             </select>
           </label>
           <label>

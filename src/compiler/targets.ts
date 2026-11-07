@@ -34,7 +34,7 @@ export type CompileTargetResolution =
 export function resolveCompileTarget(project: CircuitProject): CompileTargetResolution {
   const inst = project.boardInstances[0];
   if (!inst) {
-    return { ok: false, reason: 'Place a board on the canvas before compiling — there is no default compile target.' };
+    return { ok: false, reason: 'Place a board on the canvas before compiling: there is no default compile target.' };
   }
   const def = resolveDefinition(inst.definitionId, project);
   if (!def || !def.isBoard) {

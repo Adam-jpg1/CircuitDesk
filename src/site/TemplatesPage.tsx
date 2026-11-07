@@ -170,7 +170,7 @@ export function TemplatesPage() {
           <>
             <div className="dash-section-title" style={{ marginTop: 26 }}>Showcase projects</div>
             <div className="dash-section-note">
-              Worked projects that drive real device models on real buses, across the boards that genuinely execute
+              Larger projects that drive sensors, displays and other parts over real buses, on boards that run your
               firmware.
             </div>
             <div className="tpl-grid">

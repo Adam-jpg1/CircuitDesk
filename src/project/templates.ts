@@ -114,7 +114,7 @@ export const STARTER_TEMPLATES = (): ProjectTemplate[] => PROJECT_TEMPLATES.filt
 /** The showcase gallery: what the application can actually do. */
 export const SHOWCASE_TEMPLATES = (): ProjectTemplate[] => PROJECT_TEMPLATES.filter((t) => t.kind === 'showcase');
 
-const BLINK_CODE = `// CircuitDesk starter — Blink
+const BLINK_CODE = `// CircuitDesk starter. Blink
 // D13 drives an LED through a 220 ohm resistor to GND.
 
 void setup() {
@@ -433,16 +433,11 @@ void loop() {
 }
 `;
 
-const ESP32C6_GPIO_CODE = `// Showcase - ESP32-C6: what is real, and what is not
+const ESP32C6_GPIO_CODE = `// Showcase - ESP32-C6 light chaser
 //
-// This board executes the compiled RISC-V application image for real: ESP-IDF
-// startup, FreeRTOS, setup() and loop(), GPIO with its pull resistors, and
-// Serial on UART0.
-//
-// It does NOT simulate Wi-Fi, Bluetooth, Zigbee, Thread, USB Serial/JTAG, the
-// ADC, PWM, I2C or SPI. Sketches using them compile and run and quietly do
-// nothing, so this showcase uses only what is real: pins in, pins out, and
-// timing from the actual CPU.
+// A single light walks along four LEDs. Hold the BOOT button and all four
+// light up. The board runs the compiled RISC-V firmware: ESP-IDF startup,
+// FreeRTOS, setup() and loop(), GPIO with its pull resistors, and Serial.
 
 const int LEDS[] = {15, 18, 19, 20};
 const int BUTTON = 9;      // the board's BOOT button, active low
@@ -821,7 +816,7 @@ void loop() {
       p.tests = [
         bench(
           'All three channels are driven',
-          'Each colour pin must be switching, which is what PWM is — a steady level would mean one channel is dead.',
+          'Each colour pin must be switching, which is what PWM is: a steady level would mean one channel is dead.',
           [
             { kind: 'pin-toggles', pin: 9, minToggles: 10, withinMs: 1500 },
             { kind: 'pin-toggles', pin: 10, minToggles: 10, withinMs: 1500 },
@@ -1009,7 +1004,7 @@ void loop() {
     kind: 'starter',
     board: 'Arduino Uno',
     name: 'Serial monitor demo',
-    description: 'Prints counters and echoes serial input — exercises the emulated UART both ways.',
+    description: 'Prints counters and echoes serial input: exercises the emulated UART both ways.',
     tags: ['simulated', 'serial'],
     build: () => {
       const p = emptyProject('Serial Monitor Demo');
@@ -1214,7 +1209,7 @@ void loop() {
     name: 'RP2040: an I2C bus on pins you choose',
     description:
       'A BMP280 on a Pico, with the sketch muxing I2C onto GP4/GP5 through Wire.setSDA/setSCL. Output goes to ' +
-      'Serial — the Pico\'s USB port — and the serial monitor.',
+      'Serial (the Pico\'s USB port) and the serial monitor.',
     tags: ['simulated', 'i2c', 'rp2040'],
     kind: 'showcase',
     board: 'Raspberry Pi Pico',
@@ -1295,11 +1290,10 @@ void loop() {
   },
   {
     id: 'show.esp32c6-gpio',
-    name: 'ESP32-C6: what is real, and what is not',
+    name: 'ESP32-C6 light chaser',
     description:
-      'Real RISC-V execution of the compiled application image — ESP-IDF startup, FreeRTOS, setup() and loop(), ' +
-      'GPIO with its pulls, and Serial. Wi-Fi, Bluetooth, the ADC, PWM, I2C and SPI are not simulated, so this ' +
-      'uses only what genuinely runs.',
+      'A light walks along four LEDs, and the BOOT button lights them all. The ESP32-C6 runs the compiled RISC-V ' +
+      'firmware: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO with its pulls, and Serial.',
     tags: ['simulated', 'esp32', 'gpio'],
     kind: 'showcase',
     board: 'ESP32-C6-DevKitC-1',
@@ -1341,8 +1335,8 @@ void loop() {
     id: 'tpl.pico-blink',
     name: 'Pico Blink',
     description:
-      'Raspberry Pi Pico: an LED on GP15 and a button on GP14. Pin numbers here are GP numbers — the pad\'s own ' +
-      'name — and output goes to Serial, the Pico\'s USB port.',
+      'Raspberry Pi Pico: an LED on GP15 and a button on GP14. Pin numbers here are GP numbers: the pad\'s own ' +
+      'name, and output goes to Serial, the Pico\'s USB port.',
     tags: ['simulated', 'starter', 'rp2040'],
     kind: 'starter',
     board: 'Raspberry Pi Pico',
@@ -1366,7 +1360,7 @@ void loop() {
       p.tests = [
         bench(
           'GP15 blinks',
-          'The LED pin must go high and keep switching — on this board that is pad 15, named the way the chip names it.',
+          'The LED pin must go high and keep switching: on this board that is pad 15, named the way the chip names it.',
           [
             { kind: 'pin-becomes-high', pin: 15, withinMs: 800 },
             { kind: 'pin-toggles', pin: 15, minToggles: 3, withinMs: 2000 },
@@ -1426,7 +1420,7 @@ void loop() {
     name: 'ESP32-C6 Blink',
     description:
       'ESP32-C6: an LED on IO15 and the BOOT button on IO9, blinking faster while held. The compiled RISC-V ' +
-      'image really executes — ESP-IDF startup, FreeRTOS, loop() — but only GPIO is simulated on this board.',
+      'image really executes (ESP-IDF startup, FreeRTOS, loop()) but only GPIO is simulated on this board.',
     tags: ['simulated', 'starter', 'esp32'],
     kind: 'starter',
     board: 'ESP32-C6-DevKitC-1',
@@ -1490,7 +1484,7 @@ void loop() {
       p.tests = [
         bench(
           'The panel is configured and written to',
-          'Initialisation has to complete before any pixel is accepted, and the pattern has to be acknowledged by the device — both are reported only after the transactions succeed.',
+          'Initialisation has to complete before any pixel is accepted, and the pattern has to be acknowledged by the device: both are reported only after the transactions succeed.',
           [
             { kind: 'serial-contains', text: 'ssd1306 initialised', withinMs: 1500 },
             { kind: 'serial-contains', text: 'pattern written', withinMs: 3000 },
@@ -1505,7 +1499,7 @@ void loop() {
     id: 'show.stepper-sequence',
     name: 'Stepper: motion is the order, not a command',
     description:
-      'Four coil lines driven through a half-step sequence, with a relay alongside as a contrast — a coil you ' +
+      'Four coil lines driven through a half-step sequence, with a relay alongside as a contrast: a coil you ' +
       'switch rather than sequence. The model moves one step per adjacent transition, so reversing the order ' +
       'reverses the shaft and skipping a phase moves nothing.',
     tags: ['simulated', 'motors', 'outputs'],
@@ -1532,7 +1526,7 @@ void loop() {
       p.tests = [
         bench(
           'All four coils sequence, and the relay follows',
-          'Every coil line must switch — a sequence missing one phase is a motor that does not turn — and the forward pass must complete before the relay is energised.',
+          'Every coil line must switch (a sequence missing one phase is a motor that does not turn) and the forward pass must complete before the relay is energised.',
           [
             { kind: 'serial-contains', text: 'stepper ready', withinMs: 1200 },
             { kind: 'pin-toggles', pin: 8, minToggles: 4, withinMs: 2500 },

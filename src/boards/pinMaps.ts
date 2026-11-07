@@ -153,7 +153,7 @@ const ATMEGA32U4_LEONARDO: AvrBoardProfile = {
   portMap: atmega32u4Map(),
   unsupported: [
     'USB HID: Keyboard, Mouse and other native-USB libraries enumerate, but nothing reads their reports',
-    'ADC channels 8-13 (the A6-A11 alternate functions of D4/D6/D8/D9/D10/D12) — MUX5 sits at a different ADCSRB bit on this MCU than the engine assumes',
+    'ADC channels 8-13 (the A6-A11 alternate functions of D4/D6/D8/D9/D10/D12). MUX5 sits at a different ADCSRB bit on this MCU than the engine assumes',
     'EEPROM starts erased each time the simulation starts or is Reset (it keeps its contents for the whole run)',
     'Caterina bootloader, USB auto-reset and serial-port enumeration',
   ],

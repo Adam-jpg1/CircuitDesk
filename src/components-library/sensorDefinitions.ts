@@ -180,7 +180,7 @@ function i2cModule(
 export const I2C_SENSOR_DEFS: ComponentDefinition[] = [
   i2cModule(
     'comp.bme280', 'Environmental Sensor (BME280)', 'bme280',
-    'Bosch BME280: temperature, pressure and humidity over I²C. It publishes the raw ADC counts and a real calibration set, so a standard BME280 library runs the datasheet compensation and arrives back at the values set here. Its chip id is 0x60, distinct from a BMP280 — a driver that checks will tell them apart. Conversion timing, oversampling and IIR filtering are stored and read back but do not change the result.',
+    'Bosch BME280: temperature, pressure and humidity over I²C. It publishes the raw ADC counts and a real calibration set, so a standard BME280 library runs the datasheet compensation and arrives back at the values set here. Its chip id is 0x60, distinct from a BMP280: a driver that checks will tell them apart. Conversion timing, oversampling and IIR filtering are stored and read back but do not change the result.',
     [
       { key: 'temperature', label: 'Temperature', kind: 'number', default: 22, unit: '°C', min: -40, max: 85 },
       { key: 'pressure', label: 'Pressure', kind: 'number', default: 1013, unit: 'hPa', min: 300, max: 1100 },
@@ -190,7 +190,7 @@ export const I2C_SENSOR_DEFS: ComponentDefinition[] = [
   ),
   i2cModule(
     'comp.sht31', 'Temperature/Humidity Sensor (SHT31)', 'sht31',
-    'Sensirion SHT31 over I²C. Command-driven rather than register-mapped, and every data pair carries a real CRC-8 that the driver checks — a wrong checksum makes a reading fail here exactly as it would on hardware. The heater bit is stored and reported but does not warm the sensor.',
+    'Sensirion SHT31 over I²C. Command-driven rather than register-mapped, and every data pair carries a real CRC-8 that the driver checks: a wrong checksum makes a reading fail here exactly as it would on hardware. The heater bit is stored and reported but does not warm the sensor.',
     [
       { key: 'temperature', label: 'Temperature', kind: 'number', default: 22, unit: '°C', min: -40, max: 125 },
       { key: 'humidity', label: 'Humidity', kind: 'number', default: 45, unit: '%RH', min: 0, max: 100 },
@@ -226,7 +226,7 @@ export const LCD2004: ComponentDefinition = {
   simulationAdapterId: 'sim.lcd2004',
   supportLevel: 'simulated',
   description:
-    'Twenty-column, four-row character LCD on a PCF8574 I²C backpack. The same HD44780 controller as the 1602, so the same libraries drive it — including the quirk that row three continues row one in DDRAM, which is why text written past column 20 reappears on line three.',
+    'Twenty-column, four-row character LCD on a PCF8574 I²C backpack. The same HD44780 controller as the 1602, so the same libraries drive it: including the quirk that row three continues row one in DDRAM, which is why text written past column 20 reappears on line three.',
   isBoard: false,
 };
 
@@ -308,9 +308,9 @@ function expander(
 
 export const EXPANDER_DEFS: ComponentDefinition[] = [
   expander('comp.pcf8574', 'PCF8574 (8-bit I²C expander)', 8,
-    'Eight extra GPIOs over I²C. There is no direction register: writing a 1 releases the pin to a weak pull-up rather than driving it high, which is why you write 1 to a pin before reading it as an input — and why a button can then pull that pin low. Writing a 0 pulls firmly low, and such a pin reads low whatever is outside it.'),
+    'Eight extra GPIOs over I²C. There is no direction register: writing a 1 releases the pin to a weak pull-up rather than driving it high, which is why you write 1 to a pin before reading it as an input, and why a button can then pull that pin low. Writing a 0 pulls firmly low, and such a pin reads low whatever is outside it.'),
   expander('comp.pcf8575', 'PCF8575 (16-bit I²C expander)', 16,
     'Sixteen extra GPIOs over I²C. The PCF8574 with a second byte: the same quasi-bidirectional pins and the same write-1-to-read rule, written and read low byte first.'),
   expander('comp.mcp23017', 'MCP23017 (16-bit I²C expander)', 16,
-    'Sixteen GPIOs with real direction control, configurable pull-ups, polarity inversion and interrupt-on-change. Unlike a PCF8574 an output here drives both ways and an input is genuinely high impedance. Writing GPIOA/B writes the output latch, and reading INTCAP clears the interrupt. BANK=1 addressing and interrupt-on-compare are not modelled.'),
+    'Sixteen GPIOs with real direction control, configurable pull-ups, polarity inversion and interrupt-on-change. Unlike a PCF8574 an output here drives both ways and an input is high impedance. Writing GPIOA/B writes the output latch, and reading INTCAP clears the interrupt. BANK=1 addressing and interrupt-on-compare are not modelled.'),
 ];

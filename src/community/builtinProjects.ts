@@ -107,7 +107,7 @@ void loop() {
     title: 'Plant thirst alarm',
     description:
       'A soil probe in the pot and a buzzer that chirps when it dries out. These probes read HIGH when dry, ' +
-      'which catches everyone out once — set the moisture low in the inspector to hear it.',
+      'which catches everyone out once: set the moisture low in the inspector to hear it.',
     author: 'anonymous',
     tags: ['plants', 'sensors', 'buzzer'],
     baseLikes: 31,
@@ -164,7 +164,7 @@ void loop() {
     id: 'cp_reaction_timer',
     title: 'Reaction timer',
     description:
-      'The LED lights, you hit the button, the sketch tells you how long you took. millis() and a busy-wait — ' +
+      'The LED lights, you hit the button, the sketch tells you how long you took. millis() and a busy-wait: ' +
       'about the smallest game there is. Press the button on the canvas when the LED comes on.',
     author: 'anonymous',
     tags: ['game', 'button', 'beginner'],
@@ -228,7 +228,7 @@ void loop() {
     title: 'Fever check thermometer',
     description:
       'An LM35 and two LEDs: green under 37.5 °C, red at or above. The conversion is the LM35\'s 10 mV per degree ' +
-      'and nothing else. Set the temperature in the inspector — try 39.',
+      'and nothing else. Set the temperature in the inspector: try 39.',
     author: 'anonymous',
     tags: ['temperature', 'lm35', 'health'],
     baseLikes: 24,
@@ -514,7 +514,7 @@ void loop() {
     title: 'Five-LED bubble level',
     description:
       'An MPU6050 as a spirit level: pitch from the accelerometer with the usual atan2, shown as a "bubble" ' +
-      'that slides along five LEDs. Tilt it with the Pitch slider in the inspector. Raw registers, no library — ' +
+      'that slides along five LEDs. Tilt it with the Pitch slider in the inspector. Raw registers, no library: ' +
       'waking the chip is one write to 0x6B.',
     author: 'anonymous',
     tags: ['mpu6050', 'i2c', 'tilt'],

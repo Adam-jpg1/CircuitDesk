@@ -139,7 +139,7 @@ export class AVRRunner {
     }
     if (highest >= profile.flashBytes) {
       throw new FirmwareRejectedError(
-        `Firmware addresses flash byte 0x${highest.toString(16)} but ${profile.mcu} has only ${profile.flashBytes} bytes of flash — refusing to run firmware built for a different MCU.`,
+        `Firmware addresses flash byte 0x${highest.toString(16)} but ${profile.mcu} has only ${profile.flashBytes} bytes of flash: refusing to run firmware built for a different MCU.`,
       );
     }
     const program = new Uint8Array(profile.flashBytes);

@@ -340,7 +340,7 @@ export class CanBus {
       }
       if (starters > 1) {
         this.arbitrations++;
-        this.note(`${starters} nodes started in the same bit — arbitrating`);
+        this.note(`${starters} nodes started in the same bit: arbitrating`);
       }
     }
 
@@ -596,7 +596,7 @@ export class CanBus {
     const nodes = [...this.nodes.values()];
     return {
       status:
-        `CAN bus — ${nodes.length} node(s), ${this.bitsStepped} bit(s), ` +
+        `CAN bus: ${nodes.length} node(s), ${this.bitsStepped} bit(s), ` +
         `${this.arbitrations} arbitration(s), bus ${this.busIdle ? 'idle' : 'busy'}`,
       log: [...this.log],
     };

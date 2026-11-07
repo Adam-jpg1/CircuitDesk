@@ -210,7 +210,7 @@ export class Eeprom24cDevice implements I2cDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `24C256 EEPROM @0x${this.address.toString(16)} (32 KiB) — ` +
+        `24C256 EEPROM @0x${this.address.toString(16)} (32 KiB): ` +
         `${this.busy ? 'write cycle in progress' : 'ready'}, ${this.dirtyPages.size} page(s) written`,
       log: [...this.log],
     };

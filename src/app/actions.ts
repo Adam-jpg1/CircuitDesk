@@ -25,7 +25,7 @@ export async function compileAction(run: boolean): Promise<boolean> {
     s.setBottomTab('compiler');
     toast(
       unbuildable[0]?.reason ??
-        'Place a board on the canvas before compiling — there is no default compile target.',
+        'Place a board on the canvas before compiling: there is no default compile target.',
       'error',
     );
     return false;
@@ -53,7 +53,7 @@ export async function compileAction(run: boolean): Promise<boolean> {
     } else {
       toast(
         built.length === 1
-          ? `${built[0].boardName} — build succeeded (${built[0].fqbn})`
+          ? `${built[0].boardName}: build succeeded (${built[0].fqbn})`
           : `Built ${built.length} targets: ${built.map((b) => b.boardName).join(', ')}`,
         'success',
       );
@@ -118,7 +118,7 @@ export function validateAction(): void {
   const warnings = issues.filter((i) => i.severity === 'warning').length;
   toast(
     issues.length === 0
-      ? 'Validation passed — no issues found.'
+      ? 'Validation passed: no issues found.'
       : `Validation: ${errors} error(s), ${warnings} warning(s).`,
     errors > 0 ? 'error' : issues.length === 0 ? 'success' : 'info',
   );

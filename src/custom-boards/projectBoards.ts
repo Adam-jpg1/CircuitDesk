@@ -84,7 +84,7 @@ export function removeEmbeddedBoard(
       removed: false,
       reason:
         `${inUse.length} board instance(s) on the canvas still use this definition. ` +
-        'Delete them first — removing the definition would leave them unresolvable.',
+        'Delete them first: removing the definition would leave them unresolvable.',
     };
   }
   const before = project.customDefinitions.length;

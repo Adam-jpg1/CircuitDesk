@@ -328,7 +328,7 @@ export class EpaperDevice implements SpiDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `E-paper ${EPAPER_WIDTH}x${EPAPER_HEIGHT} — ` +
+        `E-paper ${EPAPER_WIDTH}x${EPAPER_HEIGHT}: ` +
         `${this.isBusy ? 'refreshing' : this.sleeping ? 'asleep' : 'idle'}, ` +
         `${this.refreshes} refresh(es), ${this.shownPixelCount} dark pixel(s) shown, ` +
         `${this.ramBytes} byte(s) written to RAM` +

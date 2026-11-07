@@ -152,7 +152,7 @@ export class Esp01Device implements UartPeripheral {
     } else {
       this.outbound = [];
       this.leave();
-      this.note('held in reset — CH_PD low or RST asserted');
+      this.note('held in reset: CH_PD low or RST asserted');
     }
   }
 
@@ -179,7 +179,7 @@ export class Esp01Device implements UartPeripheral {
     // of range would.
     if (this.joined) {
       this.leave();
-      this.note('the access point changed — association dropped');
+      this.note('the access point changed: association dropped');
     }
   }
 
@@ -427,7 +427,7 @@ export class Esp01Device implements UartPeripheral {
     }
     if ((type ?? '').toUpperCase() !== 'TCP') {
       this.refusedConnections++;
-      this.note(`AT+CIPSTART "${type}" — only TCP is simulated`);
+      this.note(`AT+CIPSTART "${type}"only TCP is simulated`);
       return this.reply('ERROR');
     }
     if (!host || !/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
@@ -443,7 +443,7 @@ export class Esp01Device implements UartPeripheral {
       this.note(
         peer && peer !== this
           ? `${host} is on the network but not listening on port ${port}`
-          : `no module at ${host} — only ESP-01s on this canvas, joined to "${this.ap.ssid}", are reachable`,
+          : `no module at ${host}, only ESP-01s on this canvas, joined to "${this.ap.ssid}", are reachable`,
       );
       this.reply('ERROR');
       return this.reply('CLOSED');
@@ -602,10 +602,10 @@ export class Esp01Device implements UartPeripheral {
         : 'not associated';
     return {
       status:
-        `ESP-01 — ${state}, mode ${this.mode}, ${this.config.baud} baud, ` +
+        `ESP-01: ${state}, mode ${this.mode}, ${this.config.baud} baud, ` +
         `${this.commands} AT command(s)` +
         (this.refusedConnections
-          ? `, ${this.refusedConnections} connection attempt(s) refused — only modules on this canvas are reachable`
+          ? `, ${this.refusedConnections} connection attempt(s) refused, only modules on this canvas are reachable`
           : ''),
       log: [...this.log],
     };

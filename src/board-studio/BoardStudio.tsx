@@ -53,7 +53,7 @@ function StudioBody() {
           <div>
             <h2>Board Studio</h2>
             <p className="studio-muted">
-              {draft ? `${draft.identity.name} — revision ${draft.revision}` : 'Bring in a board CircuitDesk does not have.'}
+              {draft ? `${draft.identity.name}, revision ${draft.revision}` : 'Bring in a board CircuitDesk does not have.'}
             </p>
           </div>
           <div className="studio-modes">
@@ -164,7 +164,7 @@ function StartStep() {
           const file = e.target.files?.[0];
           if (!file) return;
           const ok = useStudioStore.getState().openBundle(await file.text());
-          setMessage(ok ? null : 'That file could not be opened as a board — the reasons are on the right.');
+          setMessage(ok ? null : 'That file could not be opened as a board. The reasons are on the right.');
           e.target.value = '';
         }}
       />
@@ -215,7 +215,7 @@ function IdentityStep() {
         <span>Who made it</span>
         <input
           value={draft.identity.creator ?? ''}
-          placeholder="Optional — the maker, if it is not you"
+          placeholder="Optional: the maker, if it is not you"
           onChange={(e) => useStudioStore.getState().setIdentity({ creator: e.target.value })}
         />
       </label>
@@ -223,7 +223,7 @@ function IdentityStep() {
         <span>Hardware version</span>
         <input
           value={draft.identity.hardwareVersion ?? ''}
-          placeholder="Optional — “Rev C”, the version printed on the board"
+          placeholder="Optional: “Rev C”, the version printed on the board"
           onChange={(e) => useStudioStore.getState().setIdentity({ hardwareVersion: e.target.value })}
         />
       </label>
@@ -339,8 +339,7 @@ function ArtworkStep() {
       <p className="studio-muted">
         Artwork is rebuilt from an allowlist of drawing instructions before it is stored: shapes, paths, text and
         gradients survive; scripts, external references and anything that could load something do not. That is why a
-        file may come back with parts removed — and why the parts that were removed are listed rather than dropped
-        quietly.
+        file may come back with parts removed, and the removed parts are listed.
       </p>
       {draft.outline.artworkSvg && (
         <div className="studio-row" style={{ alignItems: 'center' }}>
@@ -364,8 +363,8 @@ function ProcessorStep() {
     <div className="studio-step-body">
       <h3>What chip is on it?</h3>
       <p className="studio-muted">
-        This is the one question nothing can answer for you, and the one CircuitDesk will never guess. Everything that
-        follows — what compiles, what runs, which pads your pins can reach — comes from this answer.
+        CircuitDesk cannot work this out for you. What compiles, what runs and which pads your pins can reach all
+        follow from this answer.
       </p>
 
       {suggestions.length > 0 && (
@@ -376,7 +375,7 @@ function ProcessorStep() {
             return (
               <div key={s.processorProfileId} className="studio-suggest-row">
                 <span>
-                  {profile?.name ?? s.processorProfileId} — {s.evidence}{' '}
+                  {profile?.name ?? s.processorProfileId}: {s.evidence}{' '}
                   <span className="badge">{s.confidence}</span>
                 </span>
                 <button className="btn sm" onClick={() => useStudioStore.getState().setProcessor(s.processorProfileId)}>
@@ -386,7 +385,7 @@ function ProcessorStep() {
             );
           })}
           <p className="studio-muted">
-            A suggestion, not a decision — nothing is applied until you press it.
+            A suggestion only. Nothing is applied until you press it.
           </p>
         </div>
       )}
@@ -440,8 +439,8 @@ function PinsStep() {
     <div className="studio-step-body">
       <h3>What pins does it have?</h3>
       <p className="studio-muted">
-        A pin has a name you print on the board and — if there is a chip — the processor pad it reaches. Those are two
-        different things on purpose: firmware is written against the pad, and you wire to the name.
+        A pin has the name printed on the board and, if there is a chip, the processor pad it reaches. Firmware uses
+        the pad; you wire to the name.
       </p>
 
       <div className="studio-row">
@@ -465,7 +464,7 @@ function PinsStep() {
       </div>
       <p className="studio-muted">
         A label column on its own is enough. Add a processor-pin column to map pads, and x/y columns if your file has
-        positions — otherwise you place them in the next step.
+        positions. Otherwise you place them in the next step.
       </p>
       {summary && <p data-testid="studio-csv-summary">{summary}</p>}
       {rows.length > 0 && (
@@ -522,7 +521,7 @@ function PinEditorTable() {
                   data-testid={`studio-pad-${pin.id}`}
                   onChange={(e) => useStudioStore.getState().updatePin(pin.id, { pad: e.target.value || null })}
                 >
-                  <option value="">— not connected to the chip —</option>
+                  <option value="">Not connected to the chip</option>
                   {processor.pads.map((pad) => <option key={pad} value={pad}>{pad}</option>)}
                 </select>
               ) : (
@@ -556,8 +555,8 @@ function PipelineStep() {
     <div className="studio-step-body">
       <h3>How is it built, and how is it run?</h3>
       <p className="studio-muted">
-        Already answered by the chip you chose. Change it if your board needs a different target — and if the
-        combination cannot work, it will say so rather than fail later inside a compiler.
+        Already answered by the chip you chose. Change it if your board needs a different target. If the combination
+        cannot work, you will be told here.
       </p>
 
       <label className="studio-field">
@@ -603,8 +602,7 @@ function PipelineStep() {
       <p className="studio-muted">
         A list rather than a text box, and a short one: every entry is a target for the same chip, because a target for
         a different chip would produce firmware this board's runtime cannot execute. The compiler service checks the
-        same rule again on its own side, and passes the value to the toolchain as an argument rather than as a command —
-        an FQBN never reaches a shell.
+        same rule again and passes the value to the toolchain as an argument, never through a shell.
       </p>
 
       {mismatches.length > 0 && (
@@ -631,7 +629,7 @@ function ReviewStep() {
       </p>
       <table className="kv-table">
         <tbody>
-          <tr><th>Board</th><td>{draft.identity.name}{draft.identity.creator ? ` — ${draft.identity.creator}` : ''}</td></tr>
+          <tr><th>Board</th><td>{draft.identity.name}{draft.identity.creator ? `, by ${draft.identity.creator}` : ''}</td></tr>
           <tr><th>Size</th><td>{draft.outline.widthMm} × {draft.outline.heightMm} mm, {draft.pins.length} pins</td></tr>
           <tr><th>Processor</th><td>{capability?.processor}</td></tr>
           <tr><th>Compiles with</th><td>{capability?.compile}</td></tr>
@@ -642,7 +640,7 @@ function ReviewStep() {
           </tr>
           <tr>
             <th>Simulated</th>
-            <td>{capability?.supported.length ? capability.supported.join(', ') : 'nothing — this board does not execute firmware'}</td>
+            <td>{capability?.supported.length ? capability.supported.join(', ') : 'nothing: this board does not run firmware'}</td>
           </tr>
           <tr><th>Not simulated</th><td>{capability?.notSimulated.join('; ')}</td></tr>
         </tbody>
@@ -735,7 +733,7 @@ function SaveControls() {
   const save = async () => {
     const ready = useStudioStore.getState().readyToSave();
     if (!ready) {
-      setMessage('There is something to fix first — the list is on the right.');
+      setMessage('There is something to fix first. The list is on the right.');
       return;
     }
     const { entry, problems: entryProblems } = libraryEntryFor(ready);
@@ -752,7 +750,7 @@ function SaveControls() {
     const ready = useStudioStore.getState().readyToSave();
     const editor = useEditorStore.getState();
     if (!ready || !editor.project) {
-      setMessage('There is something to fix first — the list is on the right.');
+      setMessage('There is something to fix first. The list is on the right.');
       return;
     }
     editor.mutateCircuit((p) => {
@@ -767,7 +765,7 @@ function SaveControls() {
   const exportBundle = () => {
     const ready = useStudioStore.getState().readyToSave();
     if (!ready) {
-      setMessage('There is something to fix first — the list is on the right.');
+      setMessage('There is something to fix first. The list is on the right.');
       return;
     }
     const { json, problems: exportProblems } = exportBoardBundle(ready);

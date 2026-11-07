@@ -134,14 +134,14 @@ export function parseEspApplicationImage(
   // so a board mix-up is reported as a board mix-up.
   if (buffer[0] === ':'.charCodeAt(0)) {
     throw new EspImageRejectedError(
-      'This is an AVR Intel HEX file, not an Espressif image. CircuitDesk will not run AVR firmware on an ESP32-C3 — recompile for the board on the canvas.',
+      'This is an AVR Intel HEX file, not an Espressif image. CircuitDesk will not run AVR firmware on an ESP32-C3: recompile for the board on the canvas.',
     );
   }
   if (buffer.length >= 4) {
     const first = new DataView(buffer.buffer, buffer.byteOffset, 4).getUint32(0, true);
     if (first === 0x0a324655) {
       throw new EspImageRejectedError(
-        'This is an RP2040 UF2 file, not an Espressif image. CircuitDesk will not run RP2040 firmware on an ESP32-C3 — recompile for the board on the canvas.',
+        'This is an RP2040 UF2 file, not an Espressif image. CircuitDesk will not run RP2040 firmware on an ESP32-C3: recompile for the board on the canvas.',
       );
     }
   }
@@ -163,7 +163,7 @@ export function parseEspApplicationImage(
   if (chipId !== ESP_CHIP_ID[expectChip]) {
     const actual = CHIP_NAMES[chipId] ?? `unknown chip id 0x${chipId.toString(16)}`;
     throw new EspImageRejectedError(
-      `This image was built for ${actual}, not ${expectChip}. CircuitDesk will not execute firmware built for a different chip — recompile for the board on the canvas.`,
+      `This image was built for ${actual}, not ${expectChip}. CircuitDesk will not execute firmware built for a different chip: recompile for the board on the canvas.`,
     );
   }
   if (segmentCount === 0 || segmentCount > MAX_SEGMENTS) {
@@ -184,7 +184,7 @@ export function parseEspApplicationImage(
 
     if (offset + length > buffer.length) {
       throw new EspImageRejectedError(
-        `Segment ${i} claims ${length} bytes but only ${buffer.length - offset} remain — the image is truncated.`,
+        `Segment ${i} claims ${length} bytes but only ${buffer.length - offset} remain: the image is truncated.`,
       );
     }
     // Load addresses below 0x10000000 are reserved for things that are not
@@ -237,6 +237,6 @@ export function decodeBase64Image(data: string): Uint8Array {
     for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
     return out;
   } catch {
-    throw new EspImageRejectedError('The compiled firmware could not be decoded — the compiler response was corrupt.');
+    throw new EspImageRejectedError('The compiled firmware could not be decoded: the compiler response was corrupt.');
   }
 }

@@ -301,7 +301,7 @@ function StatusBar() {
       <span>Zoom {(view.zoom * 100).toFixed(0)}%</span>
       <span className={status === 'running' ? 'sim-running' : status === 'paused' ? 'sim-paused' : ''}>
         {status === 'running'
-          ? `Simulating — ${(simTimeMs / 1000).toFixed(1)} s @ ${(speedFactor * 100).toFixed(0)}%`
+          ? `Simulating: ${(simTimeMs / 1000).toFixed(1)} s @ ${(speedFactor * 100).toFixed(0)}%`
           : status === 'paused'
             ? `Paused @ ${(simTimeMs / 1000).toFixed(2)} s`
             : status === 'error'

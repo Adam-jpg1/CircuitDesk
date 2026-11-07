@@ -132,7 +132,7 @@ export function Toolbar({ phone = false }: { phone?: boolean }) {
 
       <div className="sep" />
       <button className={`icon-btn ${tool === 'select' ? 'active' : ''}`} title="Select (V)" onClick={() => s.setTool('select')}><CursorIcon /></button>
-      <button className={`icon-btn ${tool === 'wire' ? 'active' : ''}`} title="Wire (W) — click a pin to start" onClick={() => s.setTool('wire')}><WireIcon /></button>
+      <button className={`icon-btn ${tool === 'wire' ? 'active' : ''}`} title="Wire (W): click a pin to start" onClick={() => s.setTool('wire')}><WireIcon /></button>
       <button className={`icon-btn ${tool === 'pan' ? 'active' : ''}`} title="Pan (H, or hold Space)" onClick={() => s.setTool('pan')}><PanIcon /></button>
       <button className="icon-btn" title="Rotate selection (R)" disabled={selection.componentIds.length === 0} onClick={() => s.rotateSelection()}><RotateIcon /></button>
       <button className="icon-btn" title="Delete selection (Del)" disabled={!hasSelection} onClick={() => s.deleteSelection()}><TrashIcon /></button>
@@ -146,7 +146,7 @@ export function Toolbar({ phone = false }: { phone?: boolean }) {
       <button className="btn sm" title="Run electrical + code validation" onClick={validateAction}>
         <CheckShieldIcon style={{ width: 14, height: 14 }} /> Validate
       </button>
-      <button className="btn sm" title="Compile with the real toolchain (Arduino CLI / avr-g++)" disabled={compiling} onClick={() => void compileAction(false)}>
+      <button className="btn sm" title="Compile with the board's toolchain (arduino-cli)" disabled={compiling} onClick={() => void compileAction(false)}>
         <HammerIcon style={{ width: 14, height: 14 }} /> {compiling ? stageLabel(compileStage) : 'Compile'}
       </button>
       {compileStage && <CompileStageDetail stage={compileStage} />}
@@ -155,14 +155,14 @@ export function Toolbar({ phone = false }: { phone?: boolean }) {
       {simStatus === 'running' ? (
         <button className="icon-btn active" title="Pause simulation" onClick={() => simulationController.pause()}><PauseIcon /></button>
       ) : (
-        <button className="icon-btn" title="Run (Ctrl+Enter) — compiles the sketch if there is one, then runs the circuit" disabled={compiling} onClick={runAction}>
+        <button className="icon-btn" title="Run (Ctrl+Enter): compiles the sketch if there is one, then runs the circuit" disabled={compiling} onClick={runAction}>
           <PlayIcon style={{ color: '#3fb950' }} />
         </button>
       )}
       <button className="icon-btn" title="Step ~1 ms of CPU time" disabled={simStatus === 'stopped' || simStatus === 'error'} onClick={() => simulationController.step()}><StepIcon /></button>
-      <button className="icon-btn" title="Reset — every board and part goes back to how it was before Run, and the sketch starts again" disabled={!simulationController.hasFirmware && simStatus === 'stopped'} onClick={() => void simulationController.reset()}><ResetIcon /></button>
+      <button className="icon-btn" title="Reset: every board and part goes back to how it was before Run, and the sketch starts again" disabled={!simulationController.hasFirmware && simStatus === 'stopped'} onClick={() => void simulationController.reset()}><ResetIcon /></button>
       <button className="icon-btn" title="Stop simulation" disabled={simStatus === 'stopped'} onClick={() => simulationController.stop()}><StopIcon /></button>
-      <button className="icon-btn" title={soundOn ? 'Sound on — speakers and buzzers play. Click to mute' : 'Sound off. Click to hear speakers and buzzers'} aria-label={soundOn ? 'Mute' : 'Unmute'} onClick={toggleSound}>
+      <button className="icon-btn" title={soundOn ? 'Sound on: speakers and buzzers play. Click to mute' : 'Sound off. Click to hear speakers and buzzers'} aria-label={soundOn ? 'Mute' : 'Unmute'} onClick={toggleSound}>
         {soundOn ? <SoundIcon /> : <MutedIcon />}
       </button>
 
@@ -181,7 +181,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
   if (!project) return null;
   const name = project.name.replace(/[^A-Za-z0-9_-]+/g, '_');
   const items: { label: string; desc: string; run: () => void }[] = [
-    { label: 'CircuitDesk project (.cdproj.json)', desc: 'Full project — circuit, code, tests, custom parts. Re-importable.', run: () => exportProjectJson(project) },
+    { label: 'CircuitDesk project (.cdproj.json)', desc: 'Full project: circuit, code, tests and custom parts. Re-importable.', run: () => exportProjectJson(project) },
     { label: 'ZIP project package', desc: 'Project JSON + code files + BOM + pin map + wiring/validation/test reports.', run: () => void exportProjectZip(project, testResultsCache) },
     { label: 'Bill of materials (BOM CSV)', desc: 'Part list with quantities and properties.', run: () => downloadFile(`${name}_bom.csv`, buildBomCsv(project), 'text/csv') },
     { label: 'Pin map (CSV)', desc: 'Every board pin with position, type, voltage and capabilities.', run: () => downloadFile(`${name}_pinmap.csv`, buildPinMapCsv(project), 'text/csv') },
@@ -191,7 +191,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
     { label: 'Project image (SVG)', desc: 'Layout snapshot of the canvas.', run: () => exportProjectImage(project) },
   ];
   return (
-    <Modal title={`Export — ${project.name}`} onClose={onClose} width={560}>
+    <Modal title={`Export ${project.name}`} onClose={onClose} width={560}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {items.map((item) => (
           <button
@@ -225,11 +225,11 @@ function ExportModal({ onClose }: { onClose: () => void }) {
 function stageLabel(stage: CompileStage | null): string {
   switch (stage?.step) {
     case 'preparing': return 'Preparing…';
-    case 'queued': return 'Queued — compiler busy…';
+    case 'queued': return 'Queued, compiler busy…';
     case 'compiling': return 'Compiling…';
     case 'linking': return 'Linking…';
     case 'starting': return 'Starting…';
-    case 'cached': return 'Ready — cached';
+    case 'cached': return 'Ready (cached)';
     default: return 'Compiling…';
   }
 }

@@ -167,7 +167,7 @@ export function KeyMatrixOverlay({ instanceId, onClose }: { instanceId: string; 
         <strong>{def.name}</strong>
         <span className="keymatrix-note">
           {running
-            ? `${downCount} key${downCount === 1 ? '' : 's'} down — closing matrix crossings, not sending characters`
+            ? `${downCount} key${downCount === 1 ? '' : 's'} down. They close matrix crossings; they do not type characters`
             : 'Start the simulation to close contacts'}
         </span>
         <label className="keymatrix-toggle">
@@ -201,7 +201,7 @@ export function KeyMatrixOverlay({ instanceId, onClose }: { instanceId: string; 
                 }
               }}
             >
-              <title>{`${keyCapDescription(k.cap)} — row/column crossing ${k.key}`}</title>
+              <title>{`${keyCapDescription(k.cap)}, row/column crossing ${k.key}`}</title>
               <rect
                 x={k.x}
                 y={k.y + (down ? k.h * 0.05 : 0)}

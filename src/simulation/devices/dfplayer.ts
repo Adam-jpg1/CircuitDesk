@@ -250,7 +250,7 @@ export class DfPlayerDevice implements UartPeripheral {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `DFPlayer Mini — ${this.state}${this.track ? ` track ${this.track}` : ''}, ` +
+        `DFPlayer Mini: ${this.state}${this.track ? ` track ${this.track}` : ''}, ` +
         `volume ${this.volume}/30, ${this.frames} frame(s)` +
         (this.badChecksums ? `, ${this.badChecksums} bad checksum(s)` : ''),
       log: [...this.log],

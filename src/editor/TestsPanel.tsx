@@ -34,7 +34,7 @@ export function TestsPanel() {
     if (stale) {
       toast(
         compile?.success && compile.boardId && compile.boardId !== currentBoardId
-          ? 'The cached build targets a different board — recompiling before running tests…'
+          ? 'The cached build is for a different board. Recompiling before running tests…'
           : 'Compiling before running tests…',
       );
       const ok = await compileAction(false);
@@ -45,7 +45,7 @@ export function TestsPanel() {
     const boardId = compile?.boardId;
     if (!data || !boardId) return null;
     if (currentBoardId !== undefined && boardId !== currentBoardId) {
-      toast('Firmware does not match the board on the canvas — tests were not run.', 'error');
+      toast('The firmware does not match the board on the canvas, so the tests were not run.', 'error');
       return null;
     }
     // Everything the engine needs, not just the executable image: an ESP part
@@ -138,7 +138,7 @@ export function TestsPanel() {
                 <div style={{ marginTop: 5 }}>
                   {r.assertionResults.map((a) => (
                     <div key={a.assertionId} className={`assertion-row ${a.passed ? 'pass' : 'fail'}`}>
-                      {a.expected} — <span style={{ color: a.passed ? 'var(--text-2)' : '#ff8a80' }}>{a.actual}</span>
+                      {a.expected}: <span style={{ color: a.passed ? 'var(--text-2)' : '#ff8a80' }}>{a.actual}</span>
                     </div>
                   ))}
                   {r.message && <div className="assertion-row fail">{r.message}</div>}

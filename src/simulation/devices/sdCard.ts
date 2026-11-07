@@ -360,7 +360,7 @@ export class SdCardDevice implements SpiDevice {
         this.initialised = false;
         this.acmdPolls = 0;
         this.sawCmd0 = true;
-        this.note('CMD0 — entered SPI idle state');
+        this.note('CMD0: entered SPI idle state');
         this.respond([R1_IDLE]);
         return;
 
@@ -443,7 +443,7 @@ export class SdCardDevice implements SpiDevice {
 
       default:
         this.illegalCommands.push(cmd);
-        this.note(`CMD${cmd} is not implemented — answered illegal command`);
+        this.note(`CMD${cmd} is not implemented: answered illegal command`);
         this.respond([(this.idle ? R1_IDLE : R1_READY) | R1_ILLEGAL_COMMAND]);
     }
   }
@@ -453,7 +453,7 @@ export class SdCardDevice implements SpiDevice {
     // A card that has not completed ACMD41 still reports the idle bit, which
     // is what makes "SD.begin() before init" fail on real hardware.
     this.respond([R1_IDLE]);
-    this.note('data command refused — card is still in idle state');
+    this.note('data command refused: card is still in idle state');
     return false;
   }
 
@@ -493,7 +493,7 @@ export class SdCardDevice implements SpiDevice {
     const stored = this.blocks.has(this.writeTarget);
     if (!stored && this.blocks.size >= SD_MAX_STORED_BLOCKS) {
       this.storageFull = true;
-      this.note('write rejected — virtual card storage limit reached');
+      this.note('write rejected: virtual card storage limit reached');
       this.phase = 'command';
       return 0x0d; // data rejected (write error)
     }
@@ -556,7 +556,7 @@ export class SdCardDevice implements SpiDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `SD card (4 MiB SDSC, FAT16) — ${this.initialised ? 'initialised' : 'idle / not initialised'}, ` +
+        `SD card (4 MiB SDSC, FAT16): ${this.initialised ? 'initialised' : 'idle / not initialised'}, ` +
         `${this.blocks.size} block(s) written`,
       log: [...this.log],
     };

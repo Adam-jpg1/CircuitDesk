@@ -279,11 +279,11 @@ function parseSvgBoard(text: string, fileName: string): ImportParseResult {
     if (vb && vb.length === 4) {
       widthMm = vb[2] / 3.7795;
       heightMm = vb[3] / 3.7795;
-      warnings.push('The SVG has no physical units — dimensions estimated from the viewBox at 96 dpi. Adjust them in the mapping step.');
+      warnings.push('The SVG has no physical units: dimensions estimated from the viewBox at 96 dpi. Adjust them in the mapping step.');
     } else {
       widthMm = 50;
       heightMm = 35;
-      warnings.push('The SVG declares no size — defaulting to 50×35 mm. Adjust in the mapping step.');
+      warnings.push('The SVG declares no size: defaulting to 50×35 mm. Adjust in the mapping step.');
     }
   }
   return {
@@ -347,7 +347,7 @@ async function parsePartBundle(entries: { path: string; entry: JSZip.JSZipObject
 
   const svgEntry = findFile('board.svg') ?? entries.find((e) => e.path.toLowerCase().endsWith('.svg'));
   const svg = svgEntry ? sanitizeSvg(await svgEntry.entry.async('text')) : undefined;
-  if (!svgEntry) warnings.push('Optional board.svg is missing — the part will use a generic body.');
+  if (!svgEntry) warnings.push('Optional board.svg is missing: the part will use a generic body.');
 
   const csvEntry = findFile('pinmap.csv') ?? entries.find((e) => e.path.toLowerCase().endsWith('.csv'));
   let pins: ImportedPin[] = [];
@@ -356,7 +356,7 @@ async function parsePartBundle(entries: { path: string; entry: JSZip.JSZipObject
     csv = parseCsvText(await csvEntry.entry.async('text'));
     pins = autoMapCsvPins(csv.headers, csv.rows);
   } else {
-    warnings.push('Optional pinmap.csv is missing — place pins manually in the mapping step.');
+    warnings.push('Optional pinmap.csv is missing: place pins manually in the mapping step.');
   }
   if (!findFile('datasheet.pdf')) warnings.push('Optional datasheet.pdf not included.');
 

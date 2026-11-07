@@ -225,7 +225,7 @@ export class Ds3231Device extends RegisterI2cDevice {
     const pad = (n: number) => String(n).padStart(2, '0');
     return {
       status:
-        `DS3231 @0x${this.address.toString(16)} — ` +
+        `DS3231 @0x${this.address.toString(16)}: ` +
         `${t.year}-${pad(t.month)}-${pad(t.date)} ${pad(t.hour)}:${pad(t.minute)}:${pad(t.second)}` +
         `${this.hour12Mode ? ' (12h mode)' : ''}, ${this.temperatureC.toFixed(2)} °C`,
       log: [...this.log],

@@ -202,7 +202,7 @@ export class Ws2812Device implements SimDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `WS2812 x${this.pixelCount} — ${this.frames} frame(s), ${this.litCount} lit` +
+        `WS2812 x${this.pixelCount}: ${this.frames} frame(s), ${this.litCount} lit` +
         (this.malformedPulses ? `, ${this.malformedPulses} malformed pulse(s)` : '') +
         (this.shortFrames ? `, ${this.shortFrames} short frame(s)` : '') +
         (this.overflowBits ? `, ${this.overflowBits} bit(s) past the end of this part` : ''),

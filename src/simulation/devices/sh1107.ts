@@ -243,7 +243,7 @@ export class Sh1107Device implements I2cDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `SH1107 @0x${this.address.toString(16)} — ${this.displayOn ? 'on' : 'off'}, ` +
+        `SH1107 @0x${this.address.toString(16)}: ${this.displayOn ? 'on' : 'off'}, ` +
         `${this.panel.dataBytes} data bytes, ${this.litPixels} lit pixels` +
         (this.unhandled.length ? `, ${this.unhandledCommands.length} unhandled command(s)` : ''),
       log: [...this.log],

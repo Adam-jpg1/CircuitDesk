@@ -123,7 +123,7 @@ export function CodePanel() {
                 looking like part of the sketch currently on screen. */}
             <button
               onClick={() => s.setActiveFile(f.id)}
-              title={isSketchFile(f) ? undefined : 'Shared by every board — this file goes into all builds'}
+              title={isSketchFile(f) ? undefined : 'Shared by every board: this file goes into all builds'}
             >
               {f.name}
               {!isSketchFile(f) && <span className="tab-note">shared</span>}
@@ -237,7 +237,7 @@ function SketchAssignmentBar() {
           onChange={(e) => s.setActiveBoard(e.target.value || null)}
           aria-label="Board being edited"
         >
-          <option value="">— sketch —</option>
+          <option value="">Choose a sketch</option>
           {boards.map((b) => (
             <option key={b.id} value={b.id}>{boardName(b.id)}</option>
           ))}

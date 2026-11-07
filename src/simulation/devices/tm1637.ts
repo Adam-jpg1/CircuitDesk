@@ -225,7 +225,7 @@ export class Tm1637Device implements SimDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `TM1637 — ${this.displayOn ? `on, brightness ${this.brightness}` : 'off'}, ` +
+        `TM1637: ${this.displayOn ? `on, brightness ${this.brightness}` : 'off'}, ` +
         `${this.bytes} byte(s)` +
         (this.unknown.length ? `, ${this.unhandledBytes.length} unhandled` : ''),
       log: [...this.log],

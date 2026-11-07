@@ -506,7 +506,7 @@ export function CanvasStage() {
         // nothing at all and say nothing — now it says why.
         const target = pinNearTouch(e.clientX, e.clientY, MOUSE_PIN_SNAP_PX);
         if (target) finishWire(target.componentId, target.pinId);
-        else toast('A wire connects at a pin — move to one of the part\'s pins (it lights up green) and click there.', 'info');
+        else toast('A wire connects at a pin. Move to one of the part\'s pins (it lights up green) and click there.', 'info');
         return;
       }
 

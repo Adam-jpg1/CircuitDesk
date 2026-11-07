@@ -80,7 +80,7 @@ export interface PinStateCell {
  */
 export function pinStateCell(row: PinStateRow, snapshot: LivePinSnapshot | null | undefined): PinStateCell {
   if (row.pin === undefined) {
-    return { label: row.label, level: 'adc-only', text: 'ADC', title: 'ADC-only input — no digital pin state' };
+    return { label: row.label, level: 'adc-only', text: 'ADC', title: 'ADC-only input: no digital pin state' };
   }
   const state = snapshot?.states[row.pin];
   if (state === undefined) {
@@ -90,7 +90,7 @@ export function pinStateCell(row: PinStateRow, snapshot: LivePinSnapshot | null 
       text: '—',
       title:
         'No live state for this pin in the running simulation. The firmware currently executing was built for a ' +
-        'different board — recompile for the board on the canvas.',
+        'different board: recompile for the board on the canvas.',
     };
   }
   const duty = snapshot?.duty[row.pin] ?? 0;

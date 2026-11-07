@@ -312,7 +312,7 @@ export class SpiFlashDevice implements SpiDevice {
         if (!this.writeEnabled) {
           // No WEL: the part accepts the bytes on the wire and discards them.
           this.refusedWrites++;
-          this.note('page program refused — write enable not set');
+          this.note('page program refused: write enable not set');
           this.phase = 'idle';
           break;
         }
@@ -348,7 +348,7 @@ export class SpiFlashDevice implements SpiDevice {
   private requireWriteEnable(what: string): boolean {
     if (this.writeEnabled) return true;
     this.refusedWrites++;
-    this.note(`${what} refused — write enable not set`);
+    this.note(`${what} refused: write enable not set`);
     this.phase = 'idle';
     return false;
   }
@@ -414,7 +414,7 @@ export class SpiFlashDevice implements SpiDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `SPI flash W25Q80 (1 MiB) — ${this.busy ? 'busy' : 'ready'}, ` +
+        `SPI flash W25Q80 (1 MiB): ${this.busy ? 'busy' : 'ready'}, ` +
         `WEL ${this.writeEnabled ? 'set' : 'clear'}, ${this.dirtyPages.size} page(s) programmed`,
       log: [...this.log],
     };

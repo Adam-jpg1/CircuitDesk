@@ -164,7 +164,7 @@ export class Mcp3008Device implements SpiDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `MCP3008 — VREF ${this.vref.toFixed(2)} V, last CH${this.channel} = ${this.result}` +
+        `MCP3008: VREF ${this.vref.toFixed(2)} V, last CH${this.channel} = ${this.result}` +
         (this.unwiredReads ? `, ${this.unwiredReads} read(s) of an unwired channel` : ''),
       log: [...this.log],
     };

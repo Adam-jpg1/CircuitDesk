@@ -35,7 +35,7 @@ export const PIN_RENAMES: PinRename[] = [
     fixedIn: '1.1.0',
     reason:
       'The CD4026 has two display-enable pins and this part had one, named for the wrong one. ' +
-      'The model read it with ctx.input(), and blanked the segments when it was low — that is ' +
+      'The model read it with ctx.input(), and blanked the segments when it was low: that is ' +
       'DISPLAY ENABLE IN, which is now what it is called. A wire to the old "deo" was connected ' +
       'to the display-enable input and still is; only the name changed. The buffered output the ' +
       'datasheet calls DEO is a new pin, and no saved project can have been wired to it.',

@@ -67,7 +67,7 @@ function r4Pins(): PinDefinition[] {
   pins.push(
     ...pinRow(
       [
-        analog('A0', 'A0', 5, { description: 'Analog 0 (P014) — also the DAC output' }),
+        analog('A0', 'A0', 5, { description: 'Analog 0 (P014): also the DAC output' }),
         analog('A1', 'A1', 5, { caps: ['analog-in', 'digital-in', 'digital-out', 'interrupt'] }),
         analog('A2', 'A2', 5, { caps: ['analog-in', 'digital-in', 'digital-out', 'interrupt'] }),
         analog('A3', 'A3', 5, { caps: ['analog-in', 'digital-in', 'digital-out', 'interrupt'] }),

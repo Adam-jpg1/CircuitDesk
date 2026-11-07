@@ -4272,7 +4272,7 @@ export class CircuitBinding {
               brightness: 0,
               burnt: true,
               currentMa: amps * 1000,
-              fault: `Burned out — ${Math.round(burnt * 1000)} mA went through it. An LED needs a resistor in series (220–1 kΩ).`,
+              fault: `Burned out: ${Math.round(burnt * 1000)} mA went through it. An LED needs a resistor in series (220–1 kΩ).`,
             });
             break;
           }
@@ -4402,7 +4402,7 @@ export class CircuitBinding {
             currentMa: amps * 1000,
             readout: [terminal !== undefined ? `${terminal.toFixed(2)} V` : 'open', `${(amps * 1000).toFixed(amps < 0.1 ? 1 : 0)} mA`],
             ...(shorted
-              ? { fault: `Short circuit — ${amps.toFixed(1)} A is flowing straight from + to −. Something with resistance has to be in the loop.` }
+              ? { fault: `Short circuit: ${amps.toFixed(1)} A is flowing straight from + to −. Something with resistance has to be in the loop.` }
               : {}),
           });
           break;

@@ -179,7 +179,7 @@ export class Mcp4725Device implements I2cDevice, AnalogDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `MCP4725 @0x${this.address.toString(16)} — code ${this.code}/4095, ` +
+        `MCP4725 @0x${this.address.toString(16)}: code ${this.code}/4095, ` +
         (this.powerDown === 0
           ? `${this.programmedVolts.toFixed(3)} V on VOUT`
           : `powered down (${PULLDOWN_OHMS[this.powerDown] / 1000} k pull-down)`),

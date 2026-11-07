@@ -34,7 +34,7 @@ export function rateLimit(options: { windowMs: number; max: number; name: string
       res.setHeader('Retry-After', String(Math.max(1, retryAfterSec)));
       res.status(429).json({
         success: false,
-        error: `Too many ${options.name} requests — please retry in about ${Math.max(1, retryAfterSec)} seconds.`,
+        error: `Too many ${options.name} requests. Please retry in about ${Math.max(1, retryAfterSec)} seconds.`,
         errorCode: 'RATE_LIMITED',
       });
       return;

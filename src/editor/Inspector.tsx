@@ -232,8 +232,8 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
         <div className="inspector-section">
           <h4>Simulation</h4>
           <div style={{ color: 'var(--text-2)', fontSize: 11.5 }}>
-            {def.supportLevel === 'validation' ? 'Validation only — this part is checked by the validator but not simulated.' :
-             def.supportLevel === 'wiring' ? 'Not simulated — wiring support only.' : 'Visual only.'}
+            {def.supportLevel === 'validation' ? 'Validation only: the validator checks this part, but it is not simulated.' :
+             def.supportLevel === 'wiring' ? 'Not simulated. Wiring support only.' : 'Visual only.'}
           </div>
         </div>
       );
@@ -320,8 +320,8 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
             Open key panel
           </button>
           <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 4 }}>
-            A bigger view of the same keys. Pressing one closes a crossing in the matrix — firmware has to
-            scan for it, exactly as on the bench.
+            A bigger view of the same keys. Pressing one closes a crossing in the matrix, and the firmware has to
+            scan for it, as on a real keypad.
           </div>
         </div>
       )}
@@ -342,7 +342,7 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
       )}
       {adapter === 'sim.servo' && (
         <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
-          Horn angle: <b>{(visuals?.servoAngle ?? 90).toFixed(0)}°</b> — derived from the measured pulse width on the signal pin.
+          Horn angle: <b>{(visuals?.servoAngle ?? 90).toFixed(0)}°</b>, from the measured pulse width on the signal pin.
         </div>
       )}
       {adapter === 'sim.buzzer' && (
@@ -363,7 +363,7 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
       )}
       {adapter === 'sim.speaker' && (
         <div style={{ fontSize: 11.5, color: 'var(--text-1)' }}>
-          Playing: <b>{visuals?.buzzerOn ? `${Math.round(visuals.value ?? 0)} Hz` : 'silent'}</b> — measured from the pin
+          Playing: <b>{visuals?.buzzerOn ? `${Math.round(visuals.value ?? 0)} Hz` : 'silent'}</b>, measured from the pin
           driving it.
         </div>
       )}
@@ -390,7 +390,7 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
             </>
           ) : (
             <span style={{ color: 'var(--text-2)' }}>
-              Not on the SPI bus — check SCK, MOSI{adapter === 'sim.hc595' ? '' : ', MISO, CS'}, VCC and GND, then start
+              Not on the SPI bus. Check SCK, MOSI{adapter === 'sim.hc595' ? '' : ', MISO, CS'}, VCC and GND, then start
               the simulation.
             </span>
           )}
@@ -409,7 +409,7 @@ function SimControls({ inst, def, simStatus }: { inst: ComponentInstance; def: P
             </>
           ) : (
             <span style={{ color: 'var(--text-2)' }}>
-              Not on the bus — check SDA/SCL, VCC and GND, then start the simulation.
+              Not on the bus. Check SDA/SCL, VCC and GND, then start the simulation.
             </span>
           )}
         </div>

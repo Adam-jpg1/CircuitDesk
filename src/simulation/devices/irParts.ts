@@ -134,10 +134,10 @@ export class IrReceiverDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `IR receiver — ${Math.round(this.centreHz / 1000)} kHz, output ${this.low ? 'LOW (carrier)' : 'HIGH (idle)'}, ` +
+        `IR receiver: ${Math.round(this.centreHz / 1000)} kHz, output ${this.low ? 'LOW (carrier)' : 'HIGH (idle)'}, ` +
         `${this.frames} frame(s), ${this.repeats} repeat(s)` +
         (this.undecodable ? `, ${this.undecodable} undecodable` : '') +
-        ` — last: ${this.lastResult}`,
+        `last: ${this.lastResult}`,
       log: [...this.log],
     };
   }
@@ -259,9 +259,9 @@ export class IrRemoteDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `IR remote — NEC address 0x${this.address.toString(16)}${this.extended ? ' (extended)' : ''}, ` +
+        `IR remote: NEC address 0x${this.address.toString(16)}${this.extended ? ' (extended)' : ''}, ` +
         `${Math.round(this.carrierHz / 1000)} kHz, ${this.sent} press(es), ${this.repeats} repeat(s)` +
-        (this.lastKey ? ` — last ${this.lastKey.label}` : ''),
+        (this.lastKey ? `last ${this.lastKey.label}` : ''),
       log: [...this.log],
     };
   }

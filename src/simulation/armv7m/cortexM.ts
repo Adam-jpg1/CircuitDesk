@@ -1543,7 +1543,7 @@ export class CortexM {
       case 0xe: {
         // BKPT
         const handled = this.onBreakpoint?.(op & 0xff);
-        if (!handled) throw new ArmFault(`Breakpoint #${op & 0xff} — the firmware stopped itself (a failed assertion, or a debugger trap)`, this.pc);
+        if (!handled) throw new ArmFault(`Breakpoint #${op & 0xff}: the firmware stopped itself (a failed assertion, or a debugger trap)`, this.pc);
         return 1;
       }
       case 0xf: {
@@ -2551,7 +2551,7 @@ export class CortexM {
   private coprocessor(hw1: number, hw2: number): number {
     const coproc = (hw2 >> 8) & 0xf;
     if ((coproc & 0xe) !== 0xa || !this.config.fpu) {
-      throw new ArmFault(`Coprocessor instruction (cp${coproc}) — no such coprocessor on this chip`, this.pc);
+      throw new ArmFault(`Coprocessor instruction (cp${coproc}): no such coprocessor on this chip`, this.pc);
     }
     if (((this.cpacr >> 20) & 0xf) !== 0xf) {
       throw new ArmFault('Floating-point instruction with the FPU disabled (CPACR): the firmware never enabled it', this.pc);

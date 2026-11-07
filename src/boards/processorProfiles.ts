@@ -195,7 +195,7 @@ const ATMEGA32U4: ProcessorProfile = {
   interruptPads: ['PD0', 'PD1', 'PD2', 'PD3', 'PE6'],
   logicVolts: 5,
   notModelled: [
-    'native USB beyond the CDC serial port — Keyboard and Mouse enumerate, but nothing reads their reports',
+    'native USB beyond the CDC serial port. Keyboard and Mouse enumerate, but nothing reads their reports',
     'Timer4\'s OC4B, complementary outputs, dead time and PLL clock (OC4A and OC4D, which analogWrite uses, are modelled)',
     'EEPROM across simulation restarts',
   ],

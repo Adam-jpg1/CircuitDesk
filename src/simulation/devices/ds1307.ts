@@ -211,7 +211,7 @@ export class Ds1307Device implements I2cDevice {
 
   snapshot(): DeviceSnapshot {
     return {
-      status: `DS1307 @0x${this.address.toString(16)} — ${this.halted ? 'halted' : 'running'}, ${this.isoTime}`,
+      status: `DS1307 @0x${this.address.toString(16)}: ${this.halted ? 'halted' : 'running'}, ${this.isoTime}`,
       log: [...this.log],
     };
   }

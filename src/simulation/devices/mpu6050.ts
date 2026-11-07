@@ -214,7 +214,7 @@ export class Mpu6050Device extends RegisterI2cDevice {
     const { accelG, gyroDps, temperatureC } = this.motion;
     return {
       status:
-        `MPU-6050 @0x${this.address.toString(16)} — ${this.isAwake ? 'awake' : 'sleep'}, ` +
+        `MPU-6050 @0x${this.address.toString(16)}: ${this.isAwake ? 'awake' : 'sleep'}, ` +
         `accel ${accelG.x.toFixed(2)}/${accelG.y.toFixed(2)}/${accelG.z.toFixed(2)} g ` +
         `(±${this.accelFullScaleG} g), gyro ${gyroDps.x.toFixed(0)}/${gyroDps.y.toFixed(0)}/` +
         `${gyroDps.z.toFixed(0)} °/s (±${this.gyroFullScaleDps} °/s), ${temperatureC.toFixed(1)} °C`,

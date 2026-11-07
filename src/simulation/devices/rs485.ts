@@ -206,7 +206,7 @@ export class Max485Device {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `MAX485 — ${this.driverEnabled ? 'driving' : 'released'}, ` +
+        `MAX485: ${this.driverEnabled ? 'driving' : 'released'}, ` +
         `receiver ${this.receiverEnabled ? 'enabled' : 'disabled'}, ` +
         `${this.sent} byte(s) sent, ${this.received} received` +
         (this.corrupted ? `, ${this.corrupted} corrupted by contention` : ''),

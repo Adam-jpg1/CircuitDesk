@@ -45,14 +45,14 @@ export function describeSupport(def: PartDefinition): string {
       lines.push(`Peripherals: ${def.simulation.supportedPeripherals.join(', ')}.`);
     }
   } else {
-    lines.push('Not simulated — code does not execute inside CircuitDesk for this board.');
+    lines.push('Not simulated: code does not execute inside CircuitDesk for this board.');
   }
 
   if (def.compiler?.supported && def.compiler.fqbn) {
     lines.push(`Compiles for the real target (${def.compiler.fqbn}).`);
     if (def.compiler.note) lines.push(def.compiler.note);
   } else if (def.compiler?.fqbn) {
-    lines.push(`Compile target ${def.compiler.fqbn} defined but not enabled${def.compiler.note ? ` — ${def.compiler.note}` : '.'}`);
+    lines.push(`Compile target ${def.compiler.fqbn} defined but not enabled${def.compiler.note ? `${def.compiler.note}` : '.'}`);
   } else {
     lines.push('No compiler toolchain for this board yet.');
   }

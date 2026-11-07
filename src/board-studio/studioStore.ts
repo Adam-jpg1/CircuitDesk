@@ -308,7 +308,7 @@ export const useStudioStore = create<StudioState>((set, get) => {
         draft: board,
         baseline: null,
         notes: [
-          { kind: 'info', text: `Imported ${board.identity.name} — identity, pins, pads and pipeline all came from the file.` },
+          { kind: 'info', text: `Imported ${board.identity.name}: identity, pins, pads and pipeline all came from the file.` },
           ...problems.filter((p) => !isError(p)).map((p) => ({ kind: 'warning' as const, text: p.message })),
         ],
         suggestions: [],

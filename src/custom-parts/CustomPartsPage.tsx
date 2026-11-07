@@ -31,7 +31,7 @@ export function CustomPartsPage() {
           <div className="empty-state" style={{ paddingTop: 60 }}>
             <p>No custom parts yet.</p>
             <p style={{ maxWidth: 440, fontSize: 12 }}>
-              Create a board from your own SVG artwork with named, positioned pins — or import KiCad / Eagle /
+              Create a board from your own SVG artwork with named, positioned pins, or import KiCad / Eagle /
               Fritzing / Gerber files from the import center. Custom parts appear in the editor library and can be
               reused in every project.
             </p>
@@ -185,7 +185,7 @@ function CustomBoardEditor({ existing, onClose }: { existing: CustomDefinition |
 
   return (
     <Modal
-      title={existing ? `Edit — ${existing.definition.name}` : 'New custom board'}
+      title={existing ? `Edit ${existing.definition.name}` : 'New custom board'}
       onClose={onClose}
       width={760}
       footer={
@@ -215,7 +215,7 @@ function CustomBoardEditor({ existing, onClose }: { existing: CustomDefinition |
         <textarea style={{ width: '100%', minHeight: 54 }} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </div>
       <div style={{ color: 'var(--text-2)', fontSize: 11, marginTop: 8 }}>
-        Custom boards get honest support badges: they can be placed, wired and validated, but are never claimed as simulated.
+        Custom boards can be placed, wired and validated, but are not simulated.
       </div>
     </Modal>
   );

@@ -79,7 +79,7 @@ export function ImportWizard() {
         // a PCB file says where the copper is, not what is soldered to it.
         const draft = boardDefinitionForStudio(effectiveResult, options, pins);
         useStudioStore.getState().openImported(draft, effectiveResult.format);
-        toast(`“${draft.identity.name}” is open in the Board Studio — tell it what chip is on it.`, 'success');
+        toast(`“${draft.identity.name}” is open in the Board Studio. Tell it what chip is on it.`, 'success');
         navigate('#/');
         return;
       }
@@ -89,7 +89,7 @@ export function ImportWizard() {
       navigate('#/custom-parts');
     } catch (err) {
       console.error('[CircuitDesk] import failed:', err);
-      toast(err instanceof Error ? err.message : 'Import failed — the file could not be converted.', 'error');
+      toast(err instanceof Error ? err.message : 'Import failed: the file could not be converted.', 'error');
     } finally {
       setImporting(false);
     }
@@ -176,7 +176,7 @@ function UploadStep({ onFile, parsing }: { onFile: (f: File) => void; parsing: b
           </>
         )}
       </div>
-      <div className="dash-section-title">Supported formats — honestly labeled</div>
+      <div className="dash-section-title">Supported formats</div>
       <table className="kv-table">
         <thead><tr><th>Format</th><th>Extensions</th><th>What actually happens</th><th>Result</th></tr></thead>
         <tbody>
@@ -276,7 +276,7 @@ function MappingStep(props: {
     <div style={{ maxWidth: 900 }}>
       {isFullProject ? (
         <div style={{ color: 'var(--text-1)' }}>
-          This is a complete CircuitDesk project — nothing to map. Continue to the preview.
+          This is a complete CircuitDesk project, so there is nothing to map. Continue to the preview.
         </div>
       ) : (
         <>
@@ -469,7 +469,7 @@ function ImportStep({ result, pins, options, setOptions, importing, onBack, onIm
       { id: 'board-studio', label: 'Open in the Board Studio', desc: 'Bring it in as YOUR board: say what chip is on it, map its pins to processor pads, and compile and run firmware for it.', disabled: Boolean(result.project) },
       { id: 'custom-board', label: 'Import as custom board', desc: 'Saved to your board library as a wiring-only part, reusable across projects.', disabled: Boolean(result.project) },
       { id: 'custom-component', label: 'Import as custom component', desc: 'Saved to the component library.', disabled: Boolean(result.project) },
-      { id: 'visual-reference', label: 'Import as visual reference', desc: 'Artwork only, honestly badged “visual only”.', disabled: Boolean(result.project) },
+      { id: 'visual-reference', label: 'Import as visual reference', desc: 'Artwork only, badged “visual only”.', disabled: Boolean(result.project) },
     ];
     return list;
   }, [result.project]);
@@ -493,7 +493,7 @@ function ImportStep({ result, pins, options, setOptions, importing, onBack, onIm
     navigate(`#/editor/${project.id}`);
     } catch (err) {
       console.error('[CircuitDesk] import into existing project failed:', err);
-      toast('Import failed — the target project was not modified. See the browser console for details.', 'error');
+      toast('Import failed. The target project was not changed; the browser console has the details.', 'error');
     }
   };
 

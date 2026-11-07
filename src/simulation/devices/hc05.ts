@@ -223,7 +223,7 @@ export class Hc05Device implements UartPeripheral {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `HC-05 — ${this.mode === 'at' ? 'AT mode' : 'data mode'}, name "${this.name}", ` +
+        `HC-05: ${this.mode === 'at' ? 'AT mode' : 'data mode'}, name "${this.name}", ` +
         `role ${this.role === 1 ? 'master' : 'slave'}, ${this.config.baud} baud, ` +
         `${this.commands} command(s)` +
         (this.dataOut.length ? `, ${this.dataOut.length} byte(s) sent transparently` : ''),

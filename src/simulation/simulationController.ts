@@ -460,7 +460,7 @@ class SimulationController {
       return {
         ...base,
         status: 'built',
-        detail: `${describe(target)} — up to date${noteSuffix(notes)}`,
+        detail: `${describe(target)}: up to date${noteSuffix(notes)}`,
         notes,
       };
     }
@@ -483,7 +483,7 @@ class SimulationController {
       return {
         ...base,
         status: 'compile-failed',
-        detail: `${describe(target)} — build failed${result.error ? `: ${firstLine(result.error)}` : ''}`,
+        detail: `${describe(target)}: build failed${result.error ? `: ${firstLine(result.error)}` : ''}`,
         notes: result.simulationNotes,
         durationMs: result.durationMs,
         result,
@@ -493,7 +493,7 @@ class SimulationController {
       return {
         ...base,
         status: 'not-simulated',
-        detail: `${describe(target)} — built for the real hardware, but CircuitDesk cannot execute this board yet`,
+        detail: `${describe(target)}: built for the real hardware, but CircuitDesk cannot execute this board yet`,
         durationMs: result.durationMs,
         result,
       };
@@ -507,7 +507,7 @@ class SimulationController {
       return {
         ...base,
         status: 'artifact-mismatch',
-        detail: `${describe(target)} — ${mismatch.message}`,
+        detail: `${describe(target)}: ${mismatch.message}`,
         durationMs: result.durationMs,
         result,
       };
@@ -519,7 +519,7 @@ class SimulationController {
     return {
       ...base,
       status: 'built',
-      detail: `${describe(target)} — build succeeded${noteSuffix(notes)}`,
+      detail: `${describe(target)}: build succeeded${noteSuffix(notes)}`,
       notes,
       durationMs: result.durationMs,
       result,
@@ -586,7 +586,7 @@ class SimulationController {
           'error',
           needBuild.length > 0
             ? `${needBuild.join(' and ')} ${needBuild.length > 1 ? 'are' : 'is'} on the canvas, but the loaded firmware was not compiled for ` +
-              `${needBuild.length > 1 ? 'those boards' : 'that board'}. The simulation was stopped — recompile for this canvas.`
+              `${needBuild.length > 1 ? 'those boards' : 'that board'}. The simulation was stopped: recompile for this canvas.`
             : 'The simulated board was removed from the canvas, so the simulation was stopped.',
         );
       return;
@@ -607,7 +607,7 @@ class SimulationController {
         sketchName: this.project?.codeFiles.find((f) => f.id === sketchIdFor(this.project!, instanceId))?.name ?? '',
         instanceIds: [instanceId],
         status: 'needs-build',
-        detail: `${def.name} — on the canvas but not built yet. Recompile to include it.`,
+        detail: `${def.name}: on the canvas but not built yet. Recompile to include it.`,
       },
     ];
     this.publishBuilds();
@@ -706,7 +706,7 @@ class SimulationController {
         continue;
       }
       if (!firmware) {
-        failures.push(`${inst.label || def.name} has no firmware — its target did not build.`);
+        failures.push(`${inst.label || def.name} has no firmware: its target did not build.`);
         continue;
       }
       try {
@@ -1188,7 +1188,7 @@ class SimulationController {
 
 /** "receiver.ino — Raspberry Pi Pico", which is what a build report needs. */
 function describe(target: WorkspaceTarget): string {
-  return `${target.sketchName} — ${target.board.name}`;
+  return `${target.sketchName}: ${target.board.name}`;
 }
 
 /**
@@ -1202,7 +1202,7 @@ function noteSuffix(notes: SimulationNote[] | undefined): string {
   const dead = (notes ?? []).filter((n) => n.kind === 'no-effect');
   if (dead.length === 0) return '';
   const names = dead.map((n) => n.header).join(', ');
-  return ` — but ${names} ${dead.length === 1 ? 'does' : 'do'} nothing on this board here`;
+  return `but ${names} ${dead.length === 1 ? 'does' : 'do'} nothing on this board here`;
 }
 
 function firstLine(text: string): string {

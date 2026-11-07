@@ -83,7 +83,7 @@ function makeBreadboard(id: string, name: string, cols: number, withRails: boole
   }
 
   return def(id, name, 'Breadboards', widthMm, heightMm, withRails ? 'breadboard' : 'breadboard-mini', pins, 'simulated', {
-    description: `${name} — internal row connectivity is honored by the circuit graph: holes in the same column segment (and each power rail) are electrically connected.`,
+    description: `${name}: internal row connectivity is honored by the circuit graph: holes in the same column segment (and each power rail) are electrically connected.`,
     internalGroups: groups,
     validationRules: ['breadboard-connectivity'],
   });
@@ -97,8 +97,8 @@ export const BREADBOARD_MINI = makeBreadboard('comp.breadboard-mini', 'Breadboar
 export const LED = def(
   'comp.led', 'LED', 'Output', 5, 9, 'led',
   [
-    pin('anode', 'Anode (+)', 1.25, 8.6, { type: 'anode', description: 'Longer leg — connect toward positive' }),
-    pin('cathode', 'Cathode (−)', 3.75, 8.6, { type: 'cathode', description: 'Shorter leg / flat side — connect toward ground' }),
+    pin('anode', 'Anode (+)', 1.25, 8.6, { type: 'anode', description: 'Longer leg: connect toward positive' }),
+    pin('cathode', 'Cathode (−)', 3.75, 8.6, { type: 'cathode', description: 'Shorter leg / flat side: connect toward ground' }),
   ],
   'simulated',
   {
@@ -114,7 +114,7 @@ export const LED = def(
     ],
     validationRules: ['led-needs-resistor', 'led-polarity'],
     simulationAdapterId: 'sim.led',
-    description: 'Standard 5 mm LED. Lit by the current the circuit actually puts through it, from a board pin or a battery: brightness follows the current (and PWM duty), reversed it stays dark, and over about 30 mA — no series resistor — it burns out. Forward voltage follows the colour: about 2 V red, 3 V blue and white.',
+    description: 'Standard 5 mm LED. Lit by the current the circuit actually puts through it, from a board pin or a battery: brightness follows the current (and PWM duty), reversed it stays dark, and over about 30 mA (no series resistor) it burns out. Forward voltage follows the colour: about 2 V red, 3 V blue and white.',
   },
 );
 
@@ -192,7 +192,7 @@ export const PUSH_BUTTON = def(
     internalGroups: { '1a': 'side1', '1b': 'side1', '2a': 'side2', '2b': 'side2' },
     validationRules: ['button-floating-input'],
     simulationAdapterId: 'sim.push-button',
-    description: 'Four-lead tactile push button. Legs 1a/1b are internally joined, as are 2a/2b. Pressing bridges the two sides — a real digital input to the emulator.',
+    description: 'Four-lead tactile push button. Legs 1a/1b are internally joined, as are 2a/2b. Pressing bridges the two sides: a real digital input to the emulator.',
   },
 );
 
@@ -252,7 +252,7 @@ export const RELAY = def(
     description:
       'A single changeover on a coil. At rest COM is joined to NC; energise the coil and it moves to NO. The ' +
       'contacts are the same model a switch uses, moved by the coil rather than by a finger, so a relay ' +
-      'switching a real load behaves like a switch switching one — and a module whose ground was forgotten, ' +
+      'switching a real load behaves like a switch switching one, and a module whose ground was forgotten, ' +
       'or one fed 3.3 V by a coil that wants 5, does not click. Behavioural: coil inductance, the flyback a ' +
       'driving transistor needs, contact bounce and contact ratings are not modelled.',
   },
@@ -281,7 +281,7 @@ export const DC_MOTOR = def(
     validationRules: ['motor-needs-driver'],
     description:
       'Brushed DC motor, rated 6 V. Direction is the sign of the voltage across its terminals and speed is the ' +
-      'magnitude relative to that rating — nothing sets a speed, so a backwards H-bridge runs it backwards, an ' +
+      'magnitude relative to that rating, nothing sets a speed, so a backwards H-bridge runs it backwards, an ' +
       'unwired terminal stops it, and a duty below about a fifth does not overcome its friction. Direct GPIO ' +
       'drive is still flagged as over-current. Behavioural: no inertia, no back-EMF, no torque and no load.',
   },
@@ -324,7 +324,7 @@ export const MOTOR_DRIVER = def(
     simulationAdapterId: 'sim.motor-driver',
     description:
       'A dual H-bridge. Each half drives its two outputs from its two inputs, but only while that half\'s ' +
-      'enable is high — with the enable low the outputs are not driven at all and the motor coasts, which is ' +
+      'enable is high, with the enable low the outputs are not driven at all and the motor coasts, which is ' +
       'why a sketch that forgets ENA gets a motor that never turns however it drives IN1 and IN2. The outputs ' +
       'swing to the motor supply, so no motor supply means no output whatever the logic side does. ' +
       'Behavioural: no bridge drop, no shoot-through, no current limit and no thermal shutdown.',
@@ -394,7 +394,7 @@ function parallelLcd(
     {
       simulationAdapterId: 'sim.lcd-parallel',
       description:
-        `Character LCD wired straight to GPIOs — the LiquidCrystal(rs, en, d4, d5, d6, d7) build. ` +
+        `Character LCD wired straight to GPIOs: the LiquidCrystal(rs, en, d4, d5, d6, d7) build. ` +
         `The HD44780 latches on the falling edge of E and reads whatever RS and the data lines hold at that ` +
         `instant, so the four-bit initialisation dance is real: skip it and the panel stays blank, exactly as ` +
         `on a breadboard. Wire all eight data lines and it runs eight-bit, one byte per pulse. ${columns}x${rows} ` +
@@ -437,13 +437,13 @@ function neopixel(
       properties: [prop('pixelCount', 'Pixels', 'number', pixels, { min: 1, max: 256 })],
       simulationAdapterId: 'sim.neopixel',
       description:
-        `${layout} of WS2812B addressable LEDs. The colours are decoded from the waveform on DIN — each bit is a ` +
+        `${layout} of WS2812B addressable LEDs. The colours are decoded from the waveform on DIN: each bit is a ` +
         `~1.25 us period whose high time is short for a zero and long for a one, twenty-four bits per pixel in ` +
         `green-red-blue order, latched by a gap of 50 us or more. Nothing watches for a library call, so a ` +
         `hand-written bit-bang loop lights it and a sketch driving the wrong pin lights nothing. Sending fewer ` +
         `bits than the strip has pixels leaves the rest holding their last colour, as the hardware does. ` +
         `Brightness is a colour rather than a current draw, the WS2811's 400 kHz mode is not modelled, and DOUT ` +
-        `drives nothing — chain by raising this part's pixel count rather than by wiring two parts together.`,
+        `drives nothing: chain by raising this part's pixel count rather than by wiring two parts together.`,
     },
   );
 }
@@ -500,19 +500,19 @@ export const EPAPER29 = spiDisplay(
   'comp.epaper29', 'E-Paper 2.9" 128×296', 48, 76, 'epaper', 'sim.epaper',
   'A 2.9-inch monochrome e-paper on an SSD1680-family controller. The behaviour that makes it an e-paper is ' +
     'modelled and is the thing people trip over: the panel does not follow its RAM. Writing display RAM changes ' +
-    'nothing visible; the image only changes when a refresh is commanded, and then it stays — through further ' +
+    'nothing visible; the image only changes when a refresh is commanded, and then it stays: through further ' +
     'RAM writes, through deep sleep, and through a reset. BUSY is a real output driven for the duration of an ' +
     'update, so a driver that waits on it blocks for a plausible time and one that does not misbehaves as it ' +
     'would on a bench. Refusing to refresh while in deep sleep is modelled too. NOT modelled and not claimed: ' +
     'ghosting, LUT waveforms, partial-refresh artefacts, refresh current, temperature compensation, and the ' +
-    'red channel of three-colour panels — a refresh here is clean at the end of its BUSY period.',
+    'red channel of three-colour panels: a refresh here is clean at the end of its BUSY period.',
   [['busy', 'BUSY']],
 );
 
 export const NOKIA5110 = spiDisplay(
   'comp.nokia5110', 'Nokia 5110 LCD (PCD8544)', 45, 45, 'nokia5110', 'sim.pcd8544',
   'The 84x48 Nokia 5110 panel. Not I2C and not quite SPI: a clock, a data line, no output at all, and a D/C ' +
-    'line deciding whether the byte is a command or display RAM. The catch every driver hits is modelled — the ' +
+    'line deciding whether the byte is a command or display RAM. The catch every driver hits is modelled: the ' +
     'function-set byte carries an H bit, and half the command set only exists while it is 1, so sending the ' +
     'contrast command without setting H first is read as something else entirely and the screen comes up blank ' +
     'or black. Contrast, bias and temperature coefficient are stored and reported rather than shown as darkness.',
@@ -531,14 +531,14 @@ export const ILI9341 = spiDisplay(
 export const ST7735 = spiDisplay(
   'comp.st7735', 'TFT 1.8" 128×160 (ST7735)', 40, 56, 'tft', 'sim.tft',
   'A 128x160 colour TFT. The visible panel is a corner of the controller\'s larger memory, so the two-pixel ' +
-    'column offset and one-pixel row offset are applied — a driver that omits them draws everything shifted ' +
+    'column offset and one-pixel row offset are applied: a driver that omits them draws everything shifted ' +
     'with a coloured edge, exactly as on a bench. Accepts 12-, 16- and 18-bit pixel formats. Same modelled ' +
     'subset and same exclusions as the other controllers in this family.',
 );
 
 export const ST7789 = spiDisplay(
   'comp.st7789', 'TFT 240×320 (ST7789)', 44, 60, 'tft', 'sim.tft',
-  'A 240x320 colour TFT with the ST7789 register set — porch, gate and VDV/VRH controls that the ILI9341 does ' +
+  'A 240x320 colour TFT with the ST7789 register set: porch, gate and VDV/VRH controls that the ILI9341 does ' +
     'not have, and which an ILI9341 will not accept. Column and row addressing, memory write, MADCTL and pixel ' +
     'format behave as the family does. Gamma and power registers are consumed without visual effect.',
 );
@@ -554,7 +554,7 @@ export const GC9A01 = spiDisplay(
 export const SSD1331 = spiDisplay(
   'comp.ssd1331', 'Colour OLED 0.95" 96×64 (SSD1331)', 34, 40, 'tft', 'sim.tft',
   'A 96x64 colour OLED, and the odd one out: its command set predates MIPI DCS, so the address window is ' +
-    '0x15/0x75 rather than CASET/RASET and there is no memory-write command at all — pixel data simply ' +
+    '0x15/0x75 rather than CASET/RASET and there is no memory-write command at all: pixel data simply ' +
     'follows. It also draws in hardware, so the line, rectangle and clear-window commands are executed rather ' +
     'than ignored, which is the difference between a filled rectangle appearing and nothing appearing. Only ' +
     'the 65k-colour mode is decoded; a remap selecting 256 colours is recorded as refused. Dim and scroll are ' +
@@ -597,7 +597,7 @@ export const SH1107_OLED = def(
     simulationAdapterId: 'sim.sh1107',
     validationRules: ['i2c-pins'],
     description:
-      'Square 128×128 I²C OLED. Its command set is close enough to the SSD1306 to be confused with it and different in the places that matter: sixteen pages instead of eight, a four-bit page opcode, a seven-bit column address, and a single-opcode addressing mode where the SSD1306 takes an argument byte — so an SSD1306 driver pointed at one produces a blank panel here exactly as it does on a bench. Segment remap, COM scan direction and the start line are applied, so a driver that flips the panel flips it here too. Contrast and multiplex ratio are stored and reported rather than shown.',
+      'Square 128×128 I²C OLED. Its command set is close enough to the SSD1306 to be confused with it and different in the places that matter: sixteen pages instead of eight, a four-bit page opcode, a seven-bit column address, and a single-opcode addressing mode where the SSD1306 takes an argument byte, so an SSD1306 driver pointed at one produces a blank panel here exactly as it does on a bench. Segment remap, COM scan direction and the start line are applied, so a driver that flips the panel flips it here too. Contrast and multiplex ratio are stored and reported rather than shown.',
   },
 );
 
@@ -639,7 +639,7 @@ function multiDigitSevenSegment(
       validationRules: ['led-needs-resistor'],
       description:
         `${digits}-digit common-cathode display. The segment lines are shared and each digit's common is ` +
-        `enabled separately, so firmware must scan it — drive one common low, set the segments, move on. ` +
+        `enabled separately, so firmware must scan it: drive one common low, set the segments, move on. ` +
         `There is no value property: what is shown is derived from which segment lines are asserted while ` +
         `which common is low. Because only one digit is electrically lit at a time, the canvas shows the ` +
         `brightness an eye would average over the last few milliseconds; a digit that is never scanned stays ` +
@@ -668,7 +668,7 @@ export const SEVEN_SEGMENT_CA = def(
     description:
       'Common-anode 7-segment digit: the common goes to the supply and a segment lights when its pin is pulled ' +
       'LOW. That is the opposite of the common-cathode part, and wiring one as the other is the most common ' +
-      'reason a digit stays dark — which it does here too.',
+      'reason a digit stays dark, which it does here too.',
   },
 );
 
@@ -696,7 +696,7 @@ export const LED_MATRIX_8X8 = def(
     description:
       'An 8x8 matrix with no driver behind it: eight row cathodes and eight column anodes, and an LED at every ' +
       'crossing. A pixel lights when its column is driven high and its row is pulled low, so a whole frame needs ' +
-      'firmware to scan the rows fast enough that the eye joins them up — which is exactly what the canvas ' +
+      'firmware to scan the rows fast enough that the eye joins them up, which is exactly what the canvas ' +
       'shows, averaged over the last few milliseconds. Stop scanning and it fades. Per-LED current and the ' +
       'brightness drop from lighting many LEDs in one row are not modelled.',
   },
@@ -715,8 +715,8 @@ export const TM1637 = def(
   {
     simulationAdapterId: 'sim.tm1637',
     description:
-      'Four digits behind a TM1637, on two wires that look like I2C and are not. There is no address — the ' +
-      'chip is the only thing on those pins — and bits go out least significant first, which is the opposite ' +
+      'Four digits behind a TM1637, on two wires that look like I2C and are not. There is no address: the ' +
+      'chip is the only thing on those pins, and bits go out least significant first, which is the opposite ' +
       'of I2C and would scramble every glyph if decoded the other way. The model watches the two pins ' +
       'directly, so an ordinary Arduino TM1637 sketch drives it with nothing simulator-specific. The chip ' +
       'holds a whole frame, so unlike a bare multiplexed display there is no scan to average. Its keypad ' +
@@ -755,13 +755,13 @@ export const GEARMOTOR = dcMotorPart(
   'A geared DC motor. Direction is the sign of the voltage across its terminals and speed is the magnitude ' +
     'relative to its 6 V rating, so a backwards H-bridge runs it backwards and a missing ground stops it. Below ' +
     'about a fifth of its rating it does not turn at all, which is why a low PWM duty does nothing. Behavioural: ' +
-    'there is no inertia, no back-EMF, no torque and no load — those need the analog solver.',
+    'there is no inertia, no back-EMF, no torque and no load: those need the analog solver.',
 );
 
 export const VIBRATION_MOTOR = dcMotorPart(
   'comp.vibration-motor', 'Vibration motor', 10, 10,
-  'A coin vibration motor, rated 3 V. Same model as any other brushed motor — direction and magnitude from the ' +
-    'terminals — which matters here because it is usually driven straight from a transistor and a 5 V drive is ' +
+  'A coin vibration motor, rated 3 V. Same model as any other brushed motor: direction and magnitude from the ' +
+    'terminals, which matters here because it is usually driven straight from a transistor and a 5 V drive is ' +
     'well past its rating. Behavioural: no inertia, no back-EMF, no torque.',
 );
 
@@ -769,7 +769,7 @@ export const DC_MOTOR_ENCODER = dcMotorPart(
   'comp.dc-motor-encoder', 'DC motor with quadrature encoder', 24, 16,
   'A gearmotor with a quadrature encoder on the shaft. Both channels are derived from the shaft position the ' +
     'motor model integrates, so a motor that is not turning produces no pulses and one running backwards ' +
-    'produces them in the other order — which is what lets firmware tell direction, and what a pulse-count ' +
+    'produces them in the other order, which is what lets firmware tell direction, and what a pulse-count ' +
     'property could never do. Eleven pulses per revolution per channel. Behavioural: no inertia or load.',
   [
     ['enca', 'A', { type: 'digital', caps: ['digital-out'] }],
@@ -788,7 +788,7 @@ export const SOLENOID = def(
     description:
       'A pull-type solenoid, rated 12 V. It is energised when there is enough voltage across it and released ' +
       'otherwise, which is the whole of its behaviour. Behavioural: stroke, force, coil inductance and the ' +
-      'flyback a switching transistor needs are not modelled — the diode is still worth wiring, and validation ' +
+      'flyback a switching transistor needs are not modelled: the diode is still worth wiring, and validation ' +
       'still asks for it.',
   },
 );
@@ -839,7 +839,7 @@ export const A4988 = def(
     description:
       'A step/direction stepper driver. It sequences the coils itself, so the model is what happens on its ' +
       'logic side: one microstep per rising edge on STEP, in the direction DIR is holding. ENABLE is active ' +
-      'low and an unwired one reads as enabled, because the board pulls it down — but drive it high and the ' +
+      'low and an unwired one reads as enabled, because the board pulls it down, but drive it high and the ' +
       'pulses are counted and ignored, which is the answer to "I sent ten thousand steps and nothing moved". ' +
       'MS1-MS3 select the microstep divisor, so the same pulse count travels a different distance. ' +
       'Behavioural: the current limit its potentiometer sets, torque, missed steps and thermal shutdown are ' +
@@ -864,7 +864,7 @@ export const ULN2003 = def(
     simulationAdapterId: 'sim.uln2003',
     description:
       'Seven Darlington sinks. A high on an input pulls the matching output to ground; a low leaves it ' +
-      'floating. It cannot source — which is not a limitation to work around but the reason a 28BYJ-48 wired ' +
+      'floating. It cannot source, which is not a limitation to work around but the reason a 28BYJ-48 wired ' +
       'to one has its common on the supply rather than on ground, and why wiring it the other way produces a ' +
       'stepper that does nothing. The flyback diodes to COM are not modelled as clamps.',
   },
@@ -889,7 +889,7 @@ export const RELAY_DPDT = def(
     simulationAdapterId: 'sim.relay',
     description:
       'Two changeover sections on one armature. At rest each COM is joined to its NC; energise the coil and ' +
-      'both move together to NO — you cannot switch one pole without the other, which is the whole reason to ' +
+      'both move together to NO: you cannot switch one pole without the other, which is the whole reason to ' +
       'use a DPDT. The contacts are the same model a switch uses, moved by the coil rather than by a finger, ' +
       'so a relay switching a real load behaves like a switch switching one. The coil needs most of its rated ' +
       'voltage to pull in, and a module whose ground was forgotten does not click. Behavioural: coil ' +
@@ -941,13 +941,13 @@ function voltageSource(
 export const CELL_15 = voltageSource(
   'comp.cell-15', 'Cell (1.5V)', 1.5, 26, 10, 'battery-aa',
   'A single 1.5 V cell. It imposes its voltage across its terminals, which is what makes a series stack behave ' +
-    'like a stack. Behavioural: capacity, internal resistance and discharge are not modelled — it never goes flat.',
+    'like a stack. Behavioural: capacity, internal resistance and discharge are not modelled: it never goes flat.',
 );
 
 export const COIN_CELL = voltageSource(
   'comp.battery-coin', 'Coin cell (CR2032)', 3, 16, 16, 'battery-coin',
   'A 3 V lithium coin cell. Behavioural: capacity, internal resistance and discharge are not modelled, which ' +
-    'matters more here than for most sources — a CR2032 cannot in reality supply what a project often asks of it.',
+    'matters more here than for most sources: a CR2032 cannot in reality supply what a project often asks of it.',
 );
 
 export const DC_SUPPLY = voltageSource(
@@ -984,7 +984,7 @@ function regulatorPart(
 export const REGULATOR_5 = regulatorPart(
   'comp.regulator-5', 'Linear regulator (5V, 7805)', 14, 18, 'regulator',
   'A 7805. It imposes 5 V on its output when its input is at least two volts above that and its ground is ' +
-    'wired — which is why feeding one 5 V gives nothing, and why a floating ground gives nothing whatever the ' +
+    'wired, which is why feeding one 5 V gives nothing, and why a floating ground gives nothing whatever the ' +
     'input is. Behavioural: ripple, efficiency, dropout curve, thermal shutdown, transient response and ' +
     'current limit are not modelled.',
   5,
@@ -1018,7 +1018,7 @@ export const BUCK_CONVERTER = regulatorPart(
 export const BOOST_CONVERTER = regulatorPart(
   'comp.boost-converter', 'Boost converter (step-up)', 22, 16, 'converter',
   'A step-up switching module. It holds its set output from any input BELOW that output and above about two ' +
-    'volts — feed it more than its output and it does not regulate, which is the mistake this model exists to ' +
+    'volts: feed it more than its output and it does not regulate, which is the mistake this model exists to ' +
     'reproduce. Behavioural: switching frequency, efficiency, ripple and current limit are not modelled.',
   5,
 );
@@ -1046,7 +1046,7 @@ export const ADS1115 = def(
     properties: [prop('i2cAddress', 'I²C address', 'text', '')],
     description:
       'A 16-bit ADC over I²C. The number firmware reads is computed from the volts actually on the input pins ' +
-      'through the mux and gain it selected — there is no way to set a reading. So the mistakes are the real ' +
+      'through the mux and gain it selected: there is no way to set a reading. So the mistakes are the real ' +
       'ones: 5 V into the default ±2.048 V range rails rather than reading 5 V, a differential mux gives a ' +
       'signed result, an unwired input is not an input at 0 V, and the conversion register holds the last ' +
       'result until something starts a new one. Single-shot and continuous modes both work. NOT modelled: ' +
@@ -1077,7 +1077,7 @@ export const MCP3008 = def(
       'Eight 10-bit channels over SPI, with no register map at all: the controller clocks in a start bit, a ' +
       'mode bit and three channel bits, and the part clocks back a null bit and ten data bits in the exact ' +
       'positions the usual three-byte transfer expects. The reference is a wire, so the same input reads ' +
-      'differently on a part fed 3.3 V and one fed 5 V — which is the second most common source of confusion ' +
+      'differently on a part fed 3.3 V and one fed 5 V, which is the second most common source of confusion ' +
       'with these. An unwired channel is reported as unwired rather than as 0 V. NOT modelled: the input-range ' +
       'rules of true differential conversion, conversion time, and input impedance.',
   },
@@ -1099,7 +1099,7 @@ export const DS1307 = def(
     validationRules: ['i2c-pins'],
     description:
       'The classic I²C real-time clock. Time advances from the simulation clock, never from the host, so a ' +
-      'sketch that sets the time and waits sees exactly the time it waited — and a test gives the same answer ' +
+      'sketch that sets the time and waits sees exactly the time it waited, and a test gives the same answer ' +
       'on any machine at any hour. Every register is packed BCD, as on the part, so a sketch that forgets to ' +
       'convert reads nonsense here too. The clock-halt bit is real: a fresh DS1307 comes up with its ' +
       'oscillator stopped and does nothing until firmware clears it. The 56 bytes of user RAM work. NOT ' +
@@ -1156,13 +1156,13 @@ export const DFPLAYER = def(
     ],
     description:
       'The DFPlayer\'s serial protocol, properly parsed. Every command is a ten-byte frame with a checksum, ' +
-      'and a frame whose checksum is wrong is ignored and counted — which matters because hand-rolled ' +
+      'and a frame whose checksum is wrong is ignored and counted, which matters because hand-rolled ' +
       'DFPlayer code gets that checksum wrong constantly, and a model that accepted anything starting with ' +
       '0x7E would make broken code look correct. Play, pause, stop, next, previous, track select, folder ' +
       'select, volume, equaliser and the status queries all drive real state a sketch can read back, and the ' +
       'BUSY pin follows playback so a sketch can wait for a track. A track past the end of the simulated card ' +
       'does not play. NOT modelled and not claimed: audio. Nothing decodes an MP3, nothing makes sound, and ' +
-      'there is no file system — a track number is a number.',
+      'there is no file system: a track number is a number.',
   },
 );
 
@@ -1296,7 +1296,7 @@ export const GPS = def(
     ],
     description:
       'A NEO-6M emitting real NMEA over a real UART. The position is always the simulated one set on this part ' +
-      '— nothing reads a host location, a geolocation service or a timezone, which would be both a privacy ' +
+      'nothing reads a host location, a geolocation service or a timezone, which would be both a privacy ' +
       'problem and useless, since you cannot test a route by standing still. GGA and RMC are emitted once a ' +
       'second with correctly computed checksums, so a parser that validates them accepts them. The sentences ' +
       'go out one byte at a time at the configured baud through the board UART, so a sketch with the wrong ' +
@@ -1314,7 +1314,7 @@ export const BLUETOOTH = def(
     pin('vcc', 'VCC', 5.0, 35.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
     pin('gnd', 'GND', 8.0, 35.6, { type: 'ground', caps: ['ground'] }),
     pin('txd', 'TXD', 11.0, 35.6, { type: 'digital', caps: ['uart-tx'], voltage: 3.3 }),
-    pin('rxd', 'RXD', 14.0, 35.6, { type: 'digital', caps: ['uart-rx'], voltage: 3.3, description: '3.3 V logic — use a divider from 5 V TX' }),
+    pin('rxd', 'RXD', 14.0, 35.6, { type: 'digital', caps: ['uart-rx'], voltage: 3.3, description: '3.3 V logic: use a divider from 5 V TX' }),
   ],
   'simulated',
   {
@@ -1327,7 +1327,7 @@ export const BLUETOOTH = def(
       'EN low and it is transparent, so every byte the sketch writes is passed through rather than ' +
       'interpreted. RXD is 3.3 V-only, which the validator enforces. There is NO Bluetooth here: no radio, ' +
       'no pairing, no inquiry, no RFCOMM, no profiles, and no addressing beyond the strings the AT commands ' +
-      'store — bytes sent in data mode are recorded, not transmitted to anything. Needs a board with a ' +
+      'store: bytes sent in data mode are recorded, not transmitted to anything. Needs a board with a ' +
       'modelled UART: the ESP32-C3 and C6 have none yet.',
   },
 );
@@ -1352,7 +1352,7 @@ export const WIFI_ACCESS_POINT = def(
       'The sketch must use this SSID and password, as with a real router: a wrong SSID fails with "no AP found" and a ' +
       'wrong password with an authentication failure. Its DHCP server hands out 192.168.1.100 onwards (the second ' +
       'access point on a canvas is 192.168.2.0/24, and so on), its DNS resolves each board by the hostname it gave, ' +
-      'and boards on it reach each other over TCP and UDP through their own network stacks — a web server on one board ' +
+      'and boards on it reach each other over TCP and UDP through their own network stacks: a web server on one board ' +
       'can be fetched by another. There is no internet behind it: other names do not resolve. Signal strength, range, ' +
       'channels and WPA handshakes are not simulated; a scan reports every access point at the same RSSI.',
   },
@@ -1380,7 +1380,7 @@ export const WIFI_ESP01 = def(
       prop('baud', 'Baud', 'number', 115200),
     ],
     description:
-      'ESP-01 Wi-Fi module — strictly 3.3 V, and the validator flags any 5 V connection to its pins. The AT ' +
+      'ESP-01 Wi-Fi module: strictly 3.3 V, and the validator flags any 5 V connection to its pins. The AT ' +
       'modem is simulated: the command parser, the echo real firmware sends back before each response, ' +
       'AT+GMR, AT+CWMODE, AT+CWLAP, AT+CWJAP with the simulated SSID and password set on this part, ' +
       'AT+CWQAP, AT+CIFSR, AT+CIPMUX, AT+CIPSTATUS and ERROR for anything else. CH_PD must be high and RST ' +
@@ -1388,7 +1388,7 @@ export const WIFI_ESP01 = def(
       'Every ESP-01 on the canvas joined to the same access point is on one simulated LAN (192.168.4.2, .3, …, ' +
       'in canvas order) and they talk TCP to each other: AT+CIPSERVER, AT+CIPSTART, AT+CIPSEND, +IPD and ' +
       'AT+CIPCLOSE, single or multiplexed. There is no internet behind it: a host name or an address no module ' +
-      'holds fails with DNS Fail or ERROR and CLOSED rather than pretending to connect. UDP and SSL are not ' +
+      'holds fails with DNS Fail or ERROR and CLOSED. UDP and SSL are not ' +
       'simulated. Nothing scans a real radio or touches a host network.',
   },
 );
@@ -1409,7 +1409,7 @@ export const IR_RECEIVER = def(
     properties: [prop('carrierHz', 'Carrier', 'number', 38000, { unit: 'Hz' })],
     description:
       'A demodulating IR receiver. It watches the shared infrared medium, and while it hears a carrier inside ' +
-      'its passband it pulls OUT LOW — active low, exactly like the hardware, which is why an idle module ' +
+      'its passband it pulls OUT LOW: active low, exactly like the hardware, which is why an idle module ' +
       'reads HIGH. The output follows the real mark and space timing on the runner\'s microsecond clock, so a ' +
       'sketch decodes it with its own timing code and a sketch whose timing is wrong fails here too. Nothing ' +
       'hands a decoded command to firmware. A carrier more than 20 % away from this module\'s centre ' +
@@ -1429,11 +1429,11 @@ export const IR_LED = def(
   {
     description:
       'An infrared emitter driven by your own firmware. It has no protocol of its own: light exists only while ' +
-      'the pin is genuinely toggling, and the carrier frequency is MEASURED from the edges rather than assumed, ' +
+      'the pin is toggling, and the carrier frequency is measured from the edges, ' +
       'so a sketch generating 56 kHz emits 56 kHz and a 38 kHz receiver will not hear it. The burst goes into ' +
       'the same shared medium a virtual remote uses, so a receiver on another board picks it up if it can see ' +
       'it, and two emitters at once interfere. The cathode has to reach a real ground or nothing lights. ' +
-      'Brightness, current, forward voltage, beam angle and range are not modelled — this is a light switch, ' +
+      'Brightness, current, forward voltage, beam angle and range are not modelled: this is a light switch, ' +
       'not a photometric model.',
     simulationAdapterId: 'sim.ir-led',
   },
@@ -1468,7 +1468,7 @@ export const NRF24L01 = def(
     // The 2x4 header, in the module's own order looking at the pins.
     pin('gnd', 'GND', 2.5, 28.6, { type: 'ground', caps: ['ground'] }),
     pin('vcc', 'VCC', 5.0, 28.6, { type: 'power-3v3', caps: ['power'], voltage: 3.3 }),
-    pin('ce', 'CE', 7.5, 28.6, { type: 'digital', caps: ['digital-in'], voltage: 3.3, description: 'Radio enable — not the chip select' }),
+    pin('ce', 'CE', 7.5, 28.6, { type: 'digital', caps: ['digital-in'], voltage: 3.3, description: 'Radio enable, not the chip select' }),
     pin('csn', 'CSN', 10.0, 28.6, { type: 'digital', caps: ['spi-ss'], voltage: 3.3 }),
     pin('sck', 'SCK', 2.5, 26.0, { type: 'digital', caps: ['spi-sck'], voltage: 3.3 }),
     pin('mosi', 'MOSI', 5.0, 26.0, { type: 'digital', caps: ['spi-mosi'], voltage: 3.3 }),
@@ -1481,11 +1481,11 @@ export const NRF24L01 = def(
     validationRules: ['spi-pins', 'voltage-level'],
     description:
       'A real nRF24L01+ SPI peripheral: the register file, both FIFOs, STATUS returned on every transfer, and ' +
-      'CE and CSN as the two separate signals they are — CSN selects the chip for a transaction, CE enables ' +
+      'CE and CSN as the two separate signals they are: CSN selects the chip for a transaction, CE enables ' +
       'the radio, and conflating them is the classic wiring error this will not forgive. Packets leave through ' +
       'the shared radio medium with airtime computed from the configured data rate, address width, payload ' +
       'length and CRC, so nothing teleports; a radio on another channel or another address hears nothing, and ' +
-      'two radios that key up together destroy each other. Auto-acknowledgement is real — a receiver with ' +
+      'two radios that key up together destroy each other. Auto-acknowledgement is real: a receiver with ' +
       'EN_AA transmits an acknowledgement back, and a transmitter that does not hear one retransmits up to ARC ' +
       'times and then raises MAX_RT, leaving the payload in the FIFO exactly as the hardware does. NOT ' +
       'modelled: RPD and RSSI (the medium has no signal strength, so the register reads zero rather than ' +
@@ -1514,7 +1514,7 @@ export const LORA_SX1278 = def(
       'An SX1278 LoRa transceiver as a real SPI peripheral: the register file, the 256-byte FIFO with its own ' +
       'address pointer and base addresses, RegOpMode driving the modem, and RegIrqFlags with write-one-to-clear ' +
       'so DIO0 rises on TxDone and RxDone. Time on air is computed from the datasheet formula, so the same ' +
-      '16-byte payload takes about 37 ms at SF7/125 kHz and about 1.15 seconds at SF12 — that difference is the ' +
+      '16-byte payload takes about 37 ms at SF7/125 kHz and about 1.15 seconds at SF12: that difference is the ' +
       'entire engineering tradeoff of LoRa and instant delivery would hide it. Two modules talk only when their ' +
       'frequency, spreading factor, bandwidth and sync word all agree, which is the commonest LoRa failure and ' +
       'is reproduced rather than smoothed over. It shares one radio medium with every other RF part, so two ' +
@@ -1539,10 +1539,10 @@ export const RF433_TX = def(
     description:
       'An on-off-keyed 433 MHz transmitter, which has no protocol at all: DATA high means the carrier is on ' +
       'and DATA low means it is off. Whatever your sketch puts on that pin goes into the shared radio medium ' +
-      'with exactly that timing, so an encoder you write yourself works here the way it works on a bench — and ' +
+      'with exactly that timing, so an encoder you write yourself works here the way it works on a bench, and ' +
       'so does one you got wrong. Two transmitters keyed at once produce the sum of their carriers and whatever ' +
       'decodes it gets nonsense; nothing arbitrates. NOT modelled: range, antenna length, supply-voltage ' +
-      'dependence, and any encoding whatsoever — no preamble, no Manchester, nothing.',
+      'dependence, and any encoding whatsoever: no preamble, no Manchester, nothing.',
   },
 );
 
@@ -1559,7 +1559,7 @@ export const RF433_RX = def(
     properties: [prop('frequencyKhz', 'Frequency', 'number', 433920, { unit: 'kHz' })],
     description:
       'A superregenerative 433 MHz receiver whose DATA pin follows the carrier it hears, edge for edge, on the ' +
-      'microsecond clock — so your own decoder measures the same pulse widths the transmitter produced. A ' +
+      'microsecond clock, so your own decoder measures the same pulse widths the transmitter produced. A ' +
       'receiver on a different frequency hears nothing. One place this is KINDER than the hardware, stated ' +
       'rather than hidden: a real idle receiver winds its gain up and produces continuous noise on DATA, and ' +
       'this one reads low instead. NOT modelled: the noise floor, AGC and squelch behaviour, range, antenna ' +
@@ -1570,10 +1570,10 @@ export const RF433_RX = def(
 export const MAX485 = def(
   'comp.max485', 'RS-485 Transceiver (MAX485)', 'Modules', 22, 18, 'max485',
   [
-    pin('ro', 'RO', 3.0, 17.6, { type: 'digital', caps: ['digital-out', 'uart-tx'], description: 'Receiver output — wire to the MCU RX' }),
+    pin('ro', 'RO', 3.0, 17.6, { type: 'digital', caps: ['digital-out', 'uart-tx'], description: 'Receiver output: wire to the MCU RX' }),
     pin('re', 'RE', 6.5, 17.6, { type: 'digital', caps: ['digital-in'], description: 'Receiver enable, ACTIVE LOW' }),
     pin('de', 'DE', 10.0, 17.6, { type: 'digital', caps: ['digital-in'], description: 'Driver enable, active high' }),
-    pin('di', 'DI', 13.5, 17.6, { type: 'digital', caps: ['digital-in', 'uart-rx'], description: 'Driver input — wire to the MCU TX' }),
+    pin('di', 'DI', 13.5, 17.6, { type: 'digital', caps: ['digital-in', 'uart-rx'], description: 'Driver input: wire to the MCU TX' }),
     pin('vcc', 'VCC', 17.0, 17.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
     pin('gnd', 'GND', 20.0, 17.6, { type: 'ground', caps: ['ground'] }),
     pin('a', 'A', 5.0, 1.4, { type: 'digital', description: 'Differential pair, non-inverting' }),
@@ -1609,7 +1609,7 @@ export const MCP2515 = def(
     pin('cs', 'CS', 17.0, 27.6, { type: 'digital', caps: ['spi-ss'] }),
     pin('gnd', 'GND', 20.5, 27.6, { type: 'ground', caps: ['ground'] }),
     pin('vcc', 'VCC', 24.0, 27.6, { type: 'power-5v', caps: ['power'], voltage: 5 }),
-    pin('canh', 'CANH', 32.0, 1.4, { type: 'digital', description: 'Bus high — wire to every other node\'s CANH' }),
+    pin('canh', 'CANH', 32.0, 1.4, { type: 'digital', description: 'Bus high: wire to every other node\'s CANH' }),
     pin('canl', 'CANL', 37.0, 1.4, { type: 'digital', description: 'Bus low' }),
   ],
   'simulated',
@@ -1617,8 +1617,8 @@ export const MCP2515 = def(
     simulationAdapterId: 'sim.mcp2515',
     validationRules: ['spi-pins'],
     description:
-      'A real MCP2515 on a real CAN bus. The SPI side is the chip\'s own command set — RESET, READ, WRITE, BIT ' +
-      'MODIFY, LOAD TX BUFFER, READ RX BUFFER, RTS, READ STATUS and RX STATUS — over the register file, with ' +
+      'A real MCP2515 on a real CAN bus. The SPI side is the chip\'s own command set. RESET, READ, WRITE, BIT ' +
+      'MODIFY, LOAD TX BUFFER, READ RX BUFFER, RTS, READ STATUS and RX STATUS: over the register file, with ' +
       'three transmit buffers, two receive buffers, CANINTF and CANINTE, and an INT pin that goes low while an ' +
       'enabled flag is set. The chip powers up in CONFIGURATION mode and will not transmit until a sketch asks ' +
       'for normal mode, which is one of the two reasons an MCP2515 project does not work; the other is bit ' +
@@ -1627,7 +1627,7 @@ export const MCP2515 = def(
       'Underneath is a bit-level bus: two nodes that start in the same bit arbitrate on the wire, the lower ' +
       'identifier wins, and the loser becomes a receiver without corrupting the winner. Loopback mode never ' +
       'reaches the wire. NOT modelled: acceptance filters and masks (they are stored and read back, but every ' +
-      'frame is accepted — the largest gap here), error counters and therefore error-passive and bus-off, ' +
+      'frame is accepted: the largest gap here), error counters and therefore error-passive and bus-off, ' +
       'one-shot mode, sleep, CLKOUT, and the RXnBF and TXnRTS pins.',
   },
 );
@@ -1667,7 +1667,7 @@ export const REGULATOR = def(
     properties: [prop('outputVoltage', 'Output', 'number', 5, { unit: 'V' })],
     description:
       'A three-terminal linear regulator. It imposes its set output when its input is at least two volts ' +
-      'above that and its ground is wired — so feeding a 5 V part 5 V gives nothing, and a floating ground ' +
+      'above that and its ground is wired, so feeding a 5 V part 5 V gives nothing, and a floating ground ' +
       'gives nothing whatever the input. Behavioural: ripple, efficiency, dropout curve, thermal shutdown, ' +
       'transient response and current limit are not modelled.',
   },
@@ -1728,7 +1728,7 @@ export const HC595 = def(
   {
     simulationAdapterId: 'sim.hc595',
     description:
-      'Serial-in / parallel-out shift register driven by real SPI traffic: firmware shifts bits on SRCLK and they appear on Q0-Q7 only when RCLK rises. OE (active low) puts the outputs in high impedance and SRCLR clears the shift register. Outputs drive real net voltages, so an LED on Q0 lights from bits the sketch actually shifted. It has no chip select, so — like the real part — it shifts whatever appears on the clock.',
+      'Serial-in / parallel-out shift register driven by real SPI traffic: firmware shifts bits on SRCLK and they appear on Q0-Q7 only when RCLK rises. OE (active low) puts the outputs in high impedance and SRCLR clears the shift register. Outputs drive real net voltages, so an LED on Q0 lights from bits the sketch actually shifted. It has no chip select, so (like the real part) it shifts whatever appears on the clock.',
   },
 );
 
@@ -1746,7 +1746,7 @@ export const SD_CARD = def(
   {
     simulationAdapterId: 'sim.sd-card',
     description:
-      'A 4 MiB standard-capacity card in SPI mode, preformatted FAT16. The real command layer is simulated \u2014 CMD0/CMD8/CMD58/ACMD41 initialisation (including the "still initialising" polls), CMD17/CMD18 block reads with the 0xFE data token, and CMD24 block writes with the busy period. FAT itself is left to the host library, as on real hardware; unimplemented commands answer with the illegal-command bit rather than pretending.',
+      'A 4 MiB standard-capacity card in SPI mode, preformatted FAT16. Its command layer is simulated: CMD0/CMD8/CMD58/ACMD41 initialisation (including the "still initialising" polls), CMD17/CMD18 block reads with the 0xFE data token, and CMD24 block writes with the busy period. FAT itself is left to the host library, as on real hardware; unimplemented commands answer with the illegal-command bit rather than pretending.',
   },
 );
 
@@ -1787,7 +1787,7 @@ export const EEPROM_24C = def(
     simulationAdapterId: 'sim.eeprom-24c',
     validationRules: ['i2c-pins'],
     description:
-      '32 KiB serial EEPROM with a two-byte word address. The self-timed write cycle is modelled: after a write the part NACKs its own address for 5 ms, so a sketch that reads back immediately genuinely fails and ACK polling genuinely works. Page writes wrap inside their 64-byte page rather than spilling, as on real silicon. The write-protect pin is wired but its protection behaviour is not modelled.',
+      '32 KiB serial EEPROM with a two-byte word address. The self-timed write cycle is modelled: after a write the part NACKs its own address for 5 ms, so a sketch that reads back immediately fails and ACK polling genuinely works. Page writes wrap inside their 64-byte page rather than spilling, as on real silicon. The write-protect pin is wired but its protection behaviour is not modelled.',
   },
 );
 
@@ -1825,7 +1825,7 @@ export const MCP4725 = def(
     simulationAdapterId: 'sim.mcp4725',
     validationRules: ['i2c-pins'],
     description:
-      '12-bit DAC whose output is a real voltage on the canvas: wire VOUT to an analog input and firmware reads back what it wrote. Fast-mode and register writes are both decoded, the EEPROM form stores a power-on code, and the three power-down modes genuinely stop driving VOUT. Full scale follows the supply rail. EEPROM write time is not modelled — the ready bit always reads ready.',
+      '12-bit DAC whose output is a real voltage on the canvas: wire VOUT to an analog input and firmware reads back what it wrote. Fast-mode and register writes are both decoded, the EEPROM form stores a power-on code, and the three power-down modes stop driving VOUT. Full scale follows the supply rail. EEPROM write time is not modelled: the ready bit always reads ready.',
   },
 );
 
@@ -1883,7 +1883,7 @@ export const SLIDE_SWITCH = def(
   'simulated',
   {
     simulationAdapterId: 'sim.slide-switch',
-    description: 'SPDT slide switch. COM is bridged to NO in one position and to NC in the other — break before make, so NO and NC are never joined.',
+    description: 'SPDT slide switch. COM is bridged to NO in one position and to NC in the other: break before make, so NO and NC are never joined.',
   },
 );
 
@@ -1910,7 +1910,7 @@ function makeDipSwitch(id: string, name: string, ways: number): ComponentDefinit
   }
   return def(id, name, 'Inputs', widthMm, heightMm, 'dip-switch', pins, 'simulated', {
     simulationAdapterId: 'sim.dip-switch',
-    description: `${ways}-way DIP switch. Each numbered pole is an independent contact between its top and bottom pin — set them individually while the simulation runs.`,
+    description: `${ways}-way DIP switch. Each numbered pole is an independent contact between its top and bottom pin: set them individually while the simulation runs.`,
   });
 }
 
@@ -1989,7 +1989,7 @@ function makeKeypad(
 
 export const KEYPAD_3X4 = makeKeypad(
   'comp.keypad-3x4', 'Membrane Keypad 3×4', 4, 3, 'keypad',
-  'Standard 12-key membrane keypad, four rows by three columns. Each key is a plain contact between its row and column line — there is no controller and no character output, so firmware scans it exactly as it would real hardware. Several keys can be held at once.',
+  'Standard 12-key membrane keypad, four rows by three columns. Each key is a plain contact between its row and column line: there is no controller and no character output, so firmware scans it exactly as it would real hardware. Several keys can be held at once.',
 );
 
 export const KEYPAD_4X4 = makeKeypad(

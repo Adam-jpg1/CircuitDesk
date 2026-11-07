@@ -112,7 +112,7 @@ export function importBoardBundle(text: string): { board?: CustomBoardDefinition
         severity: 'error',
         code: 'not-a-board-bundle',
         message:
-          `This is not a CircuitDesk board file — it says kind "${String(bundle.kind)}". ` +
+          `This is not a CircuitDesk board file: it says kind "${String(bundle.kind)}". ` +
           `A board file has kind "${BUNDLE_KIND}".`,
       }],
     };

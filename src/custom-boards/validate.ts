@@ -417,7 +417,7 @@ export function validateCustomBoard(raw: unknown): { problems: BoardProblem[]; b
         code: 'pad-shared',
         message:
           `${boardName}: ${owners.join(' and ')} both map to ${pad}. ` +
-          'They will behave as one signal — intended for a test point, a mistake otherwise.',
+          'They will behave as one signal: intended for a test point, a mistake otherwise.',
       });
     }
   }

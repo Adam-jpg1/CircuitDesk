@@ -159,7 +159,7 @@ const NONE: never[] = [];
 const PROTOTYPING: CoverageEntry[] = [
   entry('comp.breadboard-half', 'Breadboard (half, 400pt)', 'Prototyping', 'wt', 'structural', 'simulated', NONE, NONE, 'hardware', ['tests/qa.beta.mts']),
   entry('comp.breadboard-mini', 'Breadboard (mini, 170pt)', 'Prototyping', 'wt', 'structural', 'simulated', NONE, NONE, 'hardware', ['tests/qa.beta.mts']),
-  entry('comp.header-4', 'Header (4-pin)', 'Prototyping', 'wt', 'structural', 'simulated', NONE, NONE, 'basic', ['tests/coverage.report.mts'], 'A connector, and connecting is all it does — its pins are in the netlist and conduct. There is no missing primitive behind it.'),
+  entry('comp.header-4', 'Header (4-pin)', 'Prototyping', 'wt', 'structural', 'simulated', NONE, NONE, 'basic', ['tests/coverage.report.mts'], 'A connector, and connecting is all it does: its pins are in the netlist and conduct. There is no missing primitive behind it.'),
   entry('comp.breadboard-psu', 'Breadboard power module', 'Prototyping', '-', 'power', 'missing', NONE, ['selectable-rail-source'], 'none', NONE, 'Planned: 3.3V/5V rail selection feeding breadboard rails.'),
 ];
 
@@ -239,7 +239,7 @@ const SENSORS: CoverageEntry[] = [
   entry('comp.pulse-sensor', 'Pulse sensor', 'Sensors', '-', 'analog-source', 'behavioral', ['analog'], ['analog-waveform-source'], 'hardware', ['tests/parts.discrete.mts'], 'A heartbeat waveform (systolic peak, dicrotic notch) at the BPM set in the inspector, on its signal pin. No motion or ambient-light artefacts.'),
   entry('comp.mq2', 'MQ-2 gas sensor', 'Sensors', 'wt', 'analog-source', 'behavioral', ['analog'], ['gas-response-model'], 'hardware', ['tests/sensors.batch3.mts'], 'Logarithmic response curve only. No heater warm-up, no gas selectivity, no per-gas calibration.'),
   entry('comp.soil-moisture', 'Soil moisture sensor', 'Sensors', 't', 'analog-source', 'simulated', ['analog'], NONE, 'hardware', ['tests/sensors.batch3.mts']),
-  entry('comp.rain-sensor', 'Rain sensor', 'Sensors', '-', 'analog-source', 'behavioral', ['analog'], ['analog-solver'], 'hardware', ['tests/sensors.batch3.mts'], 'Surface resistance falls when wet. Behavioural only — no droplet detection or hysteresis.'),
+  entry('comp.rain-sensor', 'Rain sensor', 'Sensors', '-', 'analog-source', 'behavioral', ['analog'], ['analog-solver'], 'hardware', ['tests/sensors.batch3.mts'], 'Surface resistance falls when wet. Behavioural only: no droplet detection or hysteresis.'),
   entry('comp.fingerprint', 'Fingerprint sensor (R307)', 'Sensors', '-', 'uart-device', 'missing', ['uart'], ['fingerprint-template-model'], 'none', NONE),
 ];
 
@@ -329,7 +329,7 @@ const LOGIC: CoverageEntry[] = [
 
 // ----------------------------------------------------------------------- ICs
 const ICS: CoverageEntry[] = [
-  entry('comp.ne555', 'NE555 timer', 'ICs', 't', 'logic-ic', 'missing', ['analog', 'gpio'], ['analog-solver'], 'none', NONE, 'Astable/monostable timing needs RC behaviour; a fixed-frequency stand-in would be dishonest.'),
+  entry('comp.ne555', 'NE555 timer', 'ICs', 't', 'logic-ic', 'missing', ['analog', 'gpio'], ['analog-solver'], 'none', NONE, 'Astable/monostable timing needs RC behaviour; a fixed-frequency stand-in would give wrong timing.'),
   entry('comp.ne556', 'NE556 dual timer', 'ICs', 't', 'logic-ic', 'missing', ['analog', 'gpio'], ['analog-solver'], 'none', NONE),
   entry('comp.lm741', 'LM741 op-amp', 'ICs', 't', 'logic-ic', 'missing', ['analog'], ['analog-solver'], 'none', NONE),
   entry('comp.lm358', 'LM358 dual op-amp', 'ICs', 't', 'logic-ic', 'missing', ['analog'], ['analog-solver'], 'none', NONE),
@@ -344,7 +344,7 @@ const ICS: CoverageEntry[] = [
 
 // --------------------------------------------------------- Motors & Actuators
 const MOTORS: CoverageEntry[] = [
-  entry('comp.dc-motor', 'DC motor', 'Motors & Actuators', 'wt', 'actuator', 'behavioral', ['gpio', 'pwm'], ['mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'Direction and magnitude come from the terminal voltages; the shaft position is integrated from them. No inertia, back-EMF, torque or load — those need the analog solver.'),
+  entry('comp.dc-motor', 'DC motor', 'Motors & Actuators', 'wt', 'actuator', 'behavioral', ['gpio', 'pwm'], ['mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'Direction and magnitude come from the terminal voltages; the shaft position is integrated from them. No inertia, back-EMF, torque or load: those need the analog solver.'),
   entry('comp.dc-motor-encoder', 'DC motor with encoder', 'Motors & Actuators', '-', 'actuator', 'behavioral', ['gpio', 'pwm'], ['mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'Both encoder channels are derived from the integrated shaft position, so direction is readable from the edge order. No inertia or load.'),
   entry('comp.gearmotor', 'Gearmotor', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio', 'pwm'], ['mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'Same terminal-derived model at a geared rating. No inertia, torque or load.'),
   entry('comp.vibration-motor', 'Vibration motor', 'Motors & Actuators', 't', 'actuator', 'behavioral', ['gpio', 'pwm'], ['mechanical-load-model'], 'hardware', ['tests/motors.drive.mts'], 'Same terminal-derived model at a 3 V rating. No inertia or torque.'),
@@ -367,7 +367,7 @@ const COMMUNICATION: CoverageEntry[] = [
   entry('comp.hc05', 'HC-05 Bluetooth module', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['uart-endpoint', 'bluetooth-channel'], 'hardware', ['tests/uart.modules.mts'], 'The UART and AT-command side is real; there is no Bluetooth radio, pairing, inquiry, RFCOMM or profile handling. Data-mode bytes are recorded where a channel would attach.'),
   entry('comp.gps', 'GPS NEO-6M', 'Communication', '-', 'uart-device', 'simulated', ['uart'], ['uart-endpoint'], 'hardware', ['tests/uart.link.mts']),
   entry('comp.wifi-ap', 'Wi-Fi access point', 'Communication', '-', 'instrument', 'simulated', ['rf'], ['wifi-network'], 'hardware', ['tests/wifi.esp32.mts'], 'The access point the ESP boards\' own Wi-Fi joins: SSID and password checked, DHCP, DNS for the boards\' hostnames, ARP and ping, and frames switched between its stations, whose own lwIP stacks do the TCP and UDP. No internet, signal strength, channels or WPA handshake.'),
-  entry('comp.esp01', 'ESP-01 AT modem', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['uart-endpoint', 'canvas-lan'], 'hardware', ['tests/uart.esp01.mts'], 'The AT modem is real — parser, echo, CH_PD/RST gating, mode and association against a simulated access point — and ESP-01s on one canvas share a LAN with TCP between them (CIPSERVER, CIPSTART, CIPSEND, +IPD, CIPCLOSE). No internet, DNS, UDP or SSL: CIPSTART to an outside host fails rather than pretending.'),
+  entry('comp.esp01', 'ESP-01 AT modem', 'Communication', '-', 'uart-device', 'behavioral', ['uart'], ['uart-endpoint', 'canvas-lan'], 'hardware', ['tests/uart.esp01.mts'], 'The AT modem is real, parser, echo, CH_PD/RST gating, mode and association against a simulated access point, and ESP-01s on one canvas share a LAN with TCP between them (CIPSERVER, CIPSTART, CIPSEND, +IPD, CIPCLOSE). No internet, DNS, UDP or SSL: CIPSTART to an outside host fails rather than pretending.'),
   entry('comp.dfplayer', 'DFPlayer Mini', 'Communication', 'w', 'uart-device', 'behavioral', ['uart'], ['uart-endpoint', 'audio-decoder'], 'hardware', ['tests/uart.modules.mts'], 'The serial protocol, checksums and playback state are real; nothing decodes audio or models a file system, so a track number is a number.'),
   entry('comp.sim800l', 'SIM800L GSM modem', 'Communication', '-', 'uart-device', 'missing', ['uart'], ['cellular-network'], 'none', NONE),
   entry('comp.nrf24l01', 'nRF24L01 radio', 'Communication', '-', 'spi-register', 'simulated', ['spi', 'rf'], ['rf-channel', 'spi-register-device'], 'hardware', ['tests/rf.nrf24.mts'], 'Register file, both FIFOs, CE/CSN as separate signals, real airtime through the shared RF medium, and genuine auto-acknowledgement with retries and MAX_RT. RPD/RSSI read zero because the medium has no signal strength; ack payloads, payload reuse and per-bit CRC are not modelled.'),

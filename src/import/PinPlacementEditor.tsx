@@ -112,7 +112,7 @@ export function PinPlacementEditor({
               </tr>
             ))}
             {pins.length === 0 && (
-              <tr><td colSpan={6} style={{ color: 'var(--text-2)', padding: 12 }}>No pins yet — click the artwork to place them.</td></tr>
+              <tr><td colSpan={6} style={{ color: 'var(--text-2)', padding: 12 }}>No pins yet. Click the artwork to place them.</td></tr>
             )}
           </tbody>
         </table>

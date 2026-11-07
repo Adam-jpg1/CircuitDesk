@@ -216,7 +216,7 @@ export const COMPILE_PROFILES: CompileProfile[] = [
     libraries: ['Servo'],
     description:
       'The Arduino AVR core, built for an ATmega328P at 16 MHz. Emits Intel HEX. ' +
-      'Any board carrying that chip can use it — the target is the processor, not a product.',
+      'Any board carrying that chip can use it: the target is the processor, not a product.',
   },
   {
     id: 'compile.avr-arduino-mega',
@@ -255,7 +255,7 @@ export const COMPILE_PROFILES: CompileProfile[] = [
     libraries: ['Servo'],
     description:
       'The Arduino-Pico core, built for an RP2040. Emits UF2. The FQBN names a Pico because that is ' +
-      'the core\'s generic RP2040 target — the board using this profile keeps its own identity.',
+      'the core\'s generic RP2040 target: the board using this profile keeps its own identity.',
   },
   {
     id: 'compile.esp32c3-arduino',
@@ -466,7 +466,7 @@ export const RUNTIME_PROFILES: RuntimeProfile[] = [
       'USART0 (Serial)',
       'ADC 16 channels',
     ],
-    description: 'Executes ATmega2560 firmware on avr8js with the 2560 memory map — never the 328P profile.',
+    description: 'Executes ATmega2560 firmware on avr8js with the 2560 memory map, never the 328P profile.',
   },
   {
     id: 'runtime.avr8js-32u4',

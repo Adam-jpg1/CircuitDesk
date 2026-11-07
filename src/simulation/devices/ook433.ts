@@ -72,7 +72,7 @@ export class Ook433Transmitter {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `433 MHz transmitter — ${(this.frequencyKhz / 1000).toFixed(2)} MHz, ` +
+        `433 MHz transmitter: ${(this.frequencyKhz / 1000).toFixed(2)} MHz, ` +
         `carrier ${this.keyed ? 'on' : 'off'}, ${this.marks} mark(s) sent`,
       log: [...this.log],
     };
@@ -135,10 +135,10 @@ export class Ook433Receiver {
     const recent = this.pulses.slice(-6).join(', ');
     return {
       status:
-        `433 MHz receiver — ${(this.frequencyKhz / 1000).toFixed(2)} MHz, ` +
+        `433 MHz receiver: ${(this.frequencyKhz / 1000).toFixed(2)} MHz, ` +
         `output ${this.high ? 'HIGH' : 'low'}, ${this.edges} edge(s)` +
         (this.collisions ? `, ${this.collisions} overlapping sample(s)` : '') +
-        (recent ? ` — recent pulses ${recent} us` : ''),
+        (recent ? `recent pulses ${recent} us` : ''),
       log: [...this.log],
     };
   }

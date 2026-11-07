@@ -71,7 +71,7 @@ export function parseEasyEda(text: string, fileName: string): ImportParseResult 
 
   if (!Number.isFinite(minX)) {
     minX = 0; minY = 0; maxX = 60; maxY = 40;
-    warnings.push('No coordinates found — this may be a schematic-only document.');
+    warnings.push('No coordinates found: this may be a schematic-only document.');
   }
   for (const p of pins) {
     p.xMm -= minX;

@@ -92,7 +92,7 @@ function SerialPanel() {
         {serialText || (
           <span style={{ color: 'var(--text-2)' }}>
             {status === 'stopped'
-              ? 'Serial monitor — output from the emulated UART appears here when the simulation runs. With more than one board on the canvas each line is labelled with the board that wrote it.'
+              ? 'Serial monitor: what the sketch prints appears here when the simulation runs. With more than one board on the canvas each line is labelled with the board that wrote it.'
               : 'Waiting for serial output…'}
           </span>
         )}
@@ -159,7 +159,7 @@ function CompilerPanel() {
     <div className="mono-out">
       {health && (
         <div style={{ color: health.available ? 'var(--text-2)' : '#e8c35a', marginBottom: 8 }}>
-          Toolchain: {health.available ? `${health.toolchain} — ${health.version}` : 'unavailable'}. {health.detail}
+          Toolchain: {health.available ? `${health.toolchain} ${health.version}` : 'unavailable'}. {health.detail}
         </div>
       )}
       {capabilities && capabilities.status !== 'unreachable' && capabilities.cores.length > 0 && (
@@ -171,7 +171,7 @@ function CompilerPanel() {
             >
               {core.installed ? (core.matchesPin ? '•' : '!') : '✗'} {core.id}{' '}
               {core.installed ? core.installedVersion : 'not installed'}
-              {core.reason ? ` — ${core.reason}` : ''}
+              {core.reason ? ` (${core.reason})` : ''}
             </div>
           ))}
         </div>
@@ -220,7 +220,7 @@ function CompilerPanel() {
           <div style={{ color: lastCompile.success ? 'var(--ok)' : 'var(--error)', fontWeight: 700 }}>
             {lastCompile.success ? '✓ Build succeeded' : '✗ Build failed'}
             <span style={{ color: 'var(--text-2)', fontWeight: 400 }}>
-              {' '}— {lastCompile.toolchain} · {(lastCompile.durationMs / 1000).toFixed(1)} s
+              {' '}· {lastCompile.toolchain} · {(lastCompile.durationMs / 1000).toFixed(1)} s
             </span>
           </div>
           {lastCompile.memory && (
@@ -252,7 +252,7 @@ function ValidationPanel() {
     <div style={{ flex: 1, overflowY: 'auto' }}>
       {issues.length === 0 && (
         <div className="empty-state">
-          <p>No validation results yet — press Validate in the toolbar.</p>
+          <p>No validation results yet. Press Validate in the toolbar.</p>
           <p style={{ fontSize: 11.5 }}>Checks include missing ground, LED resistors, polarity, 5 V→3.3 V conflicts, floating inputs, I2C/UART pin use and code↔circuit mismatches.</p>
         </div>
       )}
@@ -305,8 +305,7 @@ function PinsPanel() {
       <div className="empty-state">
         <p>Live pin states require simulation support for {model.boardName}.</p>
         <p style={{ fontSize: 11.5 }}>
-          This board's badge describes what is supported. Its pins are still real connection points for wiring
-          and validation — CircuitDesk just doesn't pretend to show live activity it can't simulate.
+          This board's badge describes what is supported. You can still wire and validate its pins.
         </p>
       </div>
     );
@@ -367,7 +366,7 @@ function DebugPanel() {
 
   return (
     <div className="mono-out">
-      <div>Simulation status : {status}{error ? ` — ${error}` : ''}</div>
+      <div>Simulation status: {status}{error ? ` (${error})` : ''}</div>
       <div>Simulated time    : {(simTimeMs / 1000).toFixed(3)} s</div>
       <div>Execution speed   : {(speedFactor * 100).toFixed(0)}% of real time (16 MHz AVR)</div>
       <div>Firmware          : {lastCompile?.success ? `${lastCompile.memory?.flashBytes ?? '?'} bytes flash, built by ${lastCompile.toolchain} in ${(lastCompile.durationMs / 1000).toFixed(1)} s` : 'not compiled'}</div>

@@ -156,7 +156,7 @@ const ESP32_SIM_PERIPHERALS = [
 const ESP32_LIMITATION =
   'Real Xtensa execution of the compiled image on both cores, under ESP-IDF\'s own startup and FreeRTOS: GPIO and '
   + 'interrupts, timing, Serial, floating point, analogRead(), PWM/tone()/servos, Wire and SPI. The ADC converts '
-  + 'ideally (no noise or curve). Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated.';
+  + 'ideally (no noise or curve). Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP, with no internet behind it, and no soft-AP mode. Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated.';
 
 const ESP32C3_SIM_APIS = [
   'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
@@ -182,7 +182,7 @@ const ESP32C3_SIM_PERIPHERALS = [
   'System timer, which drives the FreeRTOS tick',
   'Interrupt matrix and CPU interrupt controller',
   'SPI flash and the flash MMU',
-  'UART0 — FIFOs, the TX-empty, RX-full, RX-timeout and TX-done interrupts, baud from the programmed divider',
+  'UART0: FIFOs, the TX-empty, RX-full, RX-timeout and TX-done interrupts, baud from the programmed divider',
   'SAR ADC one-shot conversions, at the attenuation the sketch sets',
   'GPIO interrupts, through the interrupt matrix',
   'LED PWM controller: four timers, six channels, routed through the GPIO matrix',
@@ -197,7 +197,7 @@ const ESP32C3_SIM_PERIPHERALS = [
 const ESP32C3_LIMITATION =
   'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO and ' +
   'interrupts, floating point, Serial on UART0, analogRead(), analogWrite()/tone()/servos on the LED PWM controller, ' +
-  'Wire, SPI and EEPROM/Preferences. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. ' +
+  'Wire, SPI and EEPROM/Preferences. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP, with no internet behind it, and no soft-AP mode. ' +
   'Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated. USB Serial/JTAG is not simulated.';
 
 /**
@@ -232,7 +232,7 @@ const ESP32C6_SIM_PERIPHERALS = [
   'Low-power timer, which is where the runtime reads the time',
   'SPI flash and the flash MMU',
   'ROM watchdog, heap, system-timer and flash drivers this part boots on',
-  'UART0 — FIFOs, the TX-empty, RX-full, RX-timeout and TX-done interrupts, baud from the programmed divider',
+  'UART0: FIFOs, the TX-empty, RX-full, RX-timeout and TX-done interrupts, baud from the programmed divider',
   'SAR ADC one-shot conversions, at the attenuation the sketch sets',
   'GPIO interrupts, through the interrupt matrix',
   'LED PWM controller: four timers, six channels, routed through the GPIO matrix',
@@ -247,8 +247,8 @@ const ESP32C6_SIM_PERIPHERALS = [
 const ESP32C6_LIMITATION =
   'Real RISC-V execution of the compiled application image: ESP-IDF startup, FreeRTOS, setup() and loop(), GPIO ' +
   'with its pulls and interrupts, floating point, Serial on UART0, analogRead(), analogWrite()/tone()/servos on the LED ' +
-  'PWM controller, Wire, SPI and EEPROM/Preferences. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. ' +
-  'Bluetooth LE is not simulated: BLEDevice::init() fails plainly and the sketch carries on. Zigbee/802.15.4, Thread and USB Serial/JTAG are not simulated either — sketches using them compile and run, but those radios and that port do nothing.';
+  'PWM controller, Wire, SPI and EEPROM/Preferences. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP, with no internet behind it, and no soft-AP mode. ' +
+  'Bluetooth LE is not simulated: BLEDevice::init() fails plainly and the sketch carries on. Zigbee/802.15.4, Thread and USB Serial/JTAG are not simulated either: sketches using them compile and run, but those radios and that port do nothing.';
 
 const SAMD21_SIM_APIS = [
   'pinMode (INPUT, OUTPUT, INPUT_PULLUP, INPUT_PULLDOWN)',
@@ -260,7 +260,7 @@ const SAMD21_SIM_APIS = [
   'SPI (master, on the board\'s SCK/MOSI/MISO)',
   'delay/millis/micros',
   'Serial (native USB CDC, to the serial monitor, both directions; while (!Serial) returns once connected)',
-  'Serial1 (the hardware UART, both directions — a part wired to RX/TX reaches it)',
+  'Serial1 (the hardware UART, both directions: a part wired to RX/TX reaches it)',
   'Servo (544-2400 µs pulses every 20 ms) and tone(), on the timers\' interrupts',
   'external interrupts (attachInterrupt)',
 ];
@@ -272,14 +272,14 @@ const SAMD21_SIM_PERIPHERALS = [
   'TCC0-2 and TC3-7 counting on the simulated clock: normal PWM and match frequency, compare and overflow interrupts',
   'EIC, the external interrupt controller, on every EXTINT line',
   'SERCOM I2C master and SPI master, on the shared device buses',
-  'USB device controller — the CDC serial port, enumerated by a modelled host',
+  'USB device controller: the CDC serial port, enumerated by a modelled host',
   'the SERCOM USART behind Serial1 (SERCOM0 on the Adafruit boards, SERCOM4 on the XIAO), with its receive interrupt',
 ];
 
 const SAMD21_LIMITATION =
   'Real SAMD21 firmware on a Cortex-M0+ core: startup, setup() and loop(), GPIO, analogRead, analogWrite (PWM), Wire, SPI, ' +
   'Servo, tone(), attachInterrupt(), Serial over native USB and Serial1 on the UART pins. ' +
-  'DMA, the DAC and sleep are not simulated — sketches using them compile and run, but those peripherals do nothing. ' +
+  'DMA, the DAC and sleep are not simulated: sketches using them compile and run, but those peripherals do nothing. ' +
   'The SAMD21 has no EEPROM, so the EEPROM library does not exist for these boards; FlashStorage is the usual stand-in.';
 
 const DUE_SIM_APIS = [
@@ -311,7 +311,7 @@ const DUE_SIM_PERIPHERALS = [
 const DUE_LIMITATION =
   "Real SAM3X8E firmware on CircuitDesk's ARMv7-M core: startup, setup() and loop(), GPIO, analogRead, analogWrite, Wire, " +
   "SPI, Serial to Serial3, attachInterrupt and Servo. tone() and the EEPROM library are not part of the Due's core. The native USB port (SerialUSB), CAN, EMAC (Ethernet), " +
-  "DMA and the DAC's analog output onto the canvas are not simulated — sketches using them compile and run, but those " +
+  "DMA and the DAC's analog output onto the canvas are not simulated: sketches using them compile and run, but those " +
   'peripherals do nothing. The Due has no EEPROM; DueFlashStorage writes to the simulated flash.';
 
 const NUCLEO_SIM_APIS = [
@@ -345,7 +345,7 @@ const NUCLEO_SIM_PERIPHERALS = [
 const NUCLEO_LIMITATION =
   "Real STM32F401RE firmware from the STM32duino core on CircuitDesk's ARMv7-M core: startup, setup() and loop(), GPIO, " +
   'analogRead, analogWrite, tone, Wire, SPI, Serial, attachInterrupt, Servo and EEPROM. DMA, USB, the RTC, the watchdogs ' +
-  'and timer input capture are not simulated — sketches using them compile and run, but those peripherals do nothing. ' +
+  'and timer input capture are not simulated: sketches using them compile and run, but those peripherals do nothing. ' +
   'The CPU runs at the 84 MHz the Nucleo variant sets up from the start; the clock tree itself is not modelled.';
 
 const R4_SIM_APIS = [
@@ -376,7 +376,7 @@ const R4_SIM_PERIPHERALS = [
 const R4_LIMITATION =
   "Real RA4M1 firmware from the Arduino Renesas core on CircuitDesk's ARMv7-M core: startup, setup() and loop(), GPIO, " +
   'analogRead, analogWrite, Wire, SPI, Serial over USB, Serial1, attachInterrupt, Servo, tone and EEPROM. DMA, CAN, the capacitive touch unit and ' +
-  "the DAC's analog output onto the canvas are not simulated — sketches using them compile and run, but those peripherals do " +
+  "the DAC's analog output onto the canvas are not simulated: sketches using them compile and run, but those peripherals do " +
   'nothing. The CPU runs at the 48 MHz the core configures from the start.';
 
 const MICROBIT_SIM_APIS = [
@@ -605,7 +605,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     },
     analogPinBase: 54,
     limitation:
-      'Runs its own ATmega2560 profile (8 KB SRAM at 0x200, Mega vector table, ports A-L) — never the Uno profile. ' +
+      'Runs its own ATmega2560 profile (8 KB SRAM at 0x200, Mega vector table, ports A-L), never the Uno profile. ' +
       'attachInterrupt on pins 2, 3 and 18-21 and pin-change interrupts (PCINT0-2) use the ATmega2560\'s own vectors. ' +
       'Serial (USART0) and Serial1-Serial3 (USART1-3, on pins 19/18, 17/16 and 15/14) are emulated, each reaching the parts wired to its own pins.',
   },
@@ -624,14 +624,14 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       supportedPeripherals: [
         'GPIO ports B/C/D/E/F (D0-D17, A0-A5)',
         'Timer0, Timer1 and Timer3 (PWM on D3, D5, D9, D10, D11)',
-        'USART1 — Arduino Serial1 on D0/D1',
-        'USB device controller — the CDC serial port (Arduino Serial), enumerated by a modelled host',
+        'USART1: Arduino Serial1 on D0/D1',
+        'USB device controller: the CDC serial port (Arduino Serial), enumerated by a modelled host',
         'ADC channels 0-7 (A0-A5)',
       ],
     },
     analogPinBase: 18,
     limitation:
-      'Runs its own ATmega32U4 profile (2.5 KB SRAM, 32U4 vector table, ports B-F) — never the Uno profile. ' +
+      'Runs its own ATmega32U4 profile (2.5 KB SRAM, 32U4 vector table, ports B-F), never the Uno profile. ' +
       'Serial is the native USB port and reaches the serial monitor; USB HID (Keyboard, Mouse) enumerates but nothing reads its reports. ' +
       'analogWrite on D6 and D13 runs on a model of the 32U4\'s own Timer4, at its 490 Hz. ' +
       'attachInterrupt (INT0-INT3, INT6), pin-change interrupts, SPI, I2C and EEPROM run on the 32U4\'s own registers and vectors. ' +
@@ -697,7 +697,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       requiredCore: 'rp2040:rp2040',
       supported: true,
       note: 'Built as a Seeed XIAO RP2040 (rp2040:rp2040:seeed_xiao_rp2040), with its own variant: D0-D10 as '
-        + 'printed, LED_BUILTIN on GP17, and Wire on GP6/GP7 — the pads marked SDA and SCL.',
+        + 'printed, LED_BUILTIN on GP17, and Wire on GP6/GP7: the pads marked SDA and SCL.',
     },
     simulation: {
       engine: 'rp2040js',
@@ -725,7 +725,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       fqbn: 'esp32:esp32:esp32c3',
       requiredCore: 'esp32:esp32',
       supported: true,
-      note: 'Built through the esp32:esp32 core\'s ESP32-C3 target — the same RISC-V chip and the same 4 MB flash '
+      note: 'Built through the esp32:esp32 core\'s ESP32-C3 target: the same RISC-V chip and the same 4 MB flash '
         + 'layout as the DevKitM-1 entry. Never compiled through an Xtensa or AVR core.',
     },
     simulation: {
@@ -735,9 +735,9 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       supportedPeripherals: ESP32C3_SIM_PERIPHERALS,
     },
     limitation:
-      'Real RISC-V execution of the compiled image, with the same peripherals as the DevKitM-1 entry — GPIO and '
-      + 'interrupts, floating point, analogRead(), PWM/tone()/servos, Wire, SPI and EEPROM — built through the generic C3 '
-      + 'target, so Serial is the UART rather than the native USB port. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. '
+      'Real RISC-V execution of the compiled image, with the same peripherals as the DevKitM-1 entry: GPIO and '
+      + 'interrupts, floating point, analogRead(), PWM/tone()/servos, Wire, SPI and EEPROM: built through the generic C3 '
+      + 'target, so Serial is the UART rather than the native USB port. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP, with no internet behind it, and no soft-AP mode. '
       + 'Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated.',
   },
   'board.arduino-due': {
@@ -970,8 +970,8 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     extraPinCaps: [{ pattern: /^GP\d+$/, add: ['pwm'] }],
     limitation:
       'The CYW43439 Wi-Fi chip is simulated at its SPI bus, with the board\'s own cyw43 driver, lwIP and WiFi library '
-      + 'running as built: Wi-Fi works as a station — scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP '
-      + 'and DNS from it, and TCP/UDP to other boards on it — with no internet behind it and no soft-AP mode. '
+      + 'running as built: Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP '
+      + 'and DNS from it, and TCP/UDP to other boards on it, with no internet behind it and no soft-AP mode. '
       + 'Bluetooth LE works too, through the core\'s BTstack and the chip\'s Bluetooth bus: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated. LED_BUILTIN is the chip\'s GPIO0 and follows the sketch, though the canvas does not draw it. '
       + RP2040_LIMITATION,
   },
@@ -980,7 +980,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
   'board.esp32-devkit': {
     manufacturer: MULTI_VENDOR_DESIGN,
     identityNote:
-      '"ESP32 DevKit V1" is a widely cloned third-party design, not an Espressif product — Espressif\'s own boards are the ESP32-DevKitC series. It is produced by many vendors, so no single manufacturer is claimed.',
+      '"ESP32 DevKit V1" is a widely cloned third-party design, not an Espressif product. Espressif\'s own boards are the ESP32-DevKitC series. It is produced by many vendors, so no single manufacturer is claimed.',
     architecture: 'esp32',
     variant: 'esp32',
     aliases: ['esp32-devkit-v1', 'esp32'],
@@ -995,7 +995,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       fqbn: 'esp32:esp32:esp32',
       requiredCore: 'esp32:esp32',
       supported: true,
-      note: 'Built as the Espressif core\'s "ESP32 Dev Module" — the ESP32-WROOM-32 with 4 MB of flash that the DevKit V1 carries.',
+      note: 'Built as the Espressif core\'s "ESP32 Dev Module"the ESP32-WROOM-32 with 4 MB of flash that the DevKit V1 carries.',
     },
     simulation: {
       engine: 'esp32',
@@ -1034,7 +1034,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation:
       'Real Xtensa LX7 execution of the compiled image on both cores, under ESP-IDF\'s own startup and FreeRTOS: GPIO and '
       + 'interrupts, timing, Serial and Serial1, floating point, analogRead(), PWM/tone()/servos, Wire and SPI. The ADC '
-      + 'converts ideally. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated. The native USB port and the on-board RGB LED are not simulated.',
+      + 'converts ideally. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP, with no internet behind it, and no soft-AP mode. Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated. The native USB port and the on-board RGB LED are not simulated.',
   },
   // The board is real and its pins are right; the runtime is not built yet, so
   // The compiler target is genuine — the core's generic esp32c6 target is what
@@ -1128,7 +1128,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
       + 'interrupts, timing, Serial, floating point, analogRead(A0) through the board\'s divider (3.3 V reads 1024), '
       + 'analogWrite()/tone()/Servo, Wire on D2/D1 and SPI on D5-D7. Wi-Fi works as a station: scanning, joining a Wi-Fi '
       + 'Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the core\'s own '
-      + 'lwIP — with no internet behind it, and no soft-AP mode.',
+      + 'lwIP, with no internet behind it, and no soft-AP mode.',
   },
   'board.esp32-cam': {
     manufacturer: MULTI_VENDOR_DESIGN,
@@ -1158,7 +1158,7 @@ export const BOARD_CAPABILITIES: Record<string, BoardCapabilityEntry> = {
     limitation:
       'The ESP32 runs the compiled sketch exactly as on the DevKit: GPIO, timing, Serial, analogRead(), PWM, Wire and SPI '
       + 'on the pins the module brings out. The OV2640 camera, the microSD slot and the PSRAM are not simulated, so the '
-      + 'camera library cannot be used; IO4 drives the module\'s flash LED on the real board. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP — with no internet behind it, and no soft-AP mode. Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated.',
+      + 'camera library cannot be used; IO4 drives the module\'s flash LED on the real board. Wi-Fi works as a station: scanning, joining a Wi-Fi Access Point placed on the canvas, DHCP and DNS from it, and TCP/UDP to other boards on it through the firmware\'s own lwIP, with no internet behind it, and no soft-AP mode. Bluetooth LE works through the firmware\'s own host: advertising, scanning, connections and GATT, with the workbench as a phone or with other boards on the canvas; pairing, encryption and Classic Bluetooth are not simulated.',
   },
 
   // ---------------- STM32 / imxrt / nRF52 ----------------

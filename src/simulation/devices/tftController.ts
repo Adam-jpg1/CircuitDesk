@@ -406,7 +406,7 @@ export class TftDisplayDevice implements SpiDevice {
   snapshot(): DeviceSnapshot {
     return {
       status:
-        `${this.spec.name} ${this.spec.width}x${this.spec.height} — ` +
+        `${this.spec.name} ${this.spec.width}x${this.spec.height}: ` +
         `${this.isVisible ? 'on' : this.sleeping ? 'asleep' : 'display off'}, ` +
         `${this.fb.written} pixel(s) written, ${this.commandBytes} command(s)` +
         (this.unknown.length ? `, ${this.unknownCommands.length} unknown command(s)` : '') +

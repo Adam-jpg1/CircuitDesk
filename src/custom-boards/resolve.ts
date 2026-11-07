@@ -219,7 +219,7 @@ export function describeLimits(definition: CustomBoardDefinition): string {
   }
   const runtime = runtimeProfile(definition.runtimeProfileId);
   if (!runtime || runtime.engine === 'none') {
-    return `${processor.name} firmware is not executed by CircuitDesk for this board — it compiles only.`;
+    return `${processor.name} firmware is not executed by CircuitDesk for this board: it compiles only.`;
   }
   return `Runs on the ${runtime.name}. Not modelled: ${processor.notModelled.join('; ')}.`;
 }
@@ -248,7 +248,7 @@ export function capabilitySummary(definition: CustomBoardDefinition): {
     compile: board.compiler?.supported ? compile?.name ?? 'None' : 'None',
     runtime: board.simulation?.supported ? runtime?.name ?? 'None' : 'None',
     supported: board.simulation?.supported ? [...runtime!.supportedApis] : [],
-    notSimulated: processor ? [...processor.notModelled] : ['everything — no processor is configured'],
+    notSimulated: processor ? [...processor.notModelled] : ['everything: no processor is configured'],
     supportLevel: board.supportLevel as 'simulated' | 'compile' | 'wiring',
   };
 }
