@@ -27,7 +27,8 @@ function section(t: string) {
 }
 
 const PORT = 5199;
-const vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
+// Vite itself, not through npx: killing npx would leave the server holding the port.
+const vite = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--port', String(PORT), '--strictPort'], { stdio: ['ignore', 'pipe', 'pipe'] });
 let log = '';
 vite.stdout.on('data', (d) => (log += d));
 vite.stderr.on('data', (d) => (log += d));
