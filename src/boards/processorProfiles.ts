@@ -274,7 +274,7 @@ const RP2040: ProcessorProfile = {
   ],
   interruptPads: Array.from({ length: 30 }, (_, i) => `GP${i}`),
   logicVolts: 3.3,
-  notModelled: ['DMA feeding PIO', 'USB other than the CDC serial port (no HID, no mass storage)', 'the second core', 'Wi-Fi on W variants'],
+  notModelled: ['DMA feeding PIO', 'USB other than the CDC serial port (no HID, no mass storage)', 'Wi-Fi on W variants'],
 };
 
 const ESP32C3: ProcessorProfile = {

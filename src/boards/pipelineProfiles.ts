@@ -493,7 +493,7 @@ export const RUNTIME_PROFILES: RuntimeProfile[] = [
       'delay/millis/micros', 'Serial1 (hardware UART)', 'Wire (I2C)', 'SPI',
     ],
     supportedPeripherals: ['SIO GPIO', 'ADC', 'PWM slices', 'PIO', 'UART0/1', 'I2C0/1', 'SPI0/1', 'timers'],
-    description: 'Executes RP2040 UF2 images on rp2040js, with a USB host on the CDC serial port and PIO on the simulated clock. Other USB classes and the second core are not modelled.',
+    description: 'Executes RP2040 UF2 images on rp2040js, with a USB host on the CDC serial port and PIO on the simulated clock. Both cores run. Other USB classes are not modelled.',
   },
   {
     id: 'runtime.esp32c3',

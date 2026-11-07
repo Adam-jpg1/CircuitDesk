@@ -20,7 +20,7 @@ import { romFloatCall, type RomFloatCore } from './romFloat';
 import { PioClock } from './pioClock';
 import { PadPullResolver } from './gpioPulls';
 import { Rp2040ClockTree } from './clockTree';
-import { installSioFifo } from './sioFifo';
+import { CORE1_RETURN, DualCore } from './sioFifo';
 import { FLASH_BASE, parseRp2040Uf2, type Uf2Image } from './uf2';
 import {
   readI2cPins,
@@ -131,6 +131,8 @@ export class Rp2040Runner {
   readonly engine = 'rp2040js' as const;
 
   private rp!: RP2040;
+  /** The second core and the per-core SIO registers (sioFifo.ts). */
+  private dual!: DualCore;
   private pads!: PadPullResolver;
   private pioClock!: PioClock;
   private clocks!: Rp2040ClockTree;
@@ -258,7 +260,7 @@ export class Rp2040Runner {
     };
     this.rp = rp;
     this.clocks = new Rp2040ClockTree(rp as never);
-    installSioFifo(rp as never);
+    this.dual = new DualCore(rp as never);
     this.pads = new PadPullResolver(rp.gpio);
 
     for (const [addr, data] of this.image.blocks) rp.flash.set(data, addr - FLASH_BASE);
@@ -394,6 +396,10 @@ export class Rp2040Runner {
    * the next timer alarm.
    */
   private step(): void {
+    if (this.dual.running) {
+      this.stepBoth();
+      return;
+    }
     const core = this.rp.core;
     if ((core.PC & ~1) < ROM_HEADER_END) this.reportUnresolvedRomCall();
     const cycleNs = this.cycleNs;
@@ -401,6 +407,45 @@ export class Rp2040Runner {
     const wifi = this.wifi;
     if (wifi) wifi.service();
     if (core.waiting) {
+      this.idle(() => core.waiting);
+    } else {
+      const cycles = core.executeInstruction() || 1;
+      clock.tick(cycles * cycleNs);
+      if (this.pioClock.active) this.pioClock.advance(cycles);
+    }
+  }
+
+  /**
+   * Both cores, once the sketch has started core 1: an instruction on each
+   * core that is awake, and the clock advanced by the longer of the two, as
+   * the two run side by side at clk_sys. When both sleep, time moves on to
+   * whatever wakes one of them.
+   */
+  private stepBoth(): void {
+    const dual = this.dual;
+    const [core0, core1] = dual.cores;
+    if ((core1.PC & ~1) === CORE1_RETURN) dual.parkCore1();
+    else if (!core1.waiting && (core1.PC & ~1) < ROM_HEADER_END) this.reportUnresolvedRomCall();
+    if ((core0.PC & ~1) < ROM_HEADER_END) this.reportUnresolvedRomCall();
+    if (this.wifi) this.wifi.service();
+    const running1 = dual.running;
+    if (core0.waiting && (!running1 || core1.waiting)) {
+      this.idle(() => core0.waiting && (!dual.running || core1.waiting));
+      return;
+    }
+    const c0 = core0.waiting ? 0 : dual.execute(0);
+    const c1 = running1 && !core1.waiting ? dual.execute(1) : 0;
+    const cycles = Math.max(c0, c1, 1);
+    (this.rp.clock as unknown as { tick(ns: number): void }).tick(cycles * this.cycleNs);
+    if (this.pioClock.active) this.pioClock.advance(cycles);
+  }
+
+  /** The cores are asleep: time moves to the next alarm, the Wi-Fi chip's next frame, or PIO's next event. */
+  private idle(stillAsleep: () => boolean): void {
+    const cycleNs = this.cycleNs;
+    const clock = this.rp.clock as unknown as { tick(ns: number): void; nanosToNextAlarm: number };
+    const wifi = this.wifi;
+    {
       let ns = clock.nanosToNextAlarm || cycleNs;
       // A frame the Wi-Fi chip has for later raises its host-wake line then, waking the core.
       const due = wifi?.nextDueNs();
@@ -417,15 +462,11 @@ export class Rp2040Runner {
             const nowNs = (clock as unknown as { nanos: number }).nanos;
             if (target > nowNs) clock.tick(target - nowNs);
           },
-          () => core.waiting,
+          stillAsleep,
         );
       } else {
         clock.tick(ns);
       }
-    } else {
-      const cycles = core.executeInstruction() || 1;
-      clock.tick(cycles * cycleNs);
-      if (this.pioClock.active) this.pioClock.advance(cycles);
     }
   }
 

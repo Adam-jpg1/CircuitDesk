@@ -117,7 +117,8 @@ const AVR_SIM_PERIPHERALS = ['GPIO ports', 'Timer0/1/2', 'USART0', 'ADC'];
  * exercise on real compiled firmware, not from what the chip can do.
  *
  * Deliberately absent, because nothing here tests them: Wi-Fi, USB other than
- * the CDC serial port (tests/rp2040.usbSerial.mts) and the second core. PIO is
+ * the CDC serial port (tests/rp2040.usbSerial.mts). The second core is listed for what
+ * tests/rp2040.multicore.mts runs on it: setup1()/loop1(), the FIFO and mutexes. PIO is
  * listed for what tests/rp2040.pio.mts proves on it: Servo and tone().
  *
  * Floating point, and with it `analogWrite()` (which computes its PWM divisor
@@ -509,6 +510,7 @@ const RP2040_SIM_APIS = [
   'analogWrite (PWM duty on any GP pin)',
   'float and double arithmetic, including sin/cos/sqrt/exp/log',
   'Servo and tone() (PIO programs, on the simulated clock)',
+  'setup1()/loop1() on the second core, with rp2040.fifo and mutexes between the cores',
 ];
 const RP2040_SIM_PERIPHERALS = [
   'SIO and GPIO pads (GP0-GP28, including pad pull resistors)',
@@ -520,6 +522,7 @@ const RP2040_SIM_PERIPHERALS = [
   'PIO state machines, run on the simulated clock',
   'system timer',
   'clock tree (PLLs, clk_sys, clk_peri)',
+  'both Cortex-M0+ cores, with the inter-core FIFOs and spinlocks',
 ];
 
 /** Shared by both RP2040 boards, so the two texts cannot drift apart. */
@@ -531,7 +534,8 @@ const RP2040_LIMITATION =
   'Floating point runs on CircuitDesk\'s own implementation of the boot ROM\'s float tables, not Raspberry Pi\'s. ' +
   'PIO runs on the simulated clock, so Servo and tone() work. ' +
   'EEPROM writes go to the simulated flash and last the whole run. ' +
-  'The second core and PIO-fed DMA are not simulated.';
+  'Both cores run: setup1() and loop1() on core 1, with the inter-core FIFO and mutexes between them. ' +
+  'PIO-fed DMA is not simulated.';
 
 const avrCliCompiler = (fqbn: string): BoardCompilerInfo => ({
   provider: 'arduino-cli',

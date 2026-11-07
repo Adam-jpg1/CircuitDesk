@@ -219,9 +219,11 @@ function projectWith(boardDefId: string): CircuitProject {
   );
   // PIO is claimed: tests/rp2040.pio.mts measures Servo and tone() on it.
   check(
-    !pico.simulation?.supportedPeripherals.some((p) => /USB|Wi-?Fi|second core/i.test(p)),
-    'Pico claims no USB, Wi-Fi or second core peripheral',
+    !pico.simulation?.supportedPeripherals.some((p) => /USB|Wi-?Fi/i.test(p)),
+    'Pico claims no USB or Wi-Fi peripheral',
   );
+  // Both cores: tests/rp2040.multicore.mts runs setup1()/loop1() on the second.
+  check(pico.simulation?.supportedPeripherals.some((p) => /both Cortex-M0\+ cores/.test(p)) === true, 'and claims both cores, which it runs');
   // Pico GP pins never resolve to Arduino pin numbers (no D0-D13 interpretation)
   check(arduinoPinNumber(pico, 'GP0') === undefined && arduinoPinNumber(pico, 'GP26') === undefined,
     'Pico GP pins never resolve to AVR Arduino pin numbers');
