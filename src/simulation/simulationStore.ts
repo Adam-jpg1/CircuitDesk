@@ -1,3 +1,4 @@
+import type { SimulationNote } from '../types';
 import { create } from 'zustand';
 import type { ComponentVisualState } from './circuitSim';
 import type { PinSnapshot } from './avrRunner';
@@ -25,6 +26,8 @@ export interface BoardBuildSummary {
   usedBy: string[];
   status: 'built' | 'compile-failed' | 'not-simulated' | 'artifact-mismatch' | 'no-toolchain' | 'needs-build';
   detail: string;
+  /** What the compiler service said about the sketch's includes on this board. */
+  notes?: SimulationNote[];
 }
 
 interface SimulationState {

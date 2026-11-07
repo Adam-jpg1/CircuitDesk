@@ -439,6 +439,26 @@ section('7. the suggested workaround is not a suggestion, it is tested');
   }
 }
 
+// ------------------------------------------------- what the user is told
+// Servo.h on an ESP32 fails inside the library, with an error about LEDC
+// timer widths. The Compiler tab carries the manifest's plain answer with the
+// board's line instead: what to include.
+{
+  console.log('\n[Servo.h on an ESP32: the Compiler tab says what to use]');
+  const { project } = servoProject('board.esp32-devkit', { sig: 'D4', gnd: 'GND', vcc: '5V' }, '#include <Servo.h>\nServo s;\nvoid setup() { s.attach(4); s.write(90); }\nvoid loop() {}');
+  simulationController.stop();
+  await simulationController.build(project);
+  const shown = useSimulationStore.getState().builds.flatMap((b) => b.notes ?? []);
+  const servoNote = shown.find((n) => n.header === 'Servo.h');
+  if (useSimulationStore.getState().builds.every((b) => b.status === 'no-toolchain')) {
+    console.log('   SKIP: no ESP32 toolchain here');
+    skipped++;
+  } else {
+    check(servoNote?.kind === 'unsupported' && servoNote.alternative === 'ESP32Servo.h', `the build line names ESP32Servo.h as the header to use (${JSON.stringify(servoNote ?? null)})`);
+  }
+  simulationController.stop();
+}
+
 console.log(
   failures === 0
     ? `\nPinned library checks passed (${skipped} skipped).`

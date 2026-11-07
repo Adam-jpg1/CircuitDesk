@@ -194,6 +194,17 @@ function CompilerPanel() {
               <div style={{ color: b.status === 'built' ? 'var(--ok)' : b.status === 'compile-failed' ? 'var(--error)' : '#e8c35a' }}>
                 {b.status === 'built' ? '✓' : b.status === 'compile-failed' ? '✗' : '•'} {b.detail}
               </div>
+              {/* What the compiler service knows about the sketch's includes on
+                  this board: a header that cannot build here, and what to use
+                  instead, said plainly rather than left to an error deep inside
+                  the library. */}
+              {(b.notes ?? []).map((n) => (
+                <div key={n.header} style={{ color: n.kind === 'unsupported' ? '#e8c35a' : 'var(--text-2)', paddingLeft: 14 }}>
+                  {n.kind === 'unsupported'
+                    ? `${n.header} does not build for this board${n.alternative ? `: include <${n.alternative}> instead` : ''}. ${n.reason}`
+                    : `${n.header} builds but has no effect here. ${n.reason}${n.workaround ? ` ${n.workaround}` : ''}`}
+                </div>
+              ))}
               {/* One result, and who it is for. Three boards sharing a failing
                   sketch is one error and a list, not the message three times. */}
               {b.usedBy.length > 0 && (

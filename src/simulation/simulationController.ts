@@ -383,6 +383,7 @@ class SimulationController {
         usedBy: b.instanceIds.map((id) => labels.get(id) ?? this.boardLabel(id)),
         status: b.status,
         detail: b.detail,
+        ...(b.notes?.length ? { notes: b.notes } : {}),
       })),
     );
   }
