@@ -1,0 +1,120 @@
+{
+  "_comment": [
+    "The arduino-cli cores CircuitDesk's compiler service is built and validated against.",
+    "",
+    "One source of truth, read by three things that must never disagree: the Docker",
+    "image bootstrap (server/compiler/installCores.mjs), the capability endpoint that",
+    "tells the app which targets exist, and the deployment smoke test.",
+    "",
+    "Versions are PINNED. An unpinned 'latest' means the compiler service silently",
+    "moves under the emulator: the ESP32 runtime here is validated against the ROM",
+    "entry tables and startup sequence of one core release, and a core upgrade that",
+    "nobody chose would change the firmware the emulator is asked to execute.",
+    "Changing a version here is a deliberate act that needs the runtime tests re-run."
+  ],
+  "arduinoCli": {
+    "version": "1.5.1",
+    "note": "Pinned for the same reason the cores are. The image used to install whatever install.sh from master offered, which is how the deployed service ended up on 1.5.1 while a development container ran a 1.5.2 release candidate."
+  },
+  "cores": [
+    {
+      "id": "arduino:avr",
+      "version": "1.8.8",
+      "targets": ["arduino:avr:uno", "arduino:avr:nano", "arduino:avr:mega", "arduino:avr:leonardo", "arduino:avr:pro"],
+      "required": true,
+      "note": "AVR boards. Also reachable through the avr-g++ fallback, so a failed install degrades rather than breaks."
+    },
+    {
+      "id": "rp2040:rp2040",
+      "version": "6.0.0",
+      "additionalUrl": "https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json",
+      "targets": ["rp2040:rp2040:rpipico", "rp2040:rp2040:rpipicow", "rp2040:rp2040:seeed_xiao_rp2040"],
+      "required": true,
+      "note": "Arduino-Pico. Emits .uf2 without a .hex, so an RP2040 build can never be delivered as Intel HEX."
+    },
+    {
+      "id": "esp32:esp32",
+      "version": "3.3.11",
+      "additionalUrl": "https://espressif.github.io/arduino-esp32/package_esp32_index.json",
+      "targets": ["esp32:esp32:esp32", "esp32:esp32:esp32s3", "esp32:esp32:esp32c3", "esp32:esp32:esp32c6"],
+      "required": true,
+      "keepChips": ["esp32", "esp32s3", "esp32c3", "esp32c6"],
+      "note": "Arduino-ESP32. CircuitDesk compiles only the parts it can execute (the Xtensa ESP32 and S3 and the RISC-V C3 and C6), so the per-chip libraries for the others are pruned after install — see installCores.mjs."
+    },
+    {
+      "id": "esp8266:esp8266",
+      "version": "3.1.2",
+      "additionalUrl": "https://arduino.esp8266.com/stable/package_esp8266com_index.json",
+      "targets": ["esp8266:esp8266:nodemcuv2"],
+      "required": true,
+      "note": "The ESP8266 Arduino core, on Espressif's NONOS SDK. The runtime is validated against this release's SDK start-up and ROM linkage."
+    },
+    {
+      "id": "arduino:sam",
+      "version": "1.6.12",
+      "targets": ["arduino:sam:arduino_due_x_dbg"],
+      "required": true,
+      "note": "The Arduino SAM core, for the Due. Built for the programming port, so Serial is the UART on D0/D1; emits a raw binary linked at 0x80000."
+    },
+    {
+      "id": "arduino:renesas_uno",
+      "version": "1.6.0",
+      "targets": ["arduino:renesas_uno:minima"],
+      "required": true,
+      "note": "The Arduino Renesas core, for the Uno R4 Minima. Serial is native USB (TinyUSB); emits a raw binary linked at 0x4000, above the board's bootloader."
+    },
+    {
+      "id": "arduino:mbed_nano",
+      "version": "4.6.0",
+      "targets": ["arduino:mbed_nano:nano33ble"],
+      "required": true,
+      "note": "The Arduino mbed core, for the Nano 33 BLE. Serial is native USB (mbed's USBCDC); emits a raw binary linked at 0x10000, above the board's bootloader. Shares the Renesas core's GCC 7."
+    },
+    {
+      "id": "teensy:avr",
+      "version": "1.62.0",
+      "additionalUrl": "https://www.pjrc.com/teensy/package_teensy_index.json",
+      "targets": ["teensy:avr:teensy41:speed=60"],
+      "required": true,
+      "teensyKeepMultilibs": ["thumb/v7e-m+dp"],
+      "note": "The Teensy core, for the Teensy 4.1, built at its 60 MHz speed setting so the simulation keeps pace. Emits Intel HEX of the flash from 0x60000000, which the server turns into an image. Pruned after install to the ARM compiler's Cortex-M7 double-precision multilib, without the AVR compiler for the 8-bit Teensys — see installCores.mjs."
+    },
+    {
+      "id": "sandeepmistry:nRF5",
+      "version": "0.8.0",
+      "additionalUrl": "https://sandeepmistry.github.io/arduino-nRF5/package_nRF5_boards_index.json",
+      "targets": ["sandeepmistry:nRF5:BBCmicrobitV2"],
+      "required": true,
+      "removeTools": ["gcc-arm-none-eabi"],
+      "note": "The Arduino nRF5 core, for the BBC micro:bit V2. Its own GCC 5.2 is a 32-bit x86 binary this image cannot run, so it is removed after install and builds use the 64-bit GCC 7 the Renesas core installs (arduinoCli.ts TOOLCHAIN_OVERRIDES). Must stay after arduino:renesas_uno."
+    },
+    {
+      "id": "STMicroelectronics:stm32",
+      "version": "3.0.0",
+      "additionalUrl": "https://github.com/stm32duino/BoardManagerFiles/raw/main/package_stmicroelectronics_index.json",
+      "targets": ["STMicroelectronics:stm32:Nucleo_64:pnum=NUCLEO_F401RE"],
+      "required": true,
+      "keepStm32Series": ["STM32F4xx"],
+      "keepMultilibs": ["thumb/v7e-m+fp"],
+      "note": "STM32duino, for the Nucleo-64 F401RE. Serial is USART2, the ST-LINK's virtual COM port; emits a raw binary linked at 0x08000000. Pruned after install to the F4 series and the compiler's Cortex-M4F libraries — see installCores.mjs."
+    },
+    {
+      "id": "adafruit:samd",
+      "version": "1.7.17",
+      "additionalUrl": "https://adafruit.github.io/arduino-board-index/package_adafruit_index.json",
+      "targets": ["adafruit:samd:adafruit_feather_m0", "adafruit:samd:adafruit_qtpy_m0"],
+      "keepCmsisLibs": ["libarm_cortexM0l_math.a"],
+      "required": true,
+      "note": "Adafruit's SAMD core, for the SAMD21 boards CircuitDesk executes (Feather M0, QT Py M0). Emits Intel HEX linked above the boards' 8 KB bootloader."
+    },
+    {
+      "id": "Seeeduino:samd",
+      "version": "1.8.6",
+      "additionalUrl": "https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json",
+      "targets": ["Seeeduino:samd:seeed_XIAO_m0"],
+      "keepCmsisLibs": ["libarm_cortexM0l_math.a"],
+      "required": false,
+      "note": "Seeed's SAMD core, for the XIAO SAMD21. Emits Intel HEX linked above its 8 KB bootloader. Optional because Seeed's board index is not reliably reachable: an image built while it was down ships without it, and XIAO SAMD21 compiles report the missing core rather than the whole build failing."
+    }
+  ]
+}

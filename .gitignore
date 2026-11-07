@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-server/
+.server-cache/
+*.log
+.DS_Store
+artwork-review/
+.community-data
+.env
+.env.local
+.env.*.local

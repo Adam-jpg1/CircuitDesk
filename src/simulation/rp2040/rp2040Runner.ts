@@ -1,0 +1,774 @@
+// Real RP2040 execution using rp2040js (MIT). Compiled Arduino-Pico firmware
+// (a UF2 from the compiler backend) is written into flash unmodified and
+// executed instruction by instruction: the image's own second stage runs, the
+// SDK's startup code runs, and control reaches the sketch's setup() and loop()
+// on its own. GPIO, PWM, ADC and UART behaviour all come from the emulator's
+// peripherals.
+//
+// Nothing here inspects source code, patches the image, skips startup
+// functions by address, forces the program counter into user code or
+// intercepts Arduino functions. Every observation is taken at a pad or a
+// peripheral register.
+//
+// This module statically imports rp2040js, so bundlers place both in the same
+// lazily-fetched chunk. Only `adapters.ts` imports it, and only with a dynamic
+// import when a Pico simulation actually starts.
+
+import { RP2040, USBCDC } from 'rp2040js';
+import { buildBootStub, FLASH_ERASE_TRAP, FLASH_PROGRAM_TRAP } from './bootStub';
+import { romFloatCall, type RomFloatCore } from './romFloat';
+import { PioClock } from './pioClock';
+import { PadPullResolver } from './gpioPulls';
+import { Rp2040ClockTree } from './clockTree';
+import { CORE1_RETURN, DualCore } from './sioFifo';
+import { FLASH_BASE, parseRp2040Uf2, type Uf2Image } from './uf2';
+import {
+  readI2cPins,
+  readSpiPins,
+  ARDUINO_PICO_DEFAULT_I2C,
+  ARDUINO_PICO_DEFAULT_SPI,
+  type I2cPinAssignment,
+  type SpiPinAssignment,
+} from './busPins';
+import { I2cBus } from '../devices/i2cBus';
+import { SpiBus, type SpiController } from '../devices/spiBus';
+import type { SpiMode } from '../devices/types';
+import type { PinSnapshot } from '../boardRunner';
+import type { FirmwareSymbols } from '../adapters';
+import { Cyw43Chip } from '../wifi/cyw43Chip';
+import { macForBoard, type WifiNetwork } from '../wifi/network';
+import { bluetoothAddressFor, type BleAir } from '../bluetooth/air';
+
+/** Breakpoints the Pico W's CYW43 bus calls are patched to (clear of the ROM's 0x10/0x11 and 0x80-0xdf). */
+const CYW43_TRANSFER_TRAP = 0x60;
+const CYW43_HOST_WAKE_TRAP = 0x61;
+const CYW43_BT_INIT_TRAP = 0x62;
+const CYW43_BT_WRITE_TRAP = 0x63;
+const CYW43_BT_READ_TRAP = 0x64;
+/** GPIO24: the CYW43's data line, and its host-wake interrupt while the bus is idle. */
+const CYW43_HOST_WAKE_PIN = 24;
+/** Infineon's OUI, which a Pico W's CYW43439 carries. */
+const CYW43_OUI = [0x28, 0xcd, 0xc1];
+
+/** The flash chip's erase unit. */
+const FLASH_SECTOR = 4096;
+
+/** GP0..GP29 exist on the die; a Pico brings out GP0..GP28. */
+export const RP2040_PIN_COUNT = 30;
+
+/** SRAM ends here on the RP2040; the ROM stages boot2 just below it. */
+const SRAM_TOP = 0x20042000;
+const BOOT2_RAM = SRAM_TOP - 0x100;
+
+/**
+ * Return address handed to boot2. It points into the ROM header block, which
+ * holds no code, so reaching it can only mean the second stage returned.
+ */
+const BOOT2_SENTINEL = 0x00000f00;
+
+/**
+ * System clock before the firmware configures its own.
+ *
+ * This is only the starting point. Once startup programs the PLLs and clock
+ * MUXes, the clock tree re-derives the real frequency from those registers and
+ * execution follows it — which matters, because the Arduino-Pico core runs a
+ * Pico well above the RP2040's nominal 125 MHz by default.
+ */
+const DEFAULT_CLOCK_HZ = 125e6;
+
+/** Instructions boot2 is allowed before we call it stuck. */
+const BOOT2_BUDGET = 2_000_000;
+
+/**
+ * Below this address there is no code, only the boot ROM's header block.
+ *
+ * A lookup for a ROM routine CircuitDesk does not provide returns the
+ * documented 0, and the caller then branches straight to it. Catching that
+ * here turns what would otherwise be an endless slide through zeroed memory
+ * into a message that names the cause.
+ */
+const ROM_HEADER_END = 0x10;
+
+/**
+ * Hard ceiling on instructions retired in one runFor() call. A sketch that
+ * never yields cannot hold the browser's main thread beyond this.
+ */
+const MAX_INSTRUCTIONS_PER_CALL = 20_000_000;
+/** The longest stretch a sleeping core's PIO is run for in one step: 100 µs. */
+const PIO_IDLE_SLICE_NS = 100_000;
+
+/** ADC channels 0..3 are GP26..GP29; channel 4 is the temperature sensor. */
+const ADC_FIRST_GPIO = 26;
+export const RP2040_ADC_CHANNELS = 4;
+
+/**
+ * PL022 SSPCR0 bits used to derive the datasheet SPI mode.
+ *
+ * rp2040js exposes a `spiMode` getter, but it returns 3 for CPOL=1/CPHA=0 and
+ * 2 for CPOL=1/CPHA=1 — modes 2 and 3 swapped relative to the datasheet. The
+ * control register is read directly instead, the same way the AVR runner works
+ * around the equivalent defect in avr8js (which swaps modes 1 and 2).
+ */
+const SSPCR0_OFFSET = 0x00;
+const SSPCR0_SPO = 1 << 6; // CPOL
+const SSPCR0_SPH = 1 << 7; // CPHA
+
+/** The RP2040's ADC is 3.3 V full scale and 12 bits. */
+export const RP2040_ADC_VREF = 3.3;
+export const RP2040_ADC_MAX_CODE = 4095;
+
+interface DutyTracker {
+  lastHigh: boolean;
+  lastChangeNs: number;
+  highNs: number;
+  windowStartNs: number;
+  pulseRiseNs: number;
+  pulseWidthUs: number;
+  toggles: number;
+}
+
+export class Rp2040Runner {
+  readonly engine = 'rp2040js' as const;
+
+  private rp!: RP2040;
+  /** The second core and the per-core SIO registers (sioFifo.ts). */
+  private dual!: DualCore;
+  private pads!: PadPullResolver;
+  private pioClock!: PioClock;
+  private clocks!: Rp2040ClockTree;
+  private readonly image: Uf2Image;
+  private readonly startupCycleNs: number;
+  private trackers: DutyTracker[] = [];
+  private pinListeners = new Set<(pin: number, high: boolean) => void>();
+  private unsubscribers: (() => void)[] = [];
+  private externalDrive = new Map<number, boolean>();
+  private disposed = false;
+  /**
+   * Flash sectors the firmware has erased or programmed, by sector number,
+   * as they now read. Flash is non-volatile: build() lays them back over the
+   * image, so EEPROM.commit() survives the reset button.
+   */
+  private readonly flashWrites = new Map<number, Uint8Array>();
+  /** The Pico W's CYW43439, when the build drives one (see ../wifi/cyw43Chip). */
+  readonly wifi: Cyw43Chip | null = null;
+  /** Where the build's CYW43 bus routines are, to answer them natively. */
+  private readonly cyw43Hooks: { transfer: number; hostWake?: number; btInit?: number; btWrite?: number; btRead?: number } | null = null;
+
+  /**
+   * I2C and SPI devices on the canvas attach to these, exactly as they do on
+   * the AVR runner. The device models are shared, not duplicated: an SSD1306
+   * driven by Pico firmware is the same object an Uno would drive.
+   *
+   * They live on the runner rather than on the machine so their contents
+   * survive a circuit re-bind — a wiring edit is not a power cycle.
+   */
+  readonly i2cBus = new I2cBus();
+  readonly spiBus = new SpiBus();
+  private readonly spiCtrl: SpiController;
+
+  /** Bytes the firmware transmits on UART0, which is Serial1 on a Pico. */
+  onSerialByte: ((byte: number) => void) | null = null;
+  /**
+   * Bytes the firmware sends over USB — `Serial` on every Arduino-Pico board.
+   * They reach the serial monitor, as they would reach a computer's terminal,
+   * and no wire: nothing on the canvas is plugged into the USB socket.
+   */
+  onUsbSerialByte: ((byte: number) => void) | null = null;
+  private cdc: USBCDC | null = null;
+  onPinChange: ((pin: number, high: boolean) => void) | null = null;
+
+  /**
+   * @param firmware Raw UF2 bytes. Already-validated images may be passed as a
+   *                 parsed Uf2Image to avoid parsing twice.
+   */
+  constructor(firmware: Uint8Array | Uf2Image, options: { clockHz?: number; symbols?: FirmwareSymbols } = {}) {
+    this.image = firmware instanceof Uint8Array ? parseRp2040Uf2(firmware) : firmware;
+    const transfer = options.symbols?.named.cyw43_spi_transfer;
+    if (transfer) {
+      const named = options.symbols?.named ?? {};
+      this.cyw43Hooks = {
+        transfer,
+        hostWake: named.cyw43_cb_read_host_interrupt_pin,
+        btInit: named.cyw43_btbus_init,
+        btWrite: named.cyw43_btbus_write,
+        btRead: named.cyw43_btbus_read,
+      };
+      const chip = new Cyw43Chip(
+        { read8: (a) => this.rp.readUint8(a), write8: (a, v) => this.rp.writeUint8(a, v) },
+        // (The chip is made before the machine is built; it reads 0 until then.)
+        () => (this.rp ? Number((this.rp.clock as unknown as { nanos: number }).nanos) : 0),
+        macForBoard('pico-w', CYW43_OUI),
+        'Pico W',
+      );
+      // Released when low: the pad's pull-down holds it there, as on the board.
+      chip.onHostWake = (high) => this.pads.drive(CYW43_HOST_WAKE_PIN, high ? true : null);
+      this.wifi = chip;
+    }
+    this.startupCycleNs = 1e9 / (options.clockHz ?? DEFAULT_CLOCK_HZ);
+    // Read lazily through the runner, so the mode reflects whatever the
+    // firmware has SSPCR0 set to at the moment of each transfer.
+    const runner = this;
+    this.spiCtrl = {
+      get mode(): SpiMode {
+        return runner.currentSpiMode;
+      },
+      // The PL022 in Motorola SPI format transmits most-significant bit first
+      // and offers no alternative, so unlike an AVR there is no DORD to read.
+      get bitOrder(): 'msbFirst' | 'lsbFirst' {
+        return 'msbFirst';
+      },
+    };
+    this.build();
+  }
+
+  // ------------------------------------------------------------- lifecycle
+
+  /**
+   * Constructs a machine in its power-on state and boots the image.
+   *
+   * A fresh machine is built rather than mutating the old one because
+   * rp2040js's own reset() clears only the core and the PWM block: SRAM, the
+   * GPIO pads and every other peripheral would keep whatever the previous run
+   * left behind, and a sketch would appear to restart while running on stale
+   * state.
+   */
+  private build(): void {
+    const rp = new RP2040();
+    rp.logger = { debug() {}, info() {}, warn() {}, error() {} };
+    rp.loadBootrom(buildBootStub().rom);
+    this.pioClock = new PioClock(rp.pio as unknown as ConstructorParameters<typeof PioClock>[0]);
+    // The ROM's float and double tables trap here (bootStub.ts); any other
+    // breakpoint — the SDK's panic(), a sketch's own — is left as it was.
+    rp.onBreak = (code: number) => {
+      if (code === FLASH_ERASE_TRAP) this.flashErase(rp.core.registers[0] >>> 0, rp.core.registers[1] >>> 0);
+      else if (code === FLASH_PROGRAM_TRAP)
+        this.flashProgram(rp.core.registers[0] >>> 0, rp.core.registers[1] >>> 0, rp.core.registers[2] >>> 0);
+      else if (code === CYW43_TRANSFER_TRAP && this.wifi) {
+        const r = rp.core.registers;
+        r[0] = this.wifi.transfer(r[1] >>> 0, r[2] >>> 0, r[3] >>> 0, rp.readUint32(rp.core.SP) >>> 0);
+      } else if (code === CYW43_HOST_WAKE_TRAP && this.wifi) {
+        rp.core.registers[0] = this.wifi.hostWake ? 1 : 0;
+      } else if (code === CYW43_BT_INIT_TRAP && this.wifi) {
+        rp.core.registers[0] = this.wifi.btInit();
+      } else if (code === CYW43_BT_WRITE_TRAP && this.wifi) {
+        const r = rp.core.registers;
+        r[0] = this.wifi.btWrite(r[0] >>> 0, r[1] >>> 0);
+      } else if (code === CYW43_BT_READ_TRAP && this.wifi) {
+        const r = rp.core.registers;
+        r[0] = this.wifi.btRead(r[0] >>> 0, r[1] >>> 0, r[2] >>> 0);
+      } else romFloatCall(code, rp.core as unknown as RomFloatCore);
+    };
+    this.rp = rp;
+    this.clocks = new Rp2040ClockTree(rp as never);
+    this.dual = new DualCore(rp as never);
+    this.pads = new PadPullResolver(rp.gpio);
+
+    for (const [addr, data] of this.image.blocks) rp.flash.set(data, addr - FLASH_BASE);
+    // What the sketch wrote to flash outlives the reset, as on the chip.
+    for (const [sector, data] of this.flashWrites) rp.flash.set(data, sector * FLASH_SECTOR);
+    // The CYW43 driver's bus calls become `bkpt; bx lr`, answered by the chip model.
+    if (this.cyw43Hooks) {
+      const patch = (address: number, trap: number) => {
+        const at = (address & ~1) - FLASH_BASE;
+        if (at < 0 || at + 4 > rp.flash.length) return;
+        rp.flash.set([trap, 0xbe, 0x70, 0x47], at);
+      };
+      patch(this.cyw43Hooks.transfer, CYW43_TRANSFER_TRAP);
+      if (this.cyw43Hooks.hostWake) patch(this.cyw43Hooks.hostWake, CYW43_HOST_WAKE_TRAP);
+      // A build with Bluetooth: BTstack's shared bus to the chip's Bluetooth core.
+      if (this.cyw43Hooks.btInit) patch(this.cyw43Hooks.btInit, CYW43_BT_INIT_TRAP);
+      if (this.cyw43Hooks.btWrite) patch(this.cyw43Hooks.btWrite, CYW43_BT_WRITE_TRAP);
+      if (this.cyw43Hooks.btRead) patch(this.cyw43Hooks.btRead, CYW43_BT_READ_TRAP);
+      this.wifi?.reset();
+    }
+
+    this.trackers = Array.from({ length: RP2040_PIN_COUNT }, () => ({
+      lastHigh: false,
+      lastChangeNs: 0,
+      highNs: 0,
+      windowStartNs: 0,
+      pulseRiseNs: 0,
+      pulseWidthUs: 0,
+      toggles: 0,
+    }));
+
+    for (let pin = 0; pin < RP2040_PIN_COUNT; pin++) {
+      const index = pin;
+      rp.gpio[index].addListener(() => this.padChanged(index));
+    }
+    rp.uart[0].onByte = (byte: number) => this.onSerialByte?.(byte);
+    // A host on the USB port: it enumerates the device when the firmware turns
+    // the controller on, opens the CDC port (raising DTR, without which
+    // Arduino-Pico's Serial drops what it is given) and reads what arrives.
+    // rp2040js runs the transactions on the machine's own clock, so the bytes
+    // arrive in simulated time.
+    this.cdc = new USBCDC(rp.usbCtrl);
+    this.cdc.onSerialData = (buffer: Uint8Array) => {
+      for (const byte of buffer) this.onUsbSerialByte?.(byte);
+    };
+    this.attachBuses(rp);
+
+    for (const [pin, level] of this.externalDrive) this.pads.drive(pin, level);
+    this.bootFromFlash();
+  }
+
+  /**
+   * Runs the image's own second stage the way the boot ROM does, then enters
+   * the application through the vector table the image publishes.
+   */
+  private bootFromFlash(): void {
+    const rp = this.rp;
+    for (let i = 0; i < 256; i++) rp.writeUint8(BOOT2_RAM + i, rp.readUint8(FLASH_BASE + i));
+    rp.core.SP = SRAM_TOP;
+    rp.core.registers[14] = BOOT2_SENTINEL | 1;
+    rp.core.PC = BOOT2_RAM;
+
+    let returned = false;
+    for (let i = 0; i < BOOT2_BUDGET; i++) {
+      if ((rp.core.PC & ~1) === BOOT2_SENTINEL) {
+        returned = true;
+        break;
+      }
+      this.step();
+    }
+    if (!returned) {
+      throw new Error(
+        "The firmware's second-stage bootloader did not finish. The UF2 may be corrupt or built for a different flash layout.",
+      );
+    }
+    rp.core.SP = rp.readUint32(FLASH_BASE + 0x100);
+    rp.core.PC = rp.readUint32(FLASH_BASE + 0x104) & ~1;
+  }
+
+  /** Joins the canvas's Wi-Fi network, under this board's name and a MAC of its own. */
+  attachWifi(network: WifiNetwork, identity: { id: string; label: string }): void {
+    this.wifi?.attach(network, macForBoard(identity.id, CYW43_OUI), identity.label);
+  }
+
+  /** Puts the CYW43's Bluetooth core on the world's air (a build without Bluetooth never brings it up). */
+  attachBluetooth(air: BleAir, identity: { id: string; label: string }): void {
+    if (!this.cyw43Hooks?.btInit) return;
+    this.wifi?.attachBluetooth(air, bluetoothAddressFor(identity.id, CYW43_OUI), identity.label);
+  }
+
+  /** Rebuilds the machine in its power-on state and boots the same image. */
+  reset(): void {
+    this.assertLive();
+    for (const off of this.unsubscribers) off();
+    this.unsubscribers = [];
+    this.build();
+  }
+
+  /** Releases the machine. Further calls throw rather than run on a dead one. */
+  dispose(): void {
+    for (const off of this.unsubscribers) off();
+    this.unsubscribers = [];
+    this.pinListeners.clear();
+    this.onSerialByte = null;
+    this.onUsbSerialByte = null;
+    this.cdc = null;
+    this.onPinChange = null;
+    this.disposed = true;
+  }
+
+  private assertLive(): void {
+    if (this.disposed) throw new Error('This RP2040 simulation has been stopped.');
+  }
+
+  // ------------------------------------------------------------- execution
+
+  /**
+   * Nanoseconds per CPU cycle, from the clock tree the firmware programmed.
+   *
+   * Read on each step rather than cached, so a sketch that changes the system
+   * clock at runtime changes how fast it executes, as it would on the chip.
+   */
+  private get cycleNs(): number {
+    const hz = this.rp.clkSys;
+    return hz > 0 && Number.isFinite(hz) ? 1e9 / hz : this.startupCycleNs;
+  }
+
+  /**
+   * One instruction, or a clock advance while the core is halted on a WFI —
+   * and the PIO state machines for the same stretch of clk_sys. While the core
+   * sleeps, PIO runs event by event (PioClock.advanceWhileIdle), so the pins a
+   * PIO program drives change at their own times rather than all at once at
+   * the next timer alarm.
+   */
+  private step(): void {
+    if (this.dual.running) {
+      this.stepBoth();
+      return;
+    }
+    const core = this.rp.core;
+    if ((core.PC & ~1) < ROM_HEADER_END) this.reportUnresolvedRomCall();
+    const cycleNs = this.cycleNs;
+    const clock = this.rp.clock as unknown as { tick(ns: number): void; nanosToNextAlarm: number };
+    const wifi = this.wifi;
+    if (wifi) wifi.service();
+    if (core.waiting) {
+      this.idle(() => core.waiting);
+    } else {
+      const cycles = core.executeInstruction() || 1;
+      clock.tick(cycles * cycleNs);
+      if (this.pioClock.active) this.pioClock.advance(cycles);
+    }
+  }
+
+  /**
+   * Both cores, once the sketch has started core 1: an instruction on each
+   * core that is awake, and the clock advanced by the longer of the two, as
+   * the two run side by side at clk_sys. When both sleep, time moves on to
+   * whatever wakes one of them.
+   */
+  private stepBoth(): void {
+    const dual = this.dual;
+    const [core0, core1] = dual.cores;
+    if ((core1.PC & ~1) === CORE1_RETURN) dual.parkCore1();
+    else if (!core1.waiting && (core1.PC & ~1) < ROM_HEADER_END) this.reportUnresolvedRomCall();
+    if ((core0.PC & ~1) < ROM_HEADER_END) this.reportUnresolvedRomCall();
+    if (this.wifi) this.wifi.service();
+    const running1 = dual.running;
+    if (core0.waiting && (!running1 || core1.waiting)) {
+      this.idle(() => core0.waiting && (!dual.running || core1.waiting));
+      return;
+    }
+    const c0 = core0.waiting ? 0 : dual.execute(0);
+    const c1 = running1 && !core1.waiting ? dual.execute(1) : 0;
+    const cycles = Math.max(c0, c1, 1);
+    (this.rp.clock as unknown as { tick(ns: number): void }).tick(cycles * this.cycleNs);
+    if (this.pioClock.active) this.pioClock.advance(cycles);
+  }
+
+  /** The cores are asleep: time moves to the next alarm, the Wi-Fi chip's next frame, or PIO's next event. */
+  private idle(stillAsleep: () => boolean): void {
+    const cycleNs = this.cycleNs;
+    const clock = this.rp.clock as unknown as { tick(ns: number): void; nanosToNextAlarm: number };
+    const wifi = this.wifi;
+    {
+      let ns = clock.nanosToNextAlarm || cycleNs;
+      // A frame the Wi-Fi chip has for later raises its host-wake line then, waking the core.
+      const due = wifi?.nextDueNs();
+      if (due !== undefined) ns = Math.max(cycleNs, Math.min(ns, due - (clock as unknown as { nanos: number }).nanos));
+      if (this.pioClock.active) {
+        // Bounded so a sleeping core with no alarm due still comes back to
+        // the run loop's time limit.
+        const start = (clock as unknown as { nanos: number }).nanos;
+        this.pioClock.advanceWhileIdle(
+          Math.min(ns, PIO_IDLE_SLICE_NS),
+          cycleNs,
+          (offset) => {
+            const target = start + offset;
+            const nowNs = (clock as unknown as { nanos: number }).nanos;
+            if (target > nowNs) clock.tick(target - nowNs);
+          },
+          stillAsleep,
+        );
+      } else {
+        clock.tick(ns);
+      }
+    }
+  }
+
+  /**
+   * Advances the simulation by a slice of simulated time.
+   *
+   * The instruction ceiling is the runaway guard: a sketch that spins without
+   * letting the clock advance is stopped with a clear message instead of
+   * freezing the tab.
+   */
+  runFor(simMs: number): void {
+    this.assertLive();
+    const clock = this.rp.clock as unknown as { nanos: number };
+    const target = clock.nanos + simMs * 1e6;
+    let executed = 0;
+    while (clock.nanos < target) {
+      this.step();
+      if (++executed > MAX_INSTRUCTIONS_PER_CALL) {
+        throw new Error(
+          'Simulation stopped: the firmware executed an excessive number of instructions without advancing time.',
+        );
+      }
+    }
+  }
+
+  get timeMs(): number {
+    return Number((this.rp.clock as unknown as { nanos: number }).nanos) / 1e6;
+  }
+
+  /**
+   * Explains a branch into the boot ROM header block.
+   *
+   * The only way to get there is through a ROM table lookup that returned 0:
+   * a routine this ROM does not provide. Floating point and flash writes are
+   * provided (romFloat.ts, flashErase/flashProgram); what is not is rebooting
+   * into the USB bootloader, which has nothing to act on in a simulator. Saying so is the point: the alternative is a sketch that
+   * appears to run after jumping into nothing.
+   */
+  private reportUnresolvedRomCall(): never {
+    throw new Error(
+      'This sketch called a Raspberry Pi boot ROM routine that the simulator does not provide, such as rebooting ' +
+        'into the USB bootloader, so it cannot continue here. Digital I/O, analogRead(), analogWrite(), floating ' +
+        'point, EEPROM and Serial are unaffected.',
+    );
+  }
+
+  // ----------------------------------------------------------------- flash
+
+  /**
+   * flash_range_erase(offset, count, ...): sets every byte of the 4 KB sectors
+   * in the range to 0xFF. The ROM requires a sector-aligned range; an
+   * unaligned one is widened to whole sectors, as the chip's sector-erase
+   * command would do.
+   */
+  private flashErase(offset: number, count: number): void {
+    const flash = this.rp.flash;
+    const end = Math.min(flash.length, offset + count);
+    for (let at = offset - (offset % FLASH_SECTOR); at < end; at += FLASH_SECTOR) {
+      flash.fill(0xff, at, Math.min(flash.length, at + FLASH_SECTOR));
+      this.keepSector(at / FLASH_SECTOR);
+    }
+  }
+
+  /**
+   * flash_range_program(offset, data, count): NOR flash programming only
+   * clears bits, so each byte becomes old & new — writing over unerased flash
+   * gives what the chip would, not what was asked.
+   */
+  private flashProgram(offset: number, data: number, count: number): void {
+    const flash = this.rp.flash;
+    const end = Math.min(flash.length, offset + count);
+    for (let at = offset; at < end; at++) flash[at] &= this.rp.readUint8(data + (at - offset));
+    for (let sector = Math.floor(offset / FLASH_SECTOR); sector * FLASH_SECTOR < end; sector++) this.keepSector(sector);
+  }
+
+  private keepSector(sector: number): void {
+    const at = sector * FLASH_SECTOR;
+    this.flashWrites.set(sector, this.rp.flash.slice(at, at + FLASH_SECTOR));
+  }
+
+  // ------------------------------------------------------------------ GPIO
+
+  private padChanged(pin: number): void {
+    const gpio = this.rp.gpio[pin];
+    const high = gpio.outputEnable ? gpio.outputValue : gpio.inputValue;
+    const tracker = this.trackers[pin];
+    if (!tracker || high === tracker.lastHigh) return;
+    const now = this.nowNs();
+    if (tracker.lastHigh) {
+      tracker.highNs += now - tracker.lastChangeNs;
+      tracker.pulseWidthUs = (now - tracker.pulseRiseNs) / 1000;
+    } else {
+      tracker.pulseRiseNs = now;
+    }
+    tracker.lastHigh = high;
+    tracker.lastChangeNs = now;
+    tracker.toggles++;
+    this.onPinChange?.(pin, high);
+    for (const listener of this.pinListeners) listener(pin, high);
+  }
+
+  private nowNs(): number {
+    return Number((this.rp.clock as unknown as { nanos: number }).nanos);
+  }
+
+  /** Subscribes to pad edges. Devices that latch on a pulse cannot poll. */
+  addPinListener(listener: (pin: number, high: boolean) => void): () => void {
+    this.pinListeners.add(listener);
+    const off = () => this.pinListeners.delete(listener);
+    this.unsubscribers.push(off);
+    return off;
+  }
+
+  digitalPinLevel(pin: number): 'high' | 'low' | 'input' | 'input-pullup' | undefined {
+    const gpio = this.rp.gpio[pin];
+    if (!gpio) return undefined;
+    if (gpio.outputEnable) return gpio.outputValue ? 'high' : 'low';
+    return gpio.pullupEnabled ? 'input-pullup' : 'input';
+  }
+
+  isOutput(pin: number): boolean {
+    return this.rp.gpio[pin]?.outputEnable === true;
+  }
+
+  /**
+   * Connects an external driver to a pad — a wire to a rail, another device's
+   * output, a button to ground. `null` disconnects it, leaving the pad's own
+   * pull resistor to decide, exactly as an open switch would.
+   */
+  setDigitalInput(pin: number, value: boolean | null): void {
+    if (pin < 0 || pin >= RP2040_PIN_COUNT) return;
+    if (value === null) this.externalDrive.delete(pin);
+    else this.externalDrive.set(pin, value);
+    this.pads.drive(pin, value);
+  }
+
+  // ------------------------------------------------------------ I2C and SPI
+
+  /**
+   * Connects both hardware I2C controllers and both SPI controllers to the
+   * shared device buses.
+   *
+   * rp2040js reports what the firmware's `Wire` and `SPI` calls actually do on
+   * the wire, and the bus decides who — if anyone — answers. With no device
+   * attached, the bus NACKs every address, which is the honest result for a
+   * bus with nothing on it: `Wire.endTransmission()` returns 2, exactly as on
+   * hardware.
+   *
+   * Both controller instances are wired, because the Arduino-Pico core's
+   * `Wire` and `Wire1` (and `SPI` and `SPI1`) map onto different silicon, and
+   * which one a sketch uses is its own choice.
+   */
+  private attachBuses(rp: RP2040): void {
+    for (const controller of rp.i2c) {
+      const handler = this.i2cBus.handler(controller);
+      controller.onStart = (repeatedStart: boolean) => handler.start(repeatedStart);
+      // rp2040js reports the direction as an I2CMode enum where Read is 1; the
+      // bus speaks in terms of "is this a write".
+      controller.onConnect = (address: number, mode: number) => handler.connectToSlave(address, mode === 0);
+      controller.onWriteByte = (value: number) => handler.writeByte(value);
+      controller.onReadByte = (ack: boolean) => handler.readByte(ack);
+      controller.onStop = () => handler.stop();
+    }
+
+    for (const controller of rp.spi) {
+      controller.onTransmit = (mosi: number) => {
+        const miso = this.spiBus.transferByte(mosi, this.spiCtrl, (pin) => this.digitalPinLevel(pin));
+        controller.completeTransmit(miso);
+      };
+    }
+  }
+
+  /**
+   * The datasheet SPI mode `(CPOL << 1) | CPHA`, read from SSPCR0.
+   *
+   * Uses whichever controller the firmware has muxed to pins; falls back to
+   * SPI0 when nothing is muxed yet, which is only reached before `SPI.begin()`.
+   */
+  private get currentSpiMode(): SpiMode {
+    const instance = this.activeSpiPins().instance ?? 0;
+    const control0 = this.rp.spi[instance]?.readUint32(SSPCR0_OFFSET) ?? 0;
+    return ((((control0 & SSPCR0_SPO) ? 1 : 0) << 1) | ((control0 & SSPCR0_SPH) ? 1 : 0)) as SpiMode;
+  }
+
+  /**
+   * The GP pins carrying I2C.
+   *
+   * The live mux wins whenever the firmware has established one. Before that —
+   * which is every moment up to `Wire.begin()` — the installed core's
+   * documented default is used, so a device wired on the canvas can answer a
+   * transaction issued in the same `setup()` that opened the bus.
+   */
+  activeI2cPins(): I2cPinAssignment {
+    const live = readI2cPins(this.rp.gpio);
+    return live.sda !== undefined && live.scl !== undefined ? live : ARDUINO_PICO_DEFAULT_I2C;
+  }
+
+  /** The GP pins carrying SPI, with the same live-then-default rule. */
+  activeSpiPins(): SpiPinAssignment {
+    const live = readSpiPins(this.rp.gpio);
+    return live.sck !== undefined ? live : ARDUINO_PICO_DEFAULT_SPI;
+  }
+
+  // ------------------------------------------------------------------- ADC
+
+  /** ADC channel reachable at a GP pin, or undefined if the pin has no ADC. */
+  adcChannelForPin(pin: number): number | undefined {
+    const channel = pin - ADC_FIRST_GPIO;
+    return channel >= 0 && channel < RP2040_ADC_CHANNELS ? channel : undefined;
+  }
+
+  /**
+   * Applies a net voltage to an ADC channel.
+   *
+   * rp2040js's `channelValues` are raw conversion results, not volts — the
+   * value written here is what the firmware reads back out of the ADC's RESULT
+   * register — so the net voltage is converted to a 12-bit code first.
+   *
+   * Clamped to the RP2040's own 0 - 3.3 V input range: the chip is not 5 V
+   * tolerant, and reporting a reading above full scale would be fiction.
+   */
+  setAnalogVolts(channel: number, volts: number): void {
+    if (channel < 0 || channel >= this.rp.adc.channelValues.length) return;
+    const clamped = Math.max(0, Math.min(RP2040_ADC_VREF, volts));
+    this.rp.adc.channelValues[channel] = Math.round((clamped / RP2040_ADC_VREF) * RP2040_ADC_MAX_CODE);
+  }
+
+  /** The voltage currently presented to an ADC channel, for diagnostics. */
+  analogVolts(channel: number): number {
+    const code = this.rp.adc.channelValues[channel] ?? 0;
+    return (code / RP2040_ADC_MAX_CODE) * RP2040_ADC_VREF;
+  }
+
+  // ------------------------------------------------------------------ UART
+
+  /** The rate UART0 is actually running at, derived from the real clock tree. */
+  get uartBaudRate(): number {
+    return this.rp.uart[0].baudRate;
+  }
+
+  get peripheralClockHz(): number {
+    return this.rp.clkPeri;
+  }
+
+  get systemClockHz(): number {
+    return this.rp.clkSys;
+  }
+
+  queueSerialInput(text: string): void {
+    // Typed into the monitor: to Serial over USB, and to Serial1 as it always
+    // went, so a sketch reading either one hears it.
+    for (const byte of new TextEncoder().encode(text)) {
+      this.rp.uart[0].feedByte(byte);
+      this.cdc?.sendSerialByte(byte);
+    }
+  }
+
+  queueUartInput(text: string): void {
+    for (const byte of new TextEncoder().encode(text)) this.rp.uart[0].feedByte(byte);
+  }
+
+  // ----------------------------------------------------------------- timing
+
+  /** Schedules a callback on the simulated clock, for edge-timed devices. */
+  addMicrosecondEvent(us: number, callback: () => void): () => void {
+    const alarm = (this.rp.clock as unknown as { createAlarm(cb: () => void): { schedule(ns: number): void; cancel(): void } }).createAlarm(
+      callback,
+    );
+    alarm.schedule(us * 1000);
+    return () => alarm.cancel();
+  }
+
+  // --------------------------------------------------------------- snapshot
+
+  /**
+   * Samples every pad and resets the duty measurement window.
+   *
+   * Duty is measured from real pad transitions, so a pin driven by the PWM
+   * peripheral reports the duty the circuit actually sees — the same thing a
+   * scope on the pin would show. Nothing reads back what analogWrite() was
+   * asked for.
+   */
+  snapshot(): PinSnapshot {
+    const states: PinSnapshot['states'] = [];
+    const duty: number[] = [];
+    const pulseWidthUs: number[] = [];
+    const toggles: number[] = [];
+    const now = this.nowNs();
+
+    for (let pin = 0; pin < RP2040_PIN_COUNT; pin++) {
+      states.push(this.digitalPinLevel(pin) ?? 'input');
+      const t = this.trackers[pin];
+      let high = t.highNs;
+      if (t.lastHigh) high += now - t.lastChangeNs;
+      const window = now - t.windowStartNs;
+      duty.push(window > 0 ? Math.min(1, high / window) : t.lastHigh ? 1 : 0);
+      pulseWidthUs.push(t.pulseWidthUs);
+      toggles.push(t.toggles);
+      t.highNs = 0;
+      t.windowStartNs = now;
+      if (t.lastHigh) t.lastChangeNs = now;
+    }
+    return { states, duty, pulseWidthUs, toggles };
+  }
+}

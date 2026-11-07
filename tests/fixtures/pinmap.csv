@@ -1,0 +1,5 @@
+pin,label,type,x,y,voltage,maxCurrent,capabilities,notes
+1,VCC,power-5v,2,2,5,500,power,supply
+2,GND,ground,2,7,,,ground,
+3,SIG,digital,2,12,5,20,digital-in|digital-out,signal pin
+4,EN,digital,2,17,5,20,digital-in,enable

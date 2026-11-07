@@ -1,0 +1,149 @@
+# CircuitDesk
+
+**Public Beta · v0.9.0**
+
+**CircuitDesk is a realistic electronics project workspace for planning, wiring, coding, validating, simulating, testing, and documenting hardware projects before physically assembling them.**
+
+It is a desktop-first engineering application — not a mockup. The default Blink project compiles with a real
+AVR toolchain and executes on a real ATmega328P emulator: if the compiled firmware sets D13 HIGH, the wired
+LED turns on; change `delay(500)` to `delay(100)` and the blink rate actually changes.
+
+Every board and part carries an honest support badge: **Simulated · Compile · Validation ·
+Wiring · Visual only**. Nothing is labeled as working unless it actually works.
+
+## The real simulation pipeline
+
+```
+Arduino C++ source
+  → Arduino CLI (if installed) or avr-g++ + Arduino AVR core
+  → compiled Intel HEX
+  → AVR8js ATmega328P emulator (GPIO, timers/PWM, UART, ADC, interrupts)
+  → AVR port state → Arduino pin mapping
+  → circuit graph (nets from wires + breadboard internals)
+  → component simulation (LEDs, buttons, pots, servo, buzzer, 7-segment, HC-SR04, analog sensors)
+  → canvas visuals + serial monitor + pin states
+```
+
+No keyword scanning, no hardcoded animations — behavior comes from executing compiled firmware.
+
+## Quick start
+
+```bash
+npm install
+# toolchain for real compilation (Debian/Ubuntu):
+sudo apt-get install gcc-avr avr-libc arduino-core-avr
+# (alternatively install arduino-cli + `arduino-cli core install arduino:avr`;
+#  the backend auto-detects arduino-cli and prefers it)
+
+npm run dev          # starts the compile server (:3411) + Vite dev client (:5173)
+```
+
+Open http://localhost:5173, create the Blink starter project, press **Run** (Ctrl+Enter).
+
+Production: `npm run build && npm start` (serves the built app + API on :3411).
+
+### Where data lives
+
+| Data | Where | Survives a deploy? |
+|---|---|---|
+| Community projects and likes | Postgres (Neon), via `DATABASE_URL` on the backend | Yes. It lives with the database provider, not the server |
+| Your own projects and custom parts | Your browser (IndexedDB) | Yes. They never leave your device |
+| Compile caches | The backend container | Rebuilt as needed |
+
+**Migrations run on deploy.** The backend applies any pending migration from
+`server/db/migrations` when it starts, once each, under a lock. To change the
+schema, edit `server/db/schema.ts`, run `npm run db:generate`, and commit the
+new migration. Migrations only add tables and columns; `tests/db.migrations.mts`
+rejects any that drops or truncates. Locally, without `DATABASE_URL`, the same
+schema runs on an embedded Postgres (PGlite) in `.community-data/`. Details:
+[docs/community.md](docs/community.md#where-posts-are-kept).
+
+## What's inside
+
+| Area | What actually works |
+|---|---|
+| **Dashboard** | Three pages under one header. **Projects**: create, open, rename, duplicate, delete, search and sort your projects, with thumbnails. **Templates**: 10 starters and 8 showcases on a page of their own, each card drawn from its own circuit and naming its board, parts and what it teaches. Filter by kind and board, or search. Every one compiles, runs, and carries a test bench. **Community**: share a project, like other people's, open a copy of anything, with the creator's projects marked. No accounts; see [docs/community.md](docs/community.md) |
+| **Editor** | IDE-style workspace; resizable + collapsible panels (sizes persist), infinite SVG canvas with grid/pan/zoom/fit, minimap, box-select, multi-select, rotate, snap, undo/redo, copy/paste, keyboard shortcuts, status bar |
+| **Boards** | Detailed vector Arduino Uno, Nano, Mega 2560 and Leonardo (all genuinely simulated, each on its own MCU profile); Raspberry Pi Pico/Pico W (including floating point on the simulator's own boot-ROM float tables, and PIO on the simulated clock, so Servo and tone() work), ESP32-C3-DevKitM-1 and ESP32-C6-DevKitC-1 compiled for the real target and executed (GPIO and interrupts, floating point on the simulator's own soft-float ROM routines, Serial, analogRead(), analogWrite()/tone()/servos on the LED PWM controller, Wire, SPI and EEPROM/Preferences in NVS, in tests/esp32.peripherals.mts); and three more boards on chips it already runs — Arduino Pro Mini (ATmega328P), Seeed XIAO RP2040 (its D0-D10 labels translated to the GP pads firmware addresses) and the ESP32-C3 SuperMini — each compiled and executed in tests/boards.sameChip.mts; the SAMD21 boards — Adafruit Feather M0, Adafruit QT Py M0 and Seeed XIAO SAMD21 — built with their vendors' cores and executed on a SAMD21 model (GPIO, ADC, PWM, Servo, tone(), attachInterrupt(), Wire and SPI to the parts on the canvas, Serial over native USB, Serial1 on the SERCOM UART), in tests/samd21.runtime.mts; Due, Uno R4, Nano 33 BLE, ESP32 family, ESP8266, Pi GPIO headers, Teensy, micro:bit, STM32 Nucleo — with real pin metadata and honest wiring/validation badges |
+| **Components** | Breadboards with real row/rail connectivity, LEDs, RGB LED, resistors (band colors from value), buttons, switches, pots, buzzer, servo, 7-segment, HC-SR04, TMP36, LDR, plus 20+ validation/wiring-level parts. **Every sensor can be set while it runs**: select it and drag a slider or type a value — set a BMP280 to 20 °C and the sketch prints 20.0 C; tilt an MPU6050 30° and a pitch/roll sketch computes 30°; trigger a PIR or bring a magnet to a Hall switch. Values are clamped to the part's real range and reach the firmware through the ADC, the pin, or the chip's own registers (tests/inputs.interactive.mts, tests/inputs.interactiveUi.mts) |
+| **Wiring** | Pin-snapped wires (never attach to arbitrary pixels), wires follow moved parts, waypoints, smooth/orthogonal/straight routing, recoloring, labels, live signal highlighting, rich pin hover tooltips |
+| **Code** | Monaco (bundled, offline), multiple files/tabs, compile diagnostics as markers, pin↔code cross-referencing |
+| **Compiler** | Local Express backend: `arduino-cli` or `avr-g++` pipeline, cached core archives, artifacts cached by source (an unchanged sketch never reaches the toolchain), and a background build once the code has been still for a moment, so Run usually finds the firmware ready (rate-limited on the client to a third of the server's budget, backing off when the service is busy). Each core builds from a data directory holding only its own package, and ESP32 builds reuse the stock bootloader image instead of regenerating it; GCC diagnostics mapped back to `.ino` lines, memory usage, strict input validation, temp-dir isolation, timeouts, cleanup |
+| **Simulation** | AVR8js: GPIO, timers, PWM (measured duty → LED brightness), UART both directions, ADC (pots/sensors feed real channels), ultrasonic echo protocol via CPU clock events, servo angle from measured pulse width; run/pause/step/reset/stop; execution speed readout |
+| **Validation** | 20+ real rules: missing ground/power, LED resistor + polarity, 5V→3.3V conflicts, output shorts, GPIO over-current, floating inputs, I2C/UART pin checks, duplicate I2C devices, code↔circuit mismatches — each with severity, explanation, why-it-matters, suggested fix, click-to-highlight |
+| **Test bench** | Automated tests on a fresh headless emulator: input events (press/toggle/pot/sensor) at scheduled times, assertions (pin becomes HIGH/LOW within, holds, toggles N×, serial contains), pass/fail with expected/actual and timeline |
+| **Import** | Real parsers: CircuitDesk JSON (full restore), CSV pin maps (column mapping), KiCad `.kicad_pcb/.kicad_mod` (s-expressions: outline, footprints, pads, nets), Eagle `.brd/.sch/.lbr` (XML: elements, pads, signals), Fritzing `.fzz/.fzpz` (connectors + SVG mapping), EasyEDA JSON (pads/tracks/parts), Gerber+Excellon (aperture/draw/flash rendering with layer toggles), SVG board art, ZIP part bundles — via a 5-step wizard with graceful fallback to visual reference |
+| **Custom boards** | Board Studio: bring a board CircuitDesk does not have and compile and run it. Choose the processor (never guessed), and the toolchain and runtime follow; pins carry the maker's names mapped to processor pads, so firmware written against `GP15` drives the pin labelled `STATUS`. Import a pin map, drag pins onto the board, save to My Boards, export as one `.cdboard.json`. Capability is derived from the profiles and cannot be typed — a board with no processor is wiring-only and is never built as something else. See [docs/custom-boards.md](docs/custom-boards.md) |
+| **Custom parts** | Board creator: upload SVG/image, set physical size, click-to-place pins with full metadata, save to a cross-project library, edit and export |
+| **Export** | `.cdproj.json`, ZIP package, BOM CSV, pin map CSV, wiring report, validation report, test report, board definition JSON, project image |
+| **Persistence** | IndexedDB for projects and custom parts, localStorage for UI settings; autosave (debounced), refresh-safe |
+
+## Architecture
+
+```
+src/
+  app/                app shell, routes, editor store (undo/redo, autosave)
+  dashboard/          project dashboard
+  editor/             toolbar, library, inspector, bottom panels, Monaco
+  canvas/             SVG canvas stage, geometry, wiring, minimap, thumbnails
+  boards/             board definitions + Uno/module artwork
+  components-library/ component definitions + vector artwork
+  circuit/            circuit graph (union-find nets, breadboard internals)
+  simulation/         AVR8js runner, circuit binding, controller, store
+  compiler/           compile client + static code/pin analysis
+  validation/         rule engine
+  testing/            headless test runner
+  import/             wizard + real format parsers + security hardening
+  custom-boards/      custom board schema, validation, resolution, bundles
+  board-studio/       Board Studio, its store and the My Boards library
+  custom-parts/       custom board creator + library store
+  project/            models, templates, persistence service, exporters
+  persistence/        IndexedDB + settings
+  types/ ui/ utils/
+server/
+  index.ts            Express API (+static hosting of dist/)
+  compiler/           arduinoCli.ts · gccToolchain.ts · compilerService.ts · sketchBuilder.ts · fileService.ts
+```
+
+## Verification
+
+```bash
+npm run typecheck      # strict TS, client + server
+npm run build          # production build
+npm run test:pipeline  # compiles Blink via the API, executes it on AVR8js,
+                       # asserts real 500ms timing, serial output, and that
+                       # editing delay() changes behavior
+npm run test:sim       # simulator behavior QA: button → digital input, pot →
+                       # real ADC (0/1023), PWM duty measurement, servo pulse
+                       # width → angle, ultrasonic echo protocol, Nano profile
+npm run test:mega      # ATmega2560 runtime suite: GPIO in/out, 150 ms timing,
+                       # Serial, ADC incl. A8-A15 via MUX5, PWM on Timer1 and
+                       # the Mega-only Timer5, wrong-MCU firmware rejection
+npm run test:leonardo  # ATmega32U4 runtime suite: GPIO in/out, millis, Serial1
+                       # both directions, ADC, PWM on Timer0/1/3, and proof that
+                       # native USB Serial goes over USB, never onto the UART
+npm run test:boards    # board profiles, honest badges, no Uno fallbacks
+npm run test:ui        # quick Playwright smoke test
+npx tsx tests/customBoard.demos.mts
+                       # five end-to-end custom-board journeys: a board that
+                       # arrived as a spreadsheet, a board file opened by
+                       # somebody with nothing installed, the wrong chip caught
+                       # and named, a revision priced before it costs a wire,
+                       # and a board with no chip that says so
+npm run test:qa        # full beta QA: create → edit → undo/redo → compiler
+                       # errors → compile+run → sim controls → persistence →
+                       # export → all 9 import formats → graceful failures
+```
+
+## Honest limitations (by design, clearly labeled in-app)
+
+- Compiled firmware runs on fourteen boards: the five AVR boards, the three RP2040 boards, the two ESP32-C3
+  boards and the ESP32-C6, and the three SAMD21 boards. Each was measured on Serial, PWM, interrupts, Wire,
+  SPI, Servo, tone() and EEPROM (tests/boards.eepromInterrupts.mts, samd21.timers.mts, esp32.peripherals.mts,
+  rp2040.pio.mts). The Due, Uno R4, Nano 33 BLE, the Xtensa ESP32s, ESP8266, Teensy, STM32, micro:bit and Pi
+  headers are wiring/validation level: their badges say so, and running them is refused rather than faked.
+- Not simulated on any board: Wi-Fi, Bluetooth and the other radios; the RP2040's second core; USB other than
+  the CDC serial port; DMA, the SAMD21 DAC and sleep modes. The SAMD21 has no EEPROM
+  (FlashStorage is the usual stand-in), and EEPROM on every board starts erased when a simulation starts or is Reset.
+- Analog simulation is a digital-level circuit model (documented); a SPICE-class engine is an adapter slot,
+  not a claim.

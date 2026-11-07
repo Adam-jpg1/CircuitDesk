@@ -1,0 +1,137 @@
+// UI smoke test against the production build served on :3411.
+import { chromium } from 'playwright';
+
+const errors: string[] = [];
+const browser = await chromium.launch(
+  process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : { executablePath: '/opt/pw-browsers/chromium' },
+);
+const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
+page.on('console', (msg) => {
+  if (msg.type() === 'error') errors.push(msg.text());
+});
+page.on('pageerror', (err) => errors.push(String(err)));
+
+function fail(msg: string): never {
+  console.error('FAIL:', msg);
+  console.error('console errors:', errors.slice(0, 10));
+  process.exit(1);
+}
+function pass(msg: string) {
+  console.log('PASS:', msg);
+}
+
+// 1. dashboard loads
+await page.goto('http://localhost:3411/');
+await page.waitForTimeout(1200);
+const title = await page.title();
+if (title !== 'CircuitDesk') fail(`title is "${title}"`);
+pass('dashboard loads with title CircuitDesk');
+if (!(await page.getByText('Create First Project').isVisible().catch(() => false))) fail('empty state missing');
+pass('empty state shows Create First Project');
+
+// 2. one click creates one project and opens the editor
+await page.getByText('Create First Project').click();
+await page.waitForTimeout(2500);
+if (!page.url().includes('#/editor/')) fail('did not navigate to editor');
+pass('project created and editor opened');
+await page.screenshot({ path: 'tests/.artifacts/editor.png' });
+
+// Monaco editor loaded locally?
+const monacoLoaded = await page.locator('.monaco-editor').first().isVisible().catch(() => false);
+if (!monacoLoaded) fail('Monaco editor did not load');
+pass('Monaco editor loaded (bundled, no CDN)');
+
+// canvas parts present?
+const svgParts = await page.locator('.canvas-wrap svg g').count();
+if (svgParts < 3) fail(`canvas seems empty (${svgParts} groups)`);
+pass(`canvas renders parts (${svgParts} svg groups)`);
+
+// A trackpad pinch is a Ctrl+wheel: it must zoom the canvas, and the browser
+// must never get it as page zoom — over the canvas or anywhere else in the editor.
+const ctrlWheel = (sel: string) =>
+  page.evaluate((sel) => {
+    const el = document.querySelector(sel)!;
+    const r = el.getBoundingClientRect();
+    const ev = new WheelEvent('wheel', { deltaY: -20, ctrlKey: true, bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
+    el.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  }, sel);
+const canvasSvg = '.canvas-wrap svg:not(.minimap)';
+const vbBefore = await page.locator(canvasSvg).getAttribute('viewBox');
+if (!(await ctrlWheel(canvasSvg))) fail('a pinch over the canvas reached the browser as page zoom');
+await page.waitForTimeout(150);
+if ((await page.locator(canvasSvg).getAttribute('viewBox')) === vbBefore) fail('a pinch over the canvas did not zoom it');
+for (const sel of ['.toolbar', '.side-panel.left', '.side-panel.right']) {
+  if (!(await ctrlWheel(sel))) fail(`a pinch over ${sel} reached the browser as page zoom`);
+}
+pass('a pinch zooms the canvas and never the page');
+
+// 3. validate
+await page.getByRole('button', { name: 'Validate' }).click();
+await page.waitForTimeout(600);
+pass('validate ran');
+
+// 4. compile + run via toolbar Run button (compiles first)
+await page.getByTitle(/Run \(Ctrl\+Enter\)/).click();
+await page.waitForTimeout(9000); // first compile may take a few seconds
+const statusText = await page.locator('.status-bar').innerText();
+if (!/Simulating/.test(statusText)) fail(`simulation not running: status="${statusText.replace(/\n/g, ' | ')}"`);
+pass('firmware compiled and simulation is running');
+
+// serial output appears
+await page.waitForTimeout(2500);
+const serial = await page.locator('.mono-out').first().innerText().catch(() => '');
+if (!serial.includes('ON') || !serial.includes('OFF')) fail(`serial output missing: "${serial.slice(0, 80)}"`);
+pass('serial monitor shows ON/OFF from emulated UART');
+await page.screenshot({ path: 'tests/.artifacts/running.png' });
+
+// 5. reload persistence: project still opens
+await page.goto('http://localhost:3411/#/');
+await page.waitForTimeout(1500);
+const cardCount = await page.locator('.project-card').count();
+if (cardCount < 1) fail('project did not persist to dashboard after reload');
+pass(`project persisted (${cardCount} card(s) on dashboard)`);
+await page.locator('.project-card').first().click();
+await page.waitForTimeout(2200);
+if (!page.url().includes('#/editor/')) fail('could not reopen project');
+const partsAfter = await page.locator('.canvas-wrap svg g').count();
+if (partsAfter < 3) fail('reopened project lost its parts');
+pass('project reopens with circuit restored');
+
+// 6. no react update-depth errors anywhere
+const depthErr = errors.find((e) => e.includes('Maximum update depth'));
+if (depthErr) fail('Maximum update depth exceeded occurred');
+pass('no "Maximum update depth exceeded" errors');
+const otherErrors = errors.filter((e) => !e.includes('favicon') && !e.includes('Download the React DevTools'));
+console.log(otherErrors.length === 0 ? 'PASS: no console errors' : `NOTE: console errors (${otherErrors.length}): ${otherErrors.slice(0, 5).join(' || ').slice(0, 500)}`);
+
+// 7. Licenses page reachable from home, renders, and carries real notices
+await page.goto('http://localhost:3411/#/', { waitUntil: 'load' });
+await page.waitForTimeout(500);
+const licensesBtn = page.locator('button', { hasText: /^Licenses$/ }).first();
+if ((await licensesBtn.count()) === 0) fail('home has a Licenses button');
+else {
+  pass('home has a Licenses button');
+  await licensesBtn.click();
+  await page.waitForTimeout(600);
+  const onPage = await page.locator('[data-testid="licenses-page"]').count();
+  if (onPage === 0) fail('the Licenses page renders');
+  else {
+    pass('the Licenses page renders');
+    const body = (await page.locator('[data-testid="licenses-page"]').innerText()).toLowerCase();
+    for (const needle of ['avr8js', 'rp2040js', 'arduino cores', 'independent simulation platform']) {
+      if (body.includes(needle)) pass(`the page shows "${needle}"`);
+      else fail(`the page shows "${needle}"`);
+    }
+    // An entry expands to its full notice text rather than only a summary.
+    const card = page.locator('.notice-head').first();
+    await card.click();
+    await page.waitForTimeout(300);
+    const expanded = await page.locator('.notice-body').count();
+    if (expanded > 0) pass('an entry expands to its full notice text');
+    else fail('an entry expands to its full notice text');
+  }
+}
+
+await browser.close();
+console.log('\nUI smoke test finished.');

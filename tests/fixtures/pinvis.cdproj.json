@@ -1,0 +1,76 @@
+{
+  "app": "CircuitDesk",
+  "kind": "circuitdesk-project",
+  "id": "proj_pinvis",
+  "name": "Pin Visibility Fixture",
+  "version": "1.0.0",
+  "createdAt": "2026-07-01T00:00:00.000Z",
+  "updatedAt": "2026-07-01T00:00:00.000Z",
+  "boardInstances": [
+    { "id": "b_uno", "definitionId": "board.arduino-uno", "x": 80, "y": 80, "rotation": 0, "properties": {}, "simulationState": {} },
+    { "id": "b_nano", "definitionId": "board.arduino-nano", "x": 80, "y": 400, "rotation": 0, "properties": {}, "simulationState": {} },
+    { "id": "b_mega", "definitionId": "board.arduino-mega2560", "x": 460, "y": 380, "rotation": 0, "properties": {}, "simulationState": {} },
+    { "id": "b_pico", "definitionId": "board.raspberry-pi-pico", "x": 460, "y": 80, "rotation": 0, "properties": {}, "simulationState": {} }
+  ],
+  "componentInstances": [
+    { "id": "c_bmp", "definitionId": "comp.bmp280", "x": 300, "y": 200, "rotation": 0, "properties": {}, "simulationState": {} },
+    { "id": "c_mpu", "definitionId": "comp.mpu6050", "x": 300, "y": 280, "rotation": 0, "properties": {}, "simulationState": {} }
+  ],
+  "connections": [
+    {
+      "id": "w1",
+      "sourceComponentId": "b_uno",
+      "sourcePinId": "A4",
+      "targetComponentId": "c_bmp",
+      "targetPinId": "sda",
+      "netId": "",
+      "color": "#e8590c",
+      "points": [],
+      "routing": "smooth"
+    },
+    {
+      "id": "w2",
+      "sourceComponentId": "b_uno",
+      "sourcePinId": "A4",
+      "targetComponentId": "c_mpu",
+      "targetPinId": "sda",
+      "netId": "",
+      "color": "#e8590c",
+      "points": [],
+      "routing": "smooth"
+    },
+    {
+      "id": "w3",
+      "sourceComponentId": "b_uno",
+      "sourcePinId": "A5",
+      "targetComponentId": "c_bmp",
+      "targetPinId": "scl",
+      "netId": "",
+      "color": "#3d9df2",
+      "points": [],
+      "routing": "smooth"
+    },
+    {
+      "id": "w4",
+      "sourceComponentId": "b_nano",
+      "sourcePinId": "D13",
+      "targetComponentId": "b_mega",
+      "targetPinId": "D22",
+      "netId": "",
+      "color": "#3fb950",
+      "points": [],
+      "routing": "smooth"
+    }
+  ],
+  "codeFiles": [
+    {
+      "id": "f1",
+      "name": "sketch.ino",
+      "language": "cpp",
+      "content": "void setup() {}\nvoid loop() {}\n"
+    }
+  ],
+  "tests": [],
+  "customDefinitions": [],
+  "settings": { "serialBaud": 9600, "simulationSpeed": 1 }
+}

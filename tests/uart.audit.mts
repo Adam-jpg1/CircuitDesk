@@ -1,0 +1,219 @@
+// Which boards actually have a UART, and which only look like they do.
+//
+// This file exists because "Serial works" and "there is a UART" are different
+// claims, and the gap between them is where a simulator quietly starts lying. A
+// board can print to a console through a ROM routine, a debug channel, or a
+// register file that swallows writes, and none of those can carry a byte to a
+// GPS module. If a UART peripheral model were attached on that basis, a NEO-6M
+// would appear to work on a board that cannot physically talk to one.
+//
+// So the support is enumerated here, asserted against the runners rather than
+// documented in prose, and the parts that need a UART are gated on it. When
+// someone implements the ESP UART, this file fails until the table is updated —
+// which is the point.
+//
+// The current answer, proven end to end in tests/uart.boards.mts (a wired GPS
+// parsed by compiled firmware on every Simulated board):
+//
+//   Uno, Nano, Mega, Pro Mini,  AVRUSART: real TX and real RX
+//   Leonardo
+//   Raspberry Pi Pico / W,      RP2040 UART0: real TX and real RX. UART1 is
+//   XIAO RP2040                 present in the emulator and not wired up here.
+//   ESP32-C3, SuperMini, C6     the chip's UART0, from the IDF register layout
+//   Feather M0, QT Py M0,       the SERCOM behind Serial1: TX, and RX with its
+//   XIAO SAMD21                 RXC interrupt
+
+import { BOARD_DEFINITIONS } from '../src/boards/definitions';
+import { BOARDS_WITH_UART } from '../src/simulation/circuitSim';
+import { COMPONENT_COVERAGE } from '../src/components-library/componentCoverage';
+import { validateProject } from '../src/validation/validator';
+import { emptyProject } from '../src/project/templates';
+import type { CircuitProject } from '../src/types';
+
+let failures = 0;
+function check(cond: boolean, msg: string) {
+  console.log(cond ? 'PASS:' : 'FAIL:', msg);
+  if (!cond) failures++;
+}
+function section(t: string) {
+  console.log(`\n--- ${t}`);
+}
+
+/**
+ * What each board is claimed to have, and what the runner must actually show.
+ *
+ * `tx` means a peripheral calls onSerialByte when firmware writes. `rx` means
+ * queueSerialInput reaches the firmware. Both are needed before a UART device
+ * model may attach: a GPS is useless without RX, and an AT modem is useless
+ * without both.
+ */
+const UART_SUPPORT: Record<string, { tx: boolean; rx: boolean; note: string }> = {
+  'board.arduino-uno': { tx: true, rx: true, note: 'AVRUSART, hardware Serial on D0/D1' },
+  'board.arduino-nano': { tx: true, rx: true, note: 'AVRUSART, hardware Serial on D0/D1' },
+  'board.arduino-mega2560': { tx: true, rx: true, note: 'AVRUSART; only USART0 is wired here' },
+  'board.arduino-leonardo': { tx: true, rx: true, note: 'AVRUSART; Serial1 on D0/D1' },
+  'board.raspberry-pi-pico': { tx: true, rx: true, note: 'RP2040 UART0; UART1 exists in the emulator and is not wired' },
+  'board.raspberry-pi-pico-w': { tx: true, rx: true, note: 'RP2040 UART0; UART1 not wired' },
+  'board.esp32-devkit': { tx: true, rx: true, note: 'ESP32 UART0 behind Serial on TX0/RX0; UART2 behind Serial2 on TX2/RX2' },
+  'board.esp32-cam': { tx: true, rx: true, note: 'ESP32 UART0 behind Serial, on U0T/U0R' },
+  'board.esp32-s3': { tx: true, rx: true, note: 'ESP32-S3 UART0 behind Serial on TX/RX; UART1 behind Serial1 on GPIO17/GPIO18' },
+  'board.esp8266-nodemcu': { tx: true, rx: true, note: 'ESP8266 UART0 behind Serial on TX/RX (GPIO1/GPIO3), through the board\'s USB bridge' },
+  'board.esp32-c3': { tx: true, rx: true, note: 'ESP32-C3 UART0 behind Serial, on IO21/IO20' },
+  'board.esp32-c6-devkitc-1': { tx: true, rx: true, note: 'ESP32-C6 UART0 behind Serial, on IO16/IO17' },
+  // The boards that carry a chip already executed here. The peripheral belongs
+  // to the silicon, so the entry is the silicon's — and the TX claims are
+  // watched arriving in tests/boards.sameChip.mts rather than inferred from
+  // the chip, because a table is where an inference goes to look true.
+  'board.arduino-pro-mini': { tx: true, rx: true, note: 'AVRUSART, the ATmega328P USART0 behind Serial on D0/D1' },
+  'board.seeed-xiao-rp2040': { tx: true, rx: true, note: 'RP2040 UART0 behind Serial1, on the pads printed D6/D7' },
+  'board.esp32-c3-supermini': { tx: true, rx: true, note: 'ESP32-C3 UART0 behind Serial, on the pads printed TX/RX (IO21/IO20)' },
+  'board.adafruit-feather': { tx: true, rx: true, note: 'SAMD21 SERCOM0 behind Serial1; Serial is native USB' },
+  'board.adafruit-qtpy': { tx: true, rx: true, note: 'SAMD21 SERCOM0 behind Serial1; Serial is native USB' },
+  'board.seeed-xiao': { tx: true, rx: true, note: 'SAMD21 SERCOM4 behind Serial1; Serial is native USB' },
+  'board.arduino-due': { tx: true, rx: true, note: 'SAM3X UART behind Serial on D0/D1 (the programming port); USART0-2 behind Serial1-3' },
+  'board.arduino-uno-r4': { tx: true, rx: true, note: 'RA4M1 SCI2 behind Serial1 on D0/D1; Serial is native USB' },
+  'board.stm32-nucleo': { tx: true, rx: true, note: 'STM32F401 USART2 behind Serial on PA2/PA3, shared with the ST-LINK virtual COM port' },
+  // The UART exists and Serial reaches the monitor both ways, but its pads
+  // (P0.06/P1.08) go to the USB interface chip, not the edge connector, so
+  // there is nothing on the board a GPS or a modem could be wired to.
+  'board.nano-33-ble': { tx: true, rx: true, note: 'nRF52840 UARTE0 behind Serial1 on TX1/RX0 (EasyDMA, with PPI); Serial is native USB' },
+  'board.teensy41': { tx: true, rx: true, note: 'i.MX RT1062 LPUART6 behind Serial1 on pins 0/1; Serial is native USB' },
+  // GPIO14/15 are the Pi's UART, but the Python runtime has no serial library
+  // (pyserial), so no part can be attached to them yet.
+  'board.rpi-zero-gpio': { tx: false, rx: false, note: 'UART pins GPIO14/15 exist, but the Python runtime offers no serial library to drive them' },
+  'board.rpi4-gpio': { tx: false, rx: false, note: 'UART pins GPIO14/15 exist, but the Python runtime offers no serial library to drive them' },
+  'board.microbit': { tx: false, rx: false, note: 'nRF52833 UARTE0 behind Serial, wired only to the USB interface chip; no UART on the edge connector' },
+};
+
+// ==================================== 1. the table matches the shipped boards
+section('1. every simulated board is accounted for');
+{
+  const simulated = (BOARD_DEFINITIONS as { id: string; simulation?: { supported?: boolean } }[]).filter(
+    (b) => b.simulation?.supported === true,
+  );
+  console.log(`   simulated boards: ${simulated.map((b) => b.id).join(', ')}`);
+  for (const board of simulated) {
+    check(UART_SUPPORT[board.id] !== undefined, `${board.id} has a recorded UART status`);
+  }
+  // And nothing in the table that is not a board, so it cannot rot quietly.
+  for (const id of Object.keys(UART_SUPPORT)) {
+    check(
+      simulated.some((b) => b.id === id),
+      `${id} in the table is a board this app simulates`,
+    );
+  }
+}
+
+// ================================= 2. the recorded support, printed in full ==
+section('2. what each board actually implements');
+for (const [boardId, claim] of Object.entries(UART_SUPPORT)) {
+  console.log(`   ${boardId.padEnd(28)} ${claim.tx ? 'TX' : '--'} ${claim.rx ? 'RX' : '--'}  ${claim.note}`);
+  check(claim.note.length > 10, `${boardId} says which peripheral, or which one is missing`);
+}
+
+// ===================== 3. the table agrees with the set the world links from
+section('3. the boards with a UART are the ones the world attaches parts to');
+{
+  for (const [id, claim] of Object.entries(UART_SUPPORT)) {
+    check((claim.tx && claim.rx) === BOARDS_WITH_UART.has(id), `${id}: table and BOARDS_WITH_UART agree`);
+  }
+  // The endpoint exists now, so a UART part may be simulated — but only if it
+  // is genuinely tested. The rule that must never break is the other one: a
+  // part that is NOT simulated has to name the primitive it is waiting on,
+  // rather than sitting in the matrix with no reason.
+  const uartParts = COMPONENT_COVERAGE.filter((c) => c.protocols.includes('uart'));
+  console.log(`   UART parts in the matrix: ${uartParts.length}`);
+  for (const part of uartParts) {
+    if (part.status === 'simulated') {
+      check(
+        part.tests.length > 0,
+        `${part.id} is simulated and names the tests that prove it (${part.tests.join(', ') || 'none'})`,
+      );
+      continue;
+    }
+    check(
+      part.dependencies.length > 0 || part.status === 'missing',
+      `${part.id} names what it is waiting on`,
+    );
+  }
+}
+
+// ============================ 4. AVR and RP2040 genuinely move bytes both ways
+section('4. the boards that do have a UART have both directions');
+{
+  // Running firmware for each is tests/uart.boards.mts. Here we only guard the
+  // invariant that no board claims RX without TX — a receive-only UART is not a thing,
+  // and a table that drifted into claiming one would be wrong in a way that
+  // silently half-works.
+  for (const [boardId, claim] of Object.entries(UART_SUPPORT)) {
+    check(!(claim.rx && !claim.tx), `${boardId} does not claim receive without transmit`);
+  }
+  const withUart = Object.entries(UART_SUPPORT).filter(([, c]) => c.tx && c.rx);
+  check(withUart.length === 23, `twenty-three boards carry a real UART today (${withUart.length})`);
+}
+
+
+// =========== 5. the message names the board, not the part it is blaming =====
+section('5. a UART part on a board without one blames the board');
+{
+  // The wrong message here would be "NEO-6M unsupported": the GPS is fully
+  // simulated and the identical wiring works on an Uno. What is missing is the
+  // board's UART, and the notice has to say so — a user who reads that the
+  // part is unsupported goes looking for a different part.
+  let n = 0;
+  const uid2 = (p: string) => `${p}${++n}`;
+  const mk = (definitionId: string) => ({
+    id: uid2('c'), definitionId, x: 0, y: 0, rotation: 0, properties: {}, simulationState: {},
+  });
+  const link = (p: CircuitProject, a: string, ap: string, b: string, bp: string) => {
+    p.connections.push({
+      id: uid2('w'), sourceComponentId: a, sourcePinId: ap, targetComponentId: b, targetPinId: bp,
+      netId: '', color: '#000', points: [], routing: 'smooth',
+    } as CircuitProject['connections'][number]);
+  };
+
+  // A board with UART pads and no UART simulation: the Pi header, whose
+  // Python runtime has no serial port library.
+  const boardDef = BOARD_DEFINITIONS.find((b) => b.id === 'board.rpi4-gpio');
+  const txPad = boardDef?.pins.find((p) => p.capabilities.includes('uart-tx'));
+  const rxPad = boardDef?.pins.find((p) => p.capabilities.includes('uart-rx'));
+
+  const project = emptyProject('pi-gps');
+  const board = mk('board.rpi4-gpio');
+  const gps = mk('comp.gps');
+  project.boardInstances.push(board);
+  project.componentInstances.push(gps);
+  if (txPad && rxPad) {
+    link(project, board.id, rxPad.id, gps.id, 'tx');
+    link(project, board.id, txPad.id, gps.id, 'rx');
+  }
+
+  const found = validateProject(project).find((i) => i.ruleId === 'board-uart-unsupported');
+  check(found !== undefined, 'the project raises the board-capability notice');
+  if (found) {
+    console.log(`   title: ${found.title}`);
+    check(
+      found.title === `${boardDef?.name} physical UART simulation is not yet supported.`,
+      'and the title names the board and the capability',
+    );
+    check(!/NEO-6M unsupported/.test(found.title), 'rather than calling the part unsupported');
+    check(/Uno/.test(found.description), 'and says where the same wiring does work');
+    check((found.affectedComponentIds ?? []).includes(board.id), 'pointing at the board');
+  }
+
+  // The same parts on a board that does have a UART must NOT raise it.
+  const ok = emptyProject('uno-gps');
+  const unoBoard = mk('board.arduino-uno');
+  const unoGps = mk('comp.gps');
+  ok.boardInstances.push(unoBoard);
+  ok.componentInstances.push(unoGps);
+  link(ok, unoBoard.id, 'D0', unoGps.id, 'tx');
+  link(ok, unoBoard.id, 'D1', unoGps.id, 'rx');
+  check(
+    validateProject(ok).every((i) => i.ruleId !== 'board-uart-unsupported'),
+    'and an Uno with the same wiring raises nothing',
+  );
+}
+
+console.log(failures === 0 ? '\nUART audit passed.' : `\n${failures} check(s) FAILED`);
+process.exit(failures === 0 ? 0 : 1);

@@ -1,0 +1,1294 @@
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEditorStore } from '../app/editorStore';
+import { useSimulationStore } from '../simulation/simulationStore';
+import { resolveDefinition, resolvePin } from '../project/partsRegistry';
+import { buildCircuitGraph, isBreadboard, seatInBreadboards, seatingOffset, splitNode } from '../circuit/nets';
+import { toast } from '../ui/primitives';
+import { arduinoPinNumber } from '../boards/pinMaps';
+import { runnerPinIndex } from '../simulation/boardRunner';
+import { pinAbsolute, partBounds, partSize, wirePath, snap, type Pt } from './geometry';
+import { ComponentArtwork } from '../components-library/artwork/componentArtwork';
+import { UnoArtwork } from '../boards/artwork/UnoArtwork';
+import { GenericModuleArtwork } from '../boards/artwork/GenericModuleArtwork';
+import { CustomBoardArtwork } from '../boards/artwork/CustomBoardArtwork';
+import { MicrobitArtwork } from '../boards/artwork/MicrobitArtwork';
+import { MegaArtwork } from '../boards/artwork/MegaArtwork';
+import { LeonardoArtwork } from '../boards/artwork/LeonardoArtwork';
+import { hotspotAt, type Hotspot } from '../components-library/artwork/interactiveGeometry';
+import { contactStateKey } from '../simulation/devices/contacts';
+import { MM } from '../boards/pinHelpers';
+import type { CircuitProject, ComponentDefinition, ComponentInstance, PartDefinition, PinDefinition } from '../types';
+
+const WIRE_COLORS = ['#e03131', '#212529', '#2f9e44', '#1971c2', '#e8590c', '#7048e8', '#f08c00', '#c2255c'];
+
+interface DragState {
+  kind: 'move' | 'pan' | 'box';
+  startClient: Pt;
+  lastWorld: Pt;
+  startView?: { x: number; y: number; zoom: number };
+  boxStart?: Pt;
+  moved: boolean;
+  /** A touch pan that, if the finger never moved, was a tap: clear the selection. */
+  tapClears?: boolean;
+  /** A touch pan over a wire in progress that, if it was a tap, bends the wire there. */
+  tapWaypoint?: Pt;
+}
+
+/** How far from a pin, in screen pixels, a fingertip still counts as on it. */
+const TOUCH_PIN_SLOP_PX = 22;
+/** How close, on screen, a mouse has to be to a pin for a wire's end to snap to it. */
+const MOUSE_PIN_SNAP_PX = 14;
+/** How far a finger may wander and still have tapped. */
+const TAP_SLOP_PX = 6;
+
+export function CanvasStage() {
+  const project = useEditorStore((s) => s.project);
+  const tool = useEditorStore((s) => s.tool);
+  const view = useEditorStore((s) => s.view);
+  const selection = useEditorStore((s) => s.selection);
+  const wireDraft = useEditorStore((s) => s.wireDraft);
+  const highlightedIssueId = useEditorStore((s) => s.highlightedIssueId);
+  const validationIssues = useEditorStore((s) => s.validationIssues);
+  const store = useEditorStore;
+
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [size, setSize] = useState({ w: 800, h: 600 });
+  /** Whether `size` is the canvas's real size yet, rather than the default. */
+  const [measured, setMeasured] = useState(false);
+  const dragRef = useRef<DragState | null>(null);
+  const [boxRect, setBoxRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  /** Fingers on the canvas, by pointer id, for pinch-zoom. */
+  const touchesRef = useRef(new Map<number, Pt>());
+  const pinchRef = useRef<{ startDist: number; anchor: Pt; startZoom: number } | null>(null);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver((entries) => {
+      const r = entries[0].contentRect;
+      if (r.width > 0 && r.height > 0) setMeasured(true);
+      setSize((prev) => (Math.abs(prev.w - r.width) > 1 || Math.abs(prev.h - r.height) > 1 ? { w: r.width, h: r.height } : prev));
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+        setSpaceHeld(true);
+      }
+    };
+    const up = (e: KeyboardEvent) => e.code === 'Space' && setSpaceHeld(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+    };
+  }, []);
+
+  const toWorld = useCallback(
+    (clientX: number, clientY: number): Pt => {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return { x: 0, y: 0 };
+      return {
+        x: view.x + (clientX - rect.left) / view.zoom,
+        y: view.y + (clientY - rect.top) / view.zoom,
+      };
+    },
+    [view],
+  );
+
+  const instances = useMemo(
+    () => (project ? [...project.boardInstances, ...project.componentInstances] : []),
+    [project],
+  );
+
+  const definitions = useMemo(() => {
+    const map = new Map<string, PartDefinition>();
+    for (const inst of instances) {
+      const def = resolveDefinition(inst.definitionId, project);
+      if (def) map.set(inst.id, def);
+    }
+    return map;
+  }, [instances, project]);
+
+  // fit view on demand
+  const fitToView = useCallback(() => {
+    if (instances.length === 0) {
+      store.getState().setView({ x: -60, y: -40, zoom: 1 });
+      return;
+    }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const inst of instances) {
+      const def = definitions.get(inst.id);
+      if (!def) continue;
+      const b = partBounds(inst, def);
+      minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
+      maxX = Math.max(maxX, b.x + b.w); maxY = Math.max(maxY, b.y + b.h);
+    }
+    const pad = 60;
+    const zoom = Math.min(2.5, Math.max(0.15, Math.min(size.w / (maxX - minX + pad * 2), size.h / (maxY - minY + pad * 2))));
+    store.getState().setView({
+      x: minX - (size.w / zoom - (maxX - minX)) / 2,
+      y: minY - (size.h / zoom - (maxY - minY)) / 2,
+      zoom,
+    });
+  }, [instances, definitions, size, store]);
+
+  useEffect(() => {
+    (window as unknown as { __cdFit?: () => void }).__cdFit = fitToView;
+  }, [fitToView]);
+
+  // One-time fit after project load, once the canvas has its real size: on a
+  // phone the default 800x600 fitted a board three times too large.
+  const fittedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (project && measured && fittedFor.current !== project.id) {
+      fittedFor.current = project.id;
+      fitToView();
+    }
+  }, [project, measured, fitToView]);
+
+  /** Zooms by `factor` about a point on screen, keeping that point still. */
+  const zoomAbout = useCallback(
+    (clientX: number, clientY: number, factor: number) => {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const worldBefore = toWorld(clientX, clientY);
+      const zoom = Math.min(4, Math.max(0.12, view.zoom * factor));
+      store.getState().setView({
+        x: worldBefore.x - (clientX - rect.left) / zoom,
+        y: worldBefore.y - (clientY - rect.top) / zoom,
+        zoom,
+      });
+    },
+    [toWorld, view.zoom, store],
+  );
+  const zoomAboutRef = useRef(zoomAbout);
+  zoomAboutRef.current = zoomAbout;
+
+  // The wheel and the trackpad pinch, as native listeners. React attaches
+  // wheel handlers as passive, so the old onWheel could never cancel the
+  // browser's own handling: a pinch — which browsers deliver as a wheel with
+  // Ctrl held — zoomed the canvas and the whole page with it. Safari sends a
+  // pinch as gesture events instead, which nothing handled at all.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      // Proportional to the distance scrolled, so a pinch's many small steps
+      // and a mouse wheel's few large ones both zoom at a sensible rate.
+      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      // A Ctrl+wheel notch on a mouse is a large delta: cap any one step.
+      const step = Math.max(-0.25, Math.min(0.25, -dy * (e.ctrlKey ? 0.01 : 0.0015)));
+      zoomAboutRef.current(e.clientX, e.clientY, Math.exp(step));
+    };
+    let lastScale = 1;
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      lastScale = 1;
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      const g = e as Event & { scale: number; clientX: number; clientY: number };
+      zoomAboutRef.current(g.clientX, g.clientY, g.scale / lastScale);
+      lastScale = g.scale;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('gesturestart', onGestureStart);
+    el.addEventListener('gesturechange', onGestureChange);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('gesturestart', onGestureStart);
+      el.removeEventListener('gesturechange', onGestureChange);
+    };
+  }, []);
+
+  const finishWire = useCallback(
+    (toComponentId: string, toPinId: string) => {
+      const draft = store.getState().wireDraft;
+      if (!draft) return;
+      if (draft.fromComponentId === toComponentId && draft.fromPinId === toPinId) {
+        store.getState().setWireDraft(null);
+        return;
+      }
+      const colorIdx = (store.getState().project?.connections.length ?? 0) % WIRE_COLORS.length;
+      store.getState().addConnection({
+        sourceComponentId: draft.fromComponentId,
+        sourcePinId: draft.fromPinId,
+        targetComponentId: toComponentId,
+        targetPinId: toPinId,
+        color: WIRE_COLORS[colorIdx],
+        points: draft.points,
+        routing: 'smooth',
+      });
+      store.getState().setWireDraft(null);
+    },
+    [store],
+  );
+
+  const wireFromOrTo = useCallback(
+    (componentId: string, pinId: string) => {
+      const s = store.getState();
+      if (s.wireDraft) {
+        finishWire(componentId, pinId);
+      } else {
+        s.setWireDraft({ fromComponentId: componentId, fromPinId: pinId, points: [], cursor: null });
+      }
+    },
+    [store, finishWire],
+  );
+
+  const onPinClick = useCallback(
+    (componentId: string, pin: PinDefinition, e: React.MouseEvent) => {
+      e.stopPropagation();
+      wireFromOrTo(componentId, pin.id);
+    },
+    [wireFromOrTo],
+  );
+
+  /**
+   * The pin nearest a touch, if one is close enough to have been meant. A
+   * header pin is a few pixels across at the zoom a phone shows a whole board
+   * at — far smaller than a fingertip — so a touch picks the nearest pin
+   * within reach rather than needing to land on one.
+   */
+  const pinNearTouch = useCallback(
+    (clientX: number, clientY: number, reachPx = TOUCH_PIN_SLOP_PX): { componentId: string; pinId: string } | null => {
+      const world = toWorld(clientX, clientY);
+      const reach = reachPx / view.zoom;
+      const from = store.getState().wireDraft;
+      let best: { componentId: string; pinId: string } | null = null;
+      let bestDist = reach;
+      for (const inst of instances) {
+        const def = definitions.get(inst.id);
+        if (!def) continue;
+        for (const pin of def.pins) {
+          // A wire does not end where it started.
+          if (from && from.fromComponentId === inst.id && from.fromPinId === pin.id) continue;
+          const at = pinAbsolute(inst, def, pin);
+          const d = Math.hypot(at.x - world.x, at.y - world.y);
+          if (d < bestDist) {
+            bestDist = d;
+            best = { componentId: inst.id, pinId: pin.id };
+          }
+        }
+      }
+      return best;
+    },
+    [toWorld, view.zoom, instances, definitions, store],
+  );
+
+  const onBackgroundPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      const world = toWorld(e.clientX, e.clientY);
+      const s = store.getState();
+      if (e.pointerType === 'touch') {
+        // A finger: wiring snaps to the pin it meant; anything else is a pan,
+        // and a pan that never moved was a tap.
+        if (tool === 'wire' || s.wireDraft) {
+          const pin = pinNearTouch(e.clientX, e.clientY);
+          if (pin) {
+            wireFromOrTo(pin.componentId, pin.pinId);
+            return;
+          }
+        }
+        (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+        dragRef.current = {
+          kind: 'pan',
+          startClient: { x: e.clientX, y: e.clientY },
+          lastWorld: world,
+          startView: { ...view },
+          moved: false,
+          tapClears: tool === 'select' && !s.wireDraft,
+          tapWaypoint: s.wireDraft ? world : undefined,
+        };
+        return;
+      }
+      if (s.wireDraft) {
+        // Near a pin, the wire connects to it; anywhere else, a click bends it.
+        const target = pinNearTouch(e.clientX, e.clientY, MOUSE_PIN_SNAP_PX);
+        if (target) {
+          finishWire(target.componentId, target.pinId);
+          return;
+        }
+        s.setWireDraft({ ...s.wireDraft, points: [...s.wireDraft.points, snap(world.x), snap(world.y)] });
+        return;
+      }
+      const panMode = tool === 'pan' || spaceHeld || e.button === 1;
+      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+      if (panMode) {
+        dragRef.current = { kind: 'pan', startClient: { x: e.clientX, y: e.clientY }, lastWorld: world, startView: { ...view }, moved: false };
+      } else if (tool === 'select') {
+        dragRef.current = { kind: 'box', startClient: { x: e.clientX, y: e.clientY }, lastWorld: world, boxStart: world, moved: false };
+        if (!e.shiftKey) s.setSelection({ componentIds: [], connectionIds: [] });
+      }
+    },
+    [toWorld, tool, spaceHeld, view, store, pinNearTouch, wireFromOrTo, finishWire],
+  );
+
+  /**
+   * The control under the pointer, in the part's own unrotated coordinates.
+   *
+   * The part is drawn translated to its position and rotated about its centre,
+   * so finding what was clicked means undoing exactly that — a keypad turned
+   * 90° must still respond on the key you can see, not the one that would have
+   * been there before you rotated it.
+   */
+  const hotspotUnderPointer = useCallback(
+    (def: PartDefinition, inst: ComponentInstance, e: React.PointerEvent): Hotspot | null => {
+      if (def.isBoard) return null;
+      const world = toWorld(e.clientX, e.clientY);
+      const w = def.widthMm * MM;
+      const h = def.heightMm * MM;
+      const cx = inst.x + w / 2;
+      const cy = inst.y + h / 2;
+      const theta = (-inst.rotation * Math.PI) / 180;
+      const dx = world.x - cx;
+      const dy = world.y - cy;
+      const localX = dx * Math.cos(theta) - dy * Math.sin(theta) + w / 2;
+      const localY = dx * Math.sin(theta) + dy * Math.cos(theta) + h / 2;
+      return hotspotAt(def as ComponentDefinition, inst, localX, localY);
+    },
+    [toWorld],
+  );
+
+  // Double-clicking a part opens whatever bigger view it has. Only the key
+  // matrices have one: fifty keys on a 118 mm part is nine pixels a key at the
+  // zoom the canvas opens at, which is accurate and also not usable.
+  const onPartDoubleClick = useCallback((inst: ComponentInstance, def: PartDefinition | undefined) => {
+    if (def?.simulationAdapterId === 'sim.keypad') useEditorStore.getState().setKeyPanel(inst.id);
+  }, []);
+
+  const onPartPointerDown = useCallback(
+    (inst: ComponentInstance, e: React.PointerEvent) => {
+      e.stopPropagation();
+      const s = store.getState();
+      const simRunning = useSimulationStore.getState().status === 'running';
+      const def = definitions.get(inst.id);
+
+      // A board's own buttons (the micro:bit's A and B) while it runs: held
+      // for as long as the pointer is down, like the real ones.
+      if (simRunning && def?.isBoard) {
+        const onboard = (def.metadata.onboardButtons as { key: string; xMm: number; yMm: number; rMm: number }[] | undefined) ?? [];
+        if (onboard.length) {
+          const world = toWorld(e.clientX, e.clientY);
+          const w = def.widthMm * MM;
+          const h = def.heightMm * MM;
+          const theta = (-inst.rotation * Math.PI) / 180;
+          const dx = world.x - (inst.x + w / 2);
+          const dy = world.y - (inst.y + h / 2);
+          const lx = (dx * Math.cos(theta) - dy * Math.sin(theta) + w / 2) / MM;
+          const ly = (dx * Math.sin(theta) + dy * Math.cos(theta) + h / 2) / MM;
+          const hit = onboard.find((b) => Math.hypot(lx - b.xMm, ly - b.yMm) <= b.rMm + 1.5);
+          if (hit) {
+            const key = contactStateKey(inst.id, hit.key);
+            useSimulationStore.getState().pressButton(key, true);
+            const release = () => {
+              useSimulationStore.getState().pressButton(key, false);
+              window.removeEventListener('pointerup', release);
+            };
+            window.addEventListener('pointerup', release);
+            return;
+          }
+        }
+      }
+
+      // interactive parts during simulation
+      if (simRunning && def && !def.isBoard) {
+        if (def.simulationAdapterId === 'sim.push-button') {
+          useSimulationStore.getState().pressButton(inst.id, true);
+          const release = () => {
+            useSimulationStore.getState().pressButton(inst.id, false);
+            window.removeEventListener('pointerup', release);
+          };
+          window.addEventListener('pointerup', release);
+          return;
+        }
+        if (def.simulationAdapterId === 'sim.joystick') {
+          // A thumbstick is pushed, not clicked: dragging deflects it and
+          // letting go springs it back to centre, as the real one's springs
+          // do. A press without a drag is the stick's own click switch. The
+          // drag is measured in the part's unrotated frame, so a stick turned
+          // on the canvas still pushes the way it is drawn.
+          const sim = useSimulationStore.getState();
+          const swKey = contactStateKey(inst.id, 'sw');
+          const theta = (-inst.rotation * Math.PI) / 180;
+          const start = toWorld(e.clientX, e.clientY);
+          const fullThrow = 6 * MM;
+          let dragged = false;
+          let swHeld = false;
+          const holdTimer = window.setTimeout(() => {
+            if (dragged) return;
+            swHeld = true;
+            useSimulationStore.getState().pressButton(swKey, true);
+          }, 150);
+          const move = (ev: PointerEvent) => {
+            const world = toWorld(ev.clientX, ev.clientY);
+            const wx = world.x - start.x;
+            const wy = world.y - start.y;
+            const dx = wx * Math.cos(theta) - wy * Math.sin(theta);
+            const dy = wx * Math.sin(theta) + wy * Math.cos(theta);
+            if (!dragged && Math.hypot(dx, dy) < 1.5 * MM) return;
+            dragged = true;
+            if (swHeld) {
+              swHeld = false;
+              useSimulationStore.getState().pressButton(swKey, false);
+            }
+            const axis = (d: number) => Math.min(1, Math.max(0, 0.5 + d / (2 * fullThrow)));
+            useSimulationStore.getState().setPot(`${inst.id}#x`, axis(dx));
+            useSimulationStore.getState().setPot(`${inst.id}#y`, axis(dy));
+          };
+          const release = () => {
+            window.clearTimeout(holdTimer);
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', release);
+            const st = useSimulationStore.getState();
+            st.setPot(`${inst.id}#x`, 0.5);
+            st.setPot(`${inst.id}#y`, 0.5);
+            if (swHeld) {
+              st.pressButton(swKey, false);
+            } else if (!dragged) {
+              // A quick tap: long enough for firmware polling every few
+              // milliseconds to see the switch close.
+              st.pressButton(swKey, true);
+              window.setTimeout(() => useSimulationStore.getState().pressButton(swKey, false), 120);
+            }
+          };
+          sim.setPot(`${inst.id}#x`, 0.5);
+          window.addEventListener('pointermove', move);
+          window.addEventListener('pointerup', release);
+          return;
+        }
+        if (def.simulationAdapterId === 'sim.toggle-switch') {
+          const cur = useSimulationStore.getState().toggleStates[inst.id] === true;
+          useSimulationStore.getState().setToggle(inst.id, !cur);
+          return;
+        }
+        // Parts with more than one thing to press: work out which control the
+        // pointer is actually over, and close that contact and no other. Two
+        // keys held at once are two independent contacts, so nothing here
+        // releases anything except the key its own pointer opened.
+        const spot = hotspotUnderPointer(def, inst, e);
+        if (spot) {
+          const stateKey = contactStateKey(inst.id, spot.key);
+          const sim = useSimulationStore.getState();
+          if (spot.kind === 'latching') {
+            sim.pressButton(stateKey, !sim.pressedButtons.includes(stateKey));
+          } else {
+            sim.pressButton(stateKey, true);
+            const release = () => {
+              useSimulationStore.getState().pressButton(stateKey, false);
+              window.removeEventListener('pointerup', release);
+            };
+            window.addEventListener('pointerup', release);
+          }
+          return;
+        }
+      }
+
+      if (tool === 'pan' || spaceHeld || e.button === 1) {
+        onBackgroundPointerDown(e);
+        return;
+      }
+      if (e.pointerType === 'touch' && (tool === 'wire' || s.wireDraft)) {
+        onBackgroundPointerDown(e);
+        return;
+      }
+      if (s.wireDraft) {
+        // A wire dropped on a part connects to the pin it is nearest, if it
+        // is near one. On the body, away from every pin, it used to do
+        // nothing at all and say nothing — now it says why.
+        const target = pinNearTouch(e.clientX, e.clientY, MOUSE_PIN_SNAP_PX);
+        if (target) finishWire(target.componentId, target.pinId);
+        else toast('A wire connects at a pin. Move to one of the part\'s pins (it lights up green) and click there.', 'info');
+        return;
+      }
+
+      const already = s.selection.componentIds.includes(inst.id);
+      if (e.shiftKey) {
+        s.setSelection({
+          componentIds: already
+            ? s.selection.componentIds.filter((id) => id !== inst.id)
+            : [...s.selection.componentIds, inst.id],
+          connectionIds: s.selection.connectionIds,
+        });
+      } else if (!already) {
+        s.setSelection({ componentIds: [inst.id], connectionIds: [] });
+      }
+      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+      dragRef.current = {
+        kind: 'move',
+        startClient: { x: e.clientX, y: e.clientY },
+        lastWorld: toWorld(e.clientX, e.clientY),
+        moved: false,
+      };
+    },
+    [store, tool, spaceHeld, toWorld, definitions, onBackgroundPointerDown],
+  );
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const s = store.getState();
+      if (s.wireDraft) {
+        const world = toWorld(e.clientX, e.clientY);
+        const target = pinNearTouch(e.clientX, e.clientY, e.pointerType === 'touch' ? TOUCH_PIN_SLOP_PX : MOUSE_PIN_SNAP_PX);
+        s.setWireDraft({ ...s.wireDraft, cursor: world, snapTo: target });
+      }
+      const drag = dragRef.current;
+      if (!drag) return;
+      const world = toWorld(e.clientX, e.clientY);
+      if (drag.kind === 'pan' && drag.startView) {
+        const dxClient = e.clientX - drag.startClient.x;
+        const dyClient = e.clientY - drag.startClient.y;
+        if (!drag.moved && Math.hypot(dxClient, dyClient) < TAP_SLOP_PX) return;
+        drag.moved = true;
+        s.setView({
+          x: drag.startView.x - dxClient / drag.startView.zoom,
+          y: drag.startView.y - dyClient / drag.startView.zoom,
+          zoom: drag.startView.zoom,
+        });
+      } else if (drag.kind === 'move') {
+        const dx = snap(world.x) - snap(drag.lastWorld.x);
+        const dy = snap(world.y) - snap(drag.lastWorld.y);
+        if (dx !== 0 || dy !== 0) {
+          drag.moved = true;
+          s.moveInstances(s.selection.componentIds, dx, dy, false);
+          drag.lastWorld = { x: drag.lastWorld.x + dx, y: drag.lastWorld.y + dy };
+        }
+      } else if (drag.kind === 'box' && drag.boxStart) {
+        drag.moved = true;
+        setBoxRect({
+          x: Math.min(drag.boxStart.x, world.x),
+          y: Math.min(drag.boxStart.y, world.y),
+          w: Math.abs(world.x - drag.boxStart.x),
+          h: Math.abs(world.y - drag.boxStart.y),
+        });
+      }
+    },
+    [store, toWorld, pinNearTouch],
+  );
+
+  const onPointerUp = useCallback(() => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    const s = store.getState();
+    if (!drag) return;
+    if (drag.kind === 'move' && drag.moved) {
+      // Dropped over a breadboard, a part's legs go into the holes: nudge it
+      // so the nearest leg sits exactly in its hole. Not when a breadboard is
+      // itself being moved — the parts on it travel with it or stay put.
+      const moving = instances.filter((i) => s.selection.componentIds.includes(i.id));
+      if (!moving.some((i) => isBreadboard(definitions.get(i.id)))) {
+        const lead = moving.find((i) => definitions.get(i.id));
+        const offset = lead ? seatingOffset(lead, definitions.get(lead.id)!, instances, definitions) : null;
+        if (offset) s.moveInstances(s.selection.componentIds, offset.dx, offset.dy, false);
+      }
+      s.moveInstances(s.selection.componentIds, 0, 0, true);
+    } else if (drag.kind === 'pan' && !drag.moved) {
+      if (drag.tapClears) s.setSelection({ componentIds: [], connectionIds: [] });
+      const at = drag.tapWaypoint;
+      if (at && s.wireDraft) s.setWireDraft({ ...s.wireDraft, points: [...s.wireDraft.points, snap(at.x), snap(at.y)] });
+    } else if (drag.kind === 'box' && boxRect) {
+      const hit = instances
+        .filter((inst) => {
+          const def = definitions.get(inst.id);
+          if (!def) return false;
+          const b = partBounds(inst, def);
+          return b.x < boxRect.x + boxRect.w && b.x + b.w > boxRect.x && b.y < boxRect.y + boxRect.h && b.y + b.h > boxRect.y;
+        })
+        .map((i) => i.id);
+      if (hit.length > 0) {
+        s.setSelection({ componentIds: [...new Set([...s.selection.componentIds, ...hit])], connectionIds: [] });
+      }
+    }
+    setBoxRect(null);
+  }, [store, boxRect, instances, definitions]);
+
+  // Two fingers pinch to zoom and drag to pan, about the point between them.
+  // Handled in the capture phase, above the parts, so a second finger landing
+  // on a board still zooms rather than grabbing the board.
+  const onTouchDownCapture = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      const touches = touchesRef.current;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size < 2) return;
+      e.stopPropagation();
+      if (pinchRef.current) return;
+      // Whatever the first finger began gives way to the pinch; a part it was
+      // already dragging stays where it got to.
+      const drag = dragRef.current;
+      dragRef.current = null;
+      setBoxRect(null);
+      const s = store.getState();
+      if (drag?.kind === 'move' && drag.moved) s.moveInstances(s.selection.componentIds, 0, 0, true);
+      const [a, b] = [...touches.values()];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      pinchRef.current = { startDist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), anchor: toWorld(mid.x, mid.y), startZoom: view.zoom };
+    },
+    [store, toWorld, view.zoom],
+  );
+
+  const onTouchMoveCapture = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      const touches = touchesRef.current;
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const pinch = pinchRef.current;
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!pinch || !rect || touches.size < 2) return;
+      e.stopPropagation();
+      const [a, b] = [...touches.values()];
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const zoom = Math.min(4, Math.max(0.12, (pinch.startZoom * Math.hypot(a.x - b.x, a.y - b.y)) / pinch.startDist));
+      store.getState().setView({
+        x: pinch.anchor.x - (mid.x - rect.left) / zoom,
+        y: pinch.anchor.y - (mid.y - rect.top) / zoom,
+        zoom,
+      });
+    },
+    [store],
+  );
+
+  const onTouchEndCapture = useCallback((e: React.PointerEvent) => {
+    if (e.pointerType !== 'touch') return;
+    touchesRef.current.delete(e.pointerId);
+    if (pinchRef.current) {
+      e.stopPropagation();
+      if (touchesRef.current.size < 2) pinchRef.current = null;
+    }
+  }, []);
+
+  // wire endpoints resolver
+  const pinPos = useCallback(
+    (componentId: string, pinId: string): Pt | null => {
+      const inst = instances.find((i) => i.id === componentId);
+      const def = inst ? definitions.get(inst.id) : undefined;
+      const pin = resolvePin(def, pinId);
+      if (!inst || !def || !pin) return null;
+      return pinAbsolute(inst, def, pin);
+    },
+    [instances, definitions],
+  );
+
+  /** Which pins already carry a wire, so the marker can show it without hovering. */
+  const connectedPins = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    const add = (instId: string, pinId: string) => {
+      let set = map.get(instId);
+      if (!set) map.set(instId, (set = new Set()));
+      set.add(pinId);
+    };
+    for (const c of project?.connections ?? []) {
+      add(c.sourceComponentId, c.sourcePinId);
+      add(c.targetComponentId, c.targetPinId);
+    }
+    // A leg pushed into a breadboard is connected without a wire, and so is
+    // the hole it is in.
+    for (const [pinKey, holeKey] of seatInBreadboards(instances, definitions)) {
+      for (const key of [pinKey, holeKey]) {
+        const [instId, pinId] = splitNode(key);
+        add(instId, pinId);
+      }
+    }
+    return map;
+  }, [project?.connections, instances, definitions]);
+
+  const issueHighlights = useMemo(() => {
+    if (!highlightedIssueId) return { comps: new Set<string>(), conns: new Set<string>() };
+    const issue = validationIssues.find((i) => i.id === highlightedIssueId);
+    return {
+      comps: new Set(issue?.affectedComponentIds ?? []),
+      conns: new Set(issue?.affectedConnectionIds ?? []),
+    };
+  }, [highlightedIssueId, validationIssues]);
+
+  if (!project) return null;
+
+  const vb = `${view.x} ${view.y} ${size.w / view.zoom} ${size.h / view.zoom}`;
+  const cursor = spaceHeld || tool === 'pan' ? 'grab' : wireDraft ? 'crosshair' : tool === 'wire' ? 'crosshair' : 'default';
+
+  return (
+    <div
+      ref={wrapRef}
+      className="canvas-wrap"
+      onPointerDownCapture={onTouchDownCapture}
+      onPointerMoveCapture={onTouchMoveCapture}
+      onPointerUpCapture={onTouchEndCapture}
+      onPointerCancelCapture={onTouchEndCapture}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('circuitdesk/part')) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        const defId = e.dataTransfer.getData('circuitdesk/part');
+        if (!defId) return;
+        e.preventDefault();
+        const world = toWorld(e.clientX, e.clientY);
+        const def = resolveDefinition(defId, project);
+        const { w, h } = def ? partSize(def) : { w: 40, h: 40 };
+        useEditorStore.getState().addInstance(defId, snap(world.x - w / 2), snap(world.y - h / 2));
+      }}
+    >
+      <svg
+        ref={svgRef}
+        width={size.w}
+        height={size.h}
+        viewBox={vb}
+        style={{ cursor, display: 'block' }}
+        onPointerDown={onBackgroundPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onContextMenu={(e) => {
+          if (useEditorStore.getState().wireDraft) {
+            e.preventDefault();
+            useEditorStore.getState().setWireDraft(null);
+          }
+        }}
+      >
+        <defs>
+          <pattern id="grid" width="25" height="25" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="1" fill="#232d3a" />
+          </pattern>
+          <pattern id="grid-major" width="125" height="125" patternUnits="userSpaceOnUse">
+            <rect width="125" height="125" fill="url(#grid)" />
+            <circle cx="1" cy="1" r="1.6" fill="#2e3b4b" />
+          </pattern>
+        </defs>
+        <rect
+          x={view.x - 10}
+          y={view.y - 10}
+          width={size.w / view.zoom + 20}
+          height={size.h / view.zoom + 20}
+          fill="url(#grid-major)"
+        />
+
+        <WiresLayer
+          project={project}
+          pinPos={pinPos}
+          selection={selection.connectionIds}
+          highlighted={issueHighlights.conns}
+        />
+
+        {instances.map((inst) => (
+          <PartView
+            key={inst.id}
+            inst={inst}
+            def={definitions.get(inst.id)}
+            selected={selection.componentIds.includes(inst.id)}
+            issueHighlight={issueHighlights.comps.has(inst.id)}
+            connectedPins={connectedPins.get(inst.id)}
+            zoom={view.zoom}
+            onPointerDown={onPartPointerDown}
+            onDoubleClick={onPartDoubleClick}
+            onPinClick={onPinClick}
+          />
+        ))}
+
+        <WireDraftLayer pinPos={pinPos} />
+
+        {boxRect && (
+          <rect
+            x={boxRect.x} y={boxRect.y} width={boxRect.w} height={boxRect.h}
+            fill="rgba(61,157,242,0.08)" stroke="#3d9df2" strokeWidth={1 / view.zoom} strokeDasharray={`${4 / view.zoom}`}
+          />
+        )}
+      </svg>
+
+      <PinTooltip toWorldRect={() => svgRef.current?.getBoundingClientRect() ?? null} />
+      <Minimap instances={instances} definitions={definitions} size={size} />
+    </div>
+  );
+}
+
+// ---------------- wires ----------------
+
+const WiresLayer = memo(function WiresLayer({
+  project,
+  pinPos,
+  selection,
+  highlighted,
+}: {
+  project: CircuitProject;
+  pinPos: (c: string, p: string) => Pt | null;
+  selection: string[];
+  highlighted: Set<string>;
+}) {
+  const frame = useSimulationStore((s) => s.frame);
+  const status = useSimulationStore((s) => s.status);
+
+  // net activity: map connection -> high/low when simulating
+  const graph = useMemo(() => buildCircuitGraph(project), [project]);
+  const activity = useMemo(() => {
+    void frame;
+    const snapshot = useSimulationStore.getState().pinSnapshot;
+    const map = new Map<string, boolean>();
+    if (!snapshot || status === 'stopped') return map;
+    const board = project.boardInstances[0];
+    if (!board) return map;
+    for (const conn of project.connections) {
+      const netId = graph.netOf.get(`${conn.sourceComponentId}:${conn.sourcePinId}`);
+      if (!netId) continue;
+      const net = graph.nets.find((n) => n.id === netId);
+      if (!net) continue;
+      for (const node of net.nodes) {
+        const [instId, pinId] = node.split(/:(.+)/s) as unknown as [string, string];
+        if (instId === board.id) {
+          const boardDef = graph.definitions.get(board.id);
+          // The runner's own index, not the Arduino pin number: they are the
+          // same on AVR and nothing else, so asking for the Arduino number is
+          // why wire activity never lit up on an RP2040 or an ESP32 — and
+          // would never light up on a custom board of any architecture.
+          const index = boardDef?.isBoard ? runnerPinIndex(boardDef, pinId) : undefined;
+          if (index !== undefined && snapshot.states[index] === 'high') {
+            map.set(conn.id, true);
+            break;
+          }
+        }
+      }
+    }
+    return map;
+  }, [frame, status, project, graph]);
+
+  const store = useEditorStore;
+  return (
+    <g>
+      {project.connections.map((conn) => {
+        const a = pinPos(conn.sourceComponentId, conn.sourcePinId);
+        const b = pinPos(conn.targetComponentId, conn.targetPinId);
+        if (!a || !b) {
+          // One end names a pin that is not there any more — a part was
+          // swapped for one without it. Show the loose end, not nothing.
+          const at = a ?? b;
+          if (!at) return null;
+          return (
+            <g key={conn.id} data-connection-id={conn.id} data-dangling="true">
+              <title>This wire is not connected at its other end: the pin it went to no longer exists. Delete it or rewire it.</title>
+              <circle cx={at.x} cy={at.y} r="5" fill="none" stroke="#f85149" strokeWidth="1.6" />
+              <path d={`M ${at.x - 3} ${at.y - 3} l 6 6 M ${at.x + 3} ${at.y - 3} l -6 6`} stroke="#f85149" strokeWidth="1.4" />
+            </g>
+          );
+        }
+        const d = wirePath(a, b, conn.points, conn.routing);
+        const selected = selection.includes(conn.id);
+        const active = activity.get(conn.id);
+        const issueHl = highlighted.has(conn.id);
+        return (
+          <g key={conn.id} data-connection-id={conn.id}>
+            <path d={d} stroke="transparent" strokeWidth="10" fill="none" style={{ cursor: 'pointer' }}
+              onPointerDown={(e) => {
+                const s = store.getState();
+                // A finger wiring up a pin a wire already runs over is after
+                // the pin: let the touch through to the pin finder.
+                if (e.pointerType === 'touch' && (s.tool === 'wire' || s.wireDraft)) return;
+                e.stopPropagation();
+                if (e.shiftKey) {
+                  s.setSelection({
+                    componentIds: s.selection.componentIds,
+                    connectionIds: selected
+                      ? s.selection.connectionIds.filter((id) => id !== conn.id)
+                      : [...s.selection.connectionIds, conn.id],
+                  });
+                } else {
+                  s.setSelection({ componentIds: [], connectionIds: [conn.id] });
+                }
+              }}
+            />
+            <path d={d} stroke="rgba(0,0,0,0.4)" strokeWidth="4.6" fill="none" strokeLinecap="round" opacity="0.5" transform="translate(0.8 1.2)" />
+            {active && <path d={d} stroke={conn.color} strokeWidth="7" fill="none" strokeLinecap="round" opacity="0.32" />}
+            <path
+              d={d}
+              stroke={issueHl ? '#f85149' : conn.color}
+              strokeWidth={selected ? 4.4 : 3.4}
+              fill="none"
+              strokeLinecap="round"
+              opacity={active ? 1 : 0.92}
+            />
+            {selected && <path d={d} stroke="#3d9df2" strokeWidth="1.2" strokeDasharray="5 4" fill="none" />}
+            <circle cx={a.x} cy={a.y} r="2.6" fill={conn.color} stroke="rgba(0,0,0,0.4)" strokeWidth="0.7" />
+            <circle cx={b.x} cy={b.y} r="2.6" fill={conn.color} stroke="rgba(0,0,0,0.4)" strokeWidth="0.7" />
+            {conn.label && (
+              <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 6} fontSize="9" fill="#a8b3bf" textAnchor="middle">
+                {conn.label}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </g>
+  );
+});
+
+function WireDraftLayer({ pinPos }: { pinPos: (c: string, p: string) => Pt | null }) {
+  const draft = useEditorStore((s) => s.wireDraft);
+  if (!draft || !draft.cursor) return null;
+  const from = pinPos(draft.fromComponentId, draft.fromPinId);
+  if (!from) return null;
+  const target = draft.snapTo ? pinPos(draft.snapTo.componentId, draft.snapTo.pinId) : null;
+  const end = target ?? draft.cursor;
+  const d = wirePath(from, end, draft.points, 'smooth');
+  return (
+    <g pointerEvents="none">
+      <path d={d} stroke="#3d9df2" strokeWidth="3" fill="none" strokeLinecap="round" strokeDasharray="7 5" opacity="0.9" />
+      <circle cx={from.x} cy={from.y} r="3.4" fill="#3d9df2" />
+      {target ? (
+        // Will connect here.
+        <g data-wire-end="snapped">
+          <circle cx={target.x} cy={target.y} r="7" fill="rgba(63,185,80,0.25)" stroke="#3fb950" strokeWidth="1.8" />
+          <circle cx={target.x} cy={target.y} r="2.6" fill="#3fb950" />
+        </g>
+      ) : (
+        // Dangling: a click here bends the wire rather than ending it.
+        <circle data-wire-end="dangling" cx={end.x} cy={end.y} r="4" fill="none" stroke="#f0883e" strokeWidth="1.6" strokeDasharray="2 2" />
+      )}
+    </g>
+  );
+}
+
+// ---------------- pin markers ----------------
+//
+// Pins used to be drawn as a nearly transparent hit circle, so they were only
+// findable by sweeping the cursor over the board. The marker below is purely
+// decorative — it is painted underneath the unchanged interactive circle with
+// pointer events off, so the hit area and the electrical connection point are
+// exactly what they were.
+//
+// Two independent channels keep the states readable:
+//   fill   = what the pin IS   (power / ground / analog / digital / …)
+//   stroke = what the pin is DOING (idle, connected, selected, invalid, …)
+
+/** Pin-type fills, drawn from the existing theme tokens in styles.css. */
+const PIN_FILL: Record<string, string> = {
+  'power-5v': '#f85149', // --error red, the usual supply colour
+  'power-vin': '#f85149',
+  'power-3v3': '#d29922', // --warn amber
+  ground: '#6b7885', // --text-2 neutral
+  analog: '#3fb950', // --ok green
+  digital: '#3d9df2', // --accent blue
+  reset: '#a8b3bf', // --text-1
+  aref: '#a8b3bf',
+};
+const PIN_FILL_DEFAULT = '#8b98a5'; // passive / anode / cathode / nc
+
+/** State ring colours, brightest by default so a pin never hides on artwork. */
+const PIN_RING = {
+  hover: '#8fd0ff',
+  wiring: '#3fb950',
+  invalid: '#f85149',
+  selected: '#3d9df2',
+  connected: '#ffffff',
+  idle: '#e6ebf1', // --text-0
+};
+
+// ---------------- parts ----------------
+
+const PartView = memo(function PartView({
+  inst,
+  def,
+  selected,
+  issueHighlight,
+  connectedPins,
+  zoom,
+  onPointerDown,
+  onDoubleClick,
+  onPinClick,
+}: {
+  inst: ComponentInstance;
+  def: PartDefinition | undefined;
+  selected: boolean;
+  issueHighlight: boolean;
+  connectedPins: Set<string> | undefined;
+  zoom: number;
+  onPointerDown: (inst: ComponentInstance, e: React.PointerEvent) => void;
+  onDoubleClick: (inst: ComponentInstance, def: PartDefinition | undefined) => void;
+  onPinClick: (componentId: string, pin: PinDefinition, e: React.MouseEvent) => void;
+}) {
+  const visual = useSimulationStore((s) => s.visuals[inst.id]);
+  const hoveredPin = useEditorStore((s) => s.hoveredPin);
+  const wireDraft = useEditorStore((s) => s.wireDraft);
+
+  if (!def) {
+    return (
+      <g transform={`translate(${inst.x} ${inst.y})`}>
+        <rect width="60" height="40" rx="4" fill="#3a2222" stroke="#6e2724" />
+        <text x="30" y="24" fontSize="8" fill="#ff8a80" textAnchor="middle">missing def</text>
+      </g>
+    );
+  }
+
+  const { w, h } = partSize(def);
+  const showPinLabels = zoom > 1.5;
+  const isBoard = Boolean(def.isBoard);
+  const pinRadius = isBoard ? 3.6 : 3.1;
+  // Zoomed far out, the halo and ring turn into mush on dense headers, so drop
+  // back to a plain colour dot rather than adding clutter.
+  const simplePins = zoom < 0.6;
+
+  return (
+    <g
+      transform={`translate(${inst.x} ${inst.y}) rotate(${inst.rotation} ${w / 2} ${h / 2})`}
+      data-part-id={inst.id}
+      data-definition-id={def.id}
+      onPointerDown={(e) => onPointerDown(inst, e)}
+      onDoubleClick={() => onDoubleClick(inst, def)}
+      style={{ cursor: 'move' }}
+    >
+      {def.isBoard ? (
+        def.artwork.builtinId === 'arduino-uno' ? (
+          <UnoArtwork def={def} />
+        ) : def.artwork.builtinId === 'arduino-mega' ? (
+          <MegaArtwork def={def} />
+        ) : def.artwork.builtinId === 'arduino-leonardo' ? (
+          <LeonardoArtwork def={def} />
+        ) : def.artwork.builtinId === 'microbit' ? (
+          <MicrobitArtwork def={def} visual={visual} />
+        ) : def.artwork.kind === 'svg' || def.artwork.builtinId === 'custom-board' ? (
+          <CustomBoardArtwork def={def} />
+        ) : (
+          <GenericModuleArtwork def={def} />
+        )
+      ) : (
+        <ComponentArtwork def={def} instance={inst} visual={visual} />
+      )}
+
+      {visual?.fault && (
+        // Something electrically wrong: a burned-out LED, a shorted battery.
+        // Hover for what happened and what to do about it.
+        <g transform={`translate(${w - 2} ${-2}) rotate(${-inst.rotation})`} pointerEvents="all" data-fault={visual.fault}>
+          <title>{visual.fault}</title>
+          <circle r={7} fill="#d29922" stroke="#0d1117" strokeWidth={1.2} />
+          <text y={3.4} fontSize={10} fontWeight={800} fill="#0d1117" textAnchor="middle">!</text>
+        </g>
+      )}
+
+      {(selected || issueHighlight) && (
+        <rect
+          x={-5} y={-5} width={w + 10} height={h + 10} rx="6"
+          fill="none"
+          stroke={issueHighlight ? '#f85149' : '#3d9df2'}
+          strokeWidth={1.6 / Math.max(zoom, 0.4)}
+          strokeDasharray={issueHighlight ? '4 3' : undefined}
+        />
+      )}
+
+      {/* interactive pins */}
+      {def.pins.map((pin) => {
+        const hovered = hoveredPin?.componentId === inst.id && hoveredPin.pinId === pin.id;
+        const wiring = Boolean(wireDraft);
+        const connected = connectedPins?.has(pin.id) ?? false;
+        const ring = hovered
+          ? PIN_RING.hover
+          : wiring
+            ? PIN_RING.wiring
+            : issueHighlight
+              ? PIN_RING.invalid
+              : selected
+                ? PIN_RING.selected
+                : connected
+                  ? PIN_RING.connected
+                  : PIN_RING.idle;
+        // The marker plus its stroke stays inside pinRadius, so it never spills
+        // past the hit circle it sits under.
+        const markerR = (hovered ? pinRadius + 0.7 : pinRadius) - 0.9;
+        const ringW = hovered || connected || selected || issueHighlight ? 1 : 0.7;
+        return (
+          <g key={pin.id}>
+            {simplePins ? (
+              <circle
+                cx={pin.x}
+                cy={pin.y}
+                r={markerR}
+                fill={PIN_FILL[pin.type] ?? PIN_FILL_DEFAULT}
+                pointerEvents="none"
+              />
+            ) : (
+              <>
+                {/* halo: keeps the marker off traces, silkscreen and labels */}
+                <circle cx={pin.x} cy={pin.y} r={pinRadius} fill="rgba(0,0,0,0.5)" pointerEvents="none" />
+                <circle
+                  cx={pin.x}
+                  cy={pin.y}
+                  r={markerR}
+                  fill={PIN_FILL[pin.type] ?? PIN_FILL_DEFAULT}
+                  stroke={ring}
+                  strokeWidth={ringW}
+                  pointerEvents="none"
+                />
+                {connected && (
+                  <circle cx={pin.x} cy={pin.y} r={Math.max(0.6, pinRadius - 2.4)} fill="#0d1117" pointerEvents="none" />
+                )}
+              </>
+            )}
+            <circle
+              cx={pin.x}
+              cy={pin.y}
+              r={hovered ? pinRadius + 1.6 : pinRadius}
+              fill="rgba(255,255,255,0.001)"
+              stroke="transparent"
+              strokeWidth="1"
+              style={{ cursor: 'crosshair' }}
+              data-pin-id={pin.id}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => onPinClick(inst.id, pin, e)}
+              onPointerEnter={() => useEditorStore.getState().setHoveredPin({ componentId: inst.id, pinId: pin.id })}
+              onPointerLeave={() => useEditorStore.getState().setHoveredPin(null)}
+            />
+            {showPinLabels && !isBoard && (
+              <text
+                x={pin.x}
+                y={pin.y - 6}
+                fontSize="7"
+                fill={hovered ? '#cfe6ff' : '#9fb0c2'}
+                textAnchor="middle"
+                pointerEvents="none"
+              >
+                {pin.label}
+              </text>
+            )}
+          </g>
+        );
+      })}
+
+      {inst.label && (
+        <text x={w / 2} y={-8} fontSize="10" fill="#a8b3bf" textAnchor="middle" pointerEvents="none">
+          {inst.label}
+        </text>
+      )}
+    </g>
+  );
+});
+
+// ---------------- pin tooltip ----------------
+
+function PinTooltip({ toWorldRect }: { toWorldRect: () => DOMRect | null }) {
+  const hoveredPin = useEditorStore((s) => s.hoveredPin);
+  const project = useEditorStore((s) => s.project);
+  const view = useEditorStore((s) => s.view);
+  const simStatus = useSimulationStore((s) => s.status);
+  const pinSnapshot = useSimulationStore((s) => s.pinSnapshot);
+
+  const data = useMemo(() => {
+    if (!hoveredPin || !project) return null;
+    const inst = [...project.boardInstances, ...project.componentInstances].find((i) => i.id === hoveredPin.componentId);
+    const def = inst ? resolveDefinition(inst.definitionId, project) : undefined;
+    const pin = def?.pins.find((p) => p.id === hoveredPin.pinId);
+    if (!inst || !def || !pin) return null;
+    const abs = pinAbsolute(inst, def, pin);
+    const connections = project.connections.filter(
+      (c) =>
+        (c.sourceComponentId === inst.id && c.sourcePinId === pin.id) ||
+        (c.targetComponentId === inst.id && c.targetPinId === pin.id),
+    );
+    let simState: string | null = null;
+    if (def.isBoard && simStatus !== 'stopped' && pinSnapshot) {
+      const n = runnerPinIndex(def, pin.id);
+      if (n !== undefined && n < pinSnapshot.states.length) {
+        const st = pinSnapshot.states[n];
+        const duty = pinSnapshot.duty[n];
+        simState = st === 'high' || st === 'low' ? `${st.toUpperCase()}${duty > 0.02 && duty < 0.98 && st === 'high' ? ` (PWM ${(duty * 100).toFixed(0)}%)` : ''}` : st;
+      }
+    }
+    return { inst, def, pin, abs, connections, simState };
+  }, [hoveredPin, project, simStatus, pinSnapshot]);
+
+  if (!data) return null;
+  const rect = toWorldRect();
+  if (!rect) return null;
+  const sx = (data.abs.x - view.x) * view.zoom;
+  const sy = (data.abs.y - view.y) * view.zoom;
+  if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) return null;
+
+  const { pin, connections, simState } = data;
+  return (
+    <div className="pin-tooltip" style={{ left: Math.min(sx + 14, rect.width - 270), top: Math.max(sy - 10, 8) }}>
+      <div className="pt-title">
+        {pin.label}
+        {pin.number ? ` (pin ${pin.number})` : ''}
+      </div>
+      <div className="pt-row">Type: <b>{pin.type}</b></div>
+      {pin.voltage !== undefined && <div className="pt-row">Voltage: <b>{pin.voltage} V</b></div>}
+      {pin.maxCurrentMa !== undefined && <div className="pt-row">Max current: <b>{pin.maxCurrentMa} mA</b></div>}
+      {pin.capabilities.length > 0 && (
+        <div className="pt-row">Capabilities: <b>{pin.capabilities.join(', ')}</b></div>
+      )}
+      <div className="pt-row">
+        Connections: <b>{connections.length === 0 ? 'none' : connections.length}</b>
+      </div>
+      {simState && <div className="pt-row">Simulation: <b>{simState}</b></div>}
+      {pin.description && <div className="pt-row">{pin.description}</div>}
+    </div>
+  );
+}
+
+// ---------------- minimap ----------------
+
+const Minimap = memo(function Minimap({
+  instances,
+  definitions,
+  size,
+}: {
+  instances: ComponentInstance[];
+  definitions: Map<string, PartDefinition>;
+  size: { w: number; h: number };
+}) {
+  const view = useEditorStore((s) => s.view);
+  if (instances.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const inst of instances) {
+    const def = definitions.get(inst.id);
+    if (!def) continue;
+    const b = partBounds(inst, def);
+    minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.w); maxY = Math.max(maxY, b.y + b.h);
+  }
+  const pad = 100;
+  minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+  const MW = 148, MH = 104;
+  const scale = Math.min(MW / (maxX - minX), MH / (maxY - minY));
+
+  return (
+    <svg
+      className="minimap"
+      width={MW}
+      height={MH}
+      onPointerDown={(e) => {
+        const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+        const wx = minX + (e.clientX - rect.left) / scale;
+        const wy = minY + (e.clientY - rect.top) / scale;
+        const s = useEditorStore.getState();
+        s.setView({ x: wx - size.w / s.view.zoom / 2, y: wy - size.h / s.view.zoom / 2, zoom: s.view.zoom });
+      }}
+    >
+      {instances.map((inst) => {
+        const def = definitions.get(inst.id);
+        if (!def) return null;
+        const b = partBounds(inst, def);
+        return (
+          <rect
+            key={inst.id}
+            x={(b.x - minX) * scale}
+            y={(b.y - minY) * scale}
+            width={Math.max(2, b.w * scale)}
+            height={Math.max(2, b.h * scale)}
+            fill={def.isBoard ? '#2b7bb5' : '#5c6a76'}
+            rx="1"
+          />
+        );
+      })}
+      <rect
+        x={(view.x - minX) * scale}
+        y={(view.y - minY) * scale}
+        width={(size.w / view.zoom) * scale}
+        height={(size.h / view.zoom) * scale}
+        fill="rgba(61,157,242,0.1)"
+        stroke="#3d9df2"
+        strokeWidth="1"
+      />
+    </svg>
+  );
+});
