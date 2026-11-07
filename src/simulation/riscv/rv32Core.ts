@@ -620,7 +620,14 @@ export class Rv32Core {
             (((instruction >>> 11) & 0x3) << 4) |
             (((instruction >>> 5) & 0x1) << 3) |
             (((instruction >>> 6) & 0x1) << 2);
-          if (immediate === 0) throw new RiscvFault('illegal compressed instruction', pc, instruction);
+          if (immediate === 0) {
+            // A zero immediate is reserved, and 0x0000 is the defined illegal
+            // instruction (c.unimp): ESP-IDF's abort() executes it on purpose,
+            // to enter its panic handler through the exception. So it traps
+            // (cause 2, illegal instruction), as on the chip.
+            this.trap(2, instruction, false, pc);
+            return;
+          }
           this.setReg(rdC, (this.reg(2) + immediate) | 0);
           return;
         }

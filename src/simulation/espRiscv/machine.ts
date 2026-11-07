@@ -51,6 +51,7 @@ import {
   type RomMachineState,
 } from '../esp32c3/romFunctions';
 import { romTableFor } from '../esp32c6/romDispatch';
+import { RegisterFile } from '../esp32c3/registerFile';
 import type { EspApplicationImage } from '../esp32c3/espImage';
 
 /**
@@ -118,6 +119,9 @@ class SparseMemory {
     this.pages.clear();
   }
 }
+
+/** The register blocks in the RTC / low-power domain, which a software reset does not clear. */
+const RETAINED_THROUGH_SOFTWARE_RESET = new Set(['rtc_cntl', 'lp_peripherals']);
 
 /**
  * C.EBREAK, little-endian: what a firmware routine the machine provides is
@@ -401,8 +405,28 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
     this.core.registers[2] = this.soc.romStackTop | 0;
   }
 
+  /**
+   * A reset software asked for (esp_restart() through the ROM's software_reset
+   * routines). The digital side restarts and boots the image again; the RTC /
+   * low-power domain keeps its registers — ESP-IDF leaves the reason for the
+   * restart in its store registers, for esp_reset_reason() after the reboot —
+   * and the flash keeps what was written to it. Time carries on: this board
+   * rebooted, the rest of the bench did not.
+   */
+  private softwareReset(reason: ResetReason): void {
+    const kept = this.peripherals
+      .filter((p): p is RegisterFile => p instanceof RegisterFile && RETAINED_THROUGH_SOFTWARE_RESET.has(p.name))
+      .map((p) => [p, p.snapshot()] as const);
+    const now = this.elapsedNanos;
+    this.reset();
+    for (const [p, saved] of kept) p.restore(saved);
+    this.elapsedNanos = now;
+    this.romState.resetReason = reason;
+  }
+
   /** Returns the machine to its power-on state and boots the same image again. */
   reset(): void {
+    this.romState.pendingReset = null;
     this.elapsedNanos = 0;
     this.stalled = false;
     this.idleSkips = 0;
@@ -432,6 +456,10 @@ export class EspRiscvMachine implements Bus, SimulatedClock {
    * caller can advance a cycle counter.
    */
   step(): number {
+    if (this.romState.pendingReset !== null) {
+      this.softwareReset(this.romState.pendingReset);
+      return 0;
+    }
     if (
       this.interruptsDirty ||
       (this.nextInterruptCheckNanos !== undefined && this.elapsedNanos >= this.nextInterruptCheckNanos)

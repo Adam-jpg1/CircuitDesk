@@ -55,6 +55,16 @@ export class RegisterFile implements Peripheral {
     this.registers.clear();
   }
 
+  /** Every stored register, to carry through a reset this block survives. */
+  snapshot(): Map<number, number> {
+    return new Map(this.registers);
+  }
+
+  restore(saved: Map<number, number>): void {
+    this.registers.clear();
+    for (const [offset, value] of saved) this.registers.set(offset, value);
+  }
+
   /** Raw stored value, for tests and diagnostics. */
   peek(offset: number): number {
     return (this.registers.get(offset) ?? 0) >>> 0;

@@ -130,11 +130,17 @@ export interface RomMachineState {
    * what a particular part's ROM keeps.
    */
   chipState: Map<string, unknown>;
+  /**
+   * Set by the ROM's software_reset routines: the reset the machine carries out
+   * before its next instruction (espRiscv/machine.ts), or null.
+   */
+  pendingReset: ResetReason | null;
 }
 
 export function createRomMachineState(resetReason = ResetReason.PowerOn): RomMachineState {
   return {
     resetReason,
+    pendingReset: null,
     regi2c: new Map<number, number>(),
     cache: { iCacheEnabled: false, iCacheFrozen: false, iromMmuSize: 0, dromMmuSize: 0 },
     cpuFrequencyMhz: 160,
@@ -1780,6 +1786,31 @@ export const ESP32C3_ROM_FUNCTIONS: RomFunction[] = [
     name: 'ets_install_putc1',
     handler: installPutc1,
     rationale: 'Stores the ROM printf character sink for diagnostics; nothing calls back into firmware.',
+  },
+  {
+    address: 0x40000090,
+    name: 'software_reset',
+    handler: ({ machine }) => {
+      machine.pendingReset = ResetReason.RtcSwSys;
+    },
+    rationale: 'esp_restart() on the system: the machine reboots the image before the next instruction, keeping flash and the RTC domain.',
+  },
+  {
+    address: 0x40000094,
+    name: 'software_reset_cpu',
+    handler: ({ machine }) => {
+      machine.pendingReset = ResetReason.SwSys;
+    },
+    rationale: "esp_restart()'s CPU reset: the machine reboots the image before the next instruction, keeping flash and the RTC domain.",
+  },
+  {
+    address: 0x4000051c,
+    name: 'Cache_Disable_ICache',
+    handler: ({ machine }) => {
+      machine.cache.iCacheEnabled = false;
+      return 0;
+    },
+    rationale: 'esp_restart() turns the cache off just before resetting the CPU; there is no translation to tear down.',
   },
   {
     address: 0x40000524,
