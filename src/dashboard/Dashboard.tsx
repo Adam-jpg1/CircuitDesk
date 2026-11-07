@@ -94,8 +94,8 @@ export function Dashboard() {
             <LogoIcon style={{ width: 52, height: 52, opacity: 0.8 }} />
             <h2 style={{ margin: '6px 0 2px', color: 'var(--text-0)' }}>Welcome to CircuitDesk</h2>
             <p style={{ maxWidth: 460 }}>
-              Build electronics projects with real boards, real wiring rules, a real compiler and a real AVR
-              emulator. Start with the Blink starter — it compiles and runs out of the box.
+              Build electronics projects with real boards, real wiring rules and a real compiler, then run the
+              firmware you built on the simulated chip. Start with the Blink starter: it compiles and runs out of the box.
             </p>
             <div className="empty-actions">
               <button className="btn primary" onClick={() => void createProject(() => buildBlinkProject('My First Project'))}>

@@ -14,11 +14,13 @@ import {
   type InputQuantity,
 } from '../simulation/inputControls';
 import { revealCodeLocation } from './CodePanel';
+import { useIsPhone } from './phoneLayout';
 import type { ComponentInstance, Connection, PartDefinition } from '../types';
 
 export function Inspector() {
   const project = useEditorStore((s) => s.project);
   const selection = useEditorStore((s) => s.selection);
+  const phone = useIsPhone();
 
   if (!project) return null;
   const inst = [...project.boardInstances, ...project.componentInstances].find(
@@ -38,7 +40,9 @@ export function Inspector() {
           <div className="empty-state">
             <p>Select a component, board or wire to inspect it.</p>
             <p style={{ fontSize: 11.5 }}>
-              Hover a pin for its electrical details. Use the Wire tool (W) or click any pin to start a connection.
+              {phone
+                ? 'Tap a part on the circuit to inspect it. Choose Wire, then tap two pins to connect them.'
+                : 'Hover a pin for its electrical details. Use the Wire tool (W) or click any pin to start a connection.'}
             </p>
           </div>
         )}

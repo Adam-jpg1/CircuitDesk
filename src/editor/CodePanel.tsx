@@ -6,6 +6,7 @@ import { useEditorStore } from '../app/editorStore';
 import { resolveDefinition } from '../project/partsRegistry';
 import { boardsUsingSketch, isSketchFile, sketchDocuments, sketchIdFor } from '../project/sketches';
 import { buildSerialLabels } from '../simulation/serialLog';
+import { useIsPhone } from './phoneLayout';
 
 // On a touch device Monaco's touch helpers leave a cancellation promise
 // unhandled when an editor is disposed — switching the phone's Code pane from
@@ -62,6 +63,7 @@ export function CodePanel() {
   const activeBoardId = useEditorStore((s) => s.activeBoardId);
   const lastCompile = useEditorStore((s) => s.lastCompile);
   const [addingFile, setAddingFile] = useState(false);
+  const phone = useIsPhone();
   const newFileRef = useRef<HTMLInputElement>(null);
 
   const file = project?.codeFiles.find((f) => f.id === activeFileId) ?? project?.codeFiles[0];
@@ -169,9 +171,11 @@ export function CodePanel() {
           onChange={(value) => s.updateCodeFile(file.id, value ?? '')}
           onMount={onMount}
           options={{
-            fontSize: 13,
             fontFamily: "'SF Mono', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace",
             minimap: { enabled: false },
+            // A phone has no room to scroll sideways through a long line.
+            wordWrap: phone ? 'on' : 'off',
+            fontSize: phone ? 12 : 13,
             scrollBeyondLastLine: false,
             automaticLayout: true,
             tabSize: 2,
