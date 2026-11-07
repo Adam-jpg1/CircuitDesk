@@ -648,6 +648,8 @@ export class CortexM {
 
   private systickValue(): number {
     if (!(this.stCsr & 1) || this.stNextWrap === Infinity) return this.stLoadValue;
+    // Between reaching zero and the reload on the next tick, it reads zero.
+    if (this.cycles < this.stLoadCycle) return 0;
     const elapsed = Math.floor((this.cycles - this.stLoadCycle) / this.systickTickCycles());
     return Math.max(0, this.stLoadValue - elapsed);
   }
@@ -660,10 +662,9 @@ export class CortexM {
       this.stNextWrap = Infinity;
       return;
     }
-    // From `value`, it reaches zero after `value` ticks; from zero it reloads
-    // on the next tick and wraps one full period later.
-    const ticks = value === 0 ? 1 : value;
-    this.stNextWrap = this.cycles + ticks * this.systickTickCycles();
+    // From `value`, it reaches zero after `value` ticks. At zero already, it
+    // reloads on the next tick (updateSystick), with no COUNTFLAG for this zero.
+    this.stNextWrap = this.cycles + value * this.systickTickCycles();
   }
 
   private updateSystick(): void {
@@ -674,16 +675,18 @@ export class CortexM {
         this.stCsr |= 0x10000;
         if (this.stCsr & 2) this.setPendingException(EXC.SYSTICK);
       }
-      // Reload. A reload value of zero stops the counter at zero.
-      this.stLoadCycle = at;
+      // The counter sits at zero for one tick and reloads on the next, so a
+      // period is RVR+1 ticks (ARMv7-M ARM B3.3: "RELOAD ... N-1 for a
+      // period of N"). A reload value of zero stops the counter at zero.
+      const tick = this.systickTickCycles();
+      this.stLoadCycle = at + tick;
       this.stLoadValue = this.stRvr;
       if (this.stRvr === 0) {
         this.stNextWrap = Infinity;
         this.stLoadValue = 0;
         break;
       }
-      this.stNextWrap = at + this.stRvr * this.systickTickCycles();
-      // Counting down from RVR, zero arrives RVR ticks after the reload.
+      this.stNextWrap = at + (this.stRvr + 1) * tick;
     }
   }
 
