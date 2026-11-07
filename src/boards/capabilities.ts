@@ -441,6 +441,9 @@ const TEENSY41_SIM_APIS = [
   'attachInterrupt (RISING, FALLING, CHANGE, LOW, HIGH)',
   'Wire (pins 18/19)',
   'SPI (pins 11-13)',
+  'IntervalTimer and tone() (on the PIT)',
+  'Servo (the Teensy core\'s own library)',
+  'EEPROM (emulated in the QSPI flash; kept through the board\'s reset button, while Run and Reset start it erased)',
 ];
 
 const TEENSY41_SIM_PERIPHERALS = [
@@ -450,14 +453,16 @@ const TEENSY41_SIM_PERIPHERALS = [
   'GPIO1-5 and the fast GPIO6-9 with edge and level interrupts',
   'ADC1/ADC2, FlexPWM1-4 and QuadTimer1-3 outputs, LPUART6, LPI2C1, LPSPI4',
   'USB OTG1 in device mode (queue heads, transfer descriptors, a simulated host that opens the CDC port)',
+  'PIT (four channels on the 24 MHz peripheral clock)',
+  'FlexSPI IP commands: page program and sector/block erase of the QSPI flash',
 ];
 
 const TEENSY41_LIMITATION =
   "Real i.MX RT1062 firmware from the Teensy 4 core on CircuitDesk's ARMv7-M core: startup, setup() and loop(), GPIO, " +
-  'analogRead, analogWrite, Serial over USB, Serial1, Wire, SPI and attachInterrupt. Built at the core\'s 60 MHz speed ' +
-  'setting rather than 600 MHz, so heavy computation runs slower than on the board while timing stays exact. Serial2-8, ' +
-  'the other I2C and SPI ports, IntervalTimer and tone(), EEPROM, DMA, Ethernet, the SD card slot, the external PSRAM ' +
-  'and audio are not simulated.';
+  'analogRead, analogWrite, Serial over USB, Serial1, Wire, SPI, attachInterrupt, IntervalTimer, tone(), Servo and ' +
+  'EEPROM (kept through the board\'s reset button; Run and Reset start it erased). Built at the core\'s 60 MHz speed setting rather than ' +
+  '600 MHz, so heavy computation runs slower than on the board while timing stays exact. Serial2-8, the other I2C and ' +
+  'SPI ports, DMA, Ethernet, the SD card slot, the external PSRAM and audio are not simulated.';
 
 const PI_SIM_APIS = [
   'Python 3: functions, classes, loops, try/except, comprehensions, f-strings',

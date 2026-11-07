@@ -651,8 +651,7 @@ const IMXRT1062: ProcessorProfile = {
   logicVolts: 3.3,
   notModelled: [
     'LPUART1-5/7/8, LPI2C2-4 and LPSPI1-3 (Serial2-8, Wire1/2, SPI1/2)',
-    'PIT and GPT timers (IntervalTimer, tone), eDMA, FlexIO, ENET, uSDHC, the external PSRAM',
-    'the EEPROM emulation in flash',
+    'the GPT timers, eDMA, FlexIO, ENET, uSDHC, the external PSRAM',
     'clock reconfiguration: the CPU runs at the speed the sketch was built for',
   ],
 };

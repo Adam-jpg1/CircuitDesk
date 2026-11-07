@@ -241,5 +241,69 @@ void loop() { digitalWrite(13, HIGH); delay(100); digitalWrite(13, LOW); delay(1
   }
 }
 
+section('IntervalTimer, tone(), Servo and EEPROM');
+// IntervalTimer and tone() run on the PIT; Servo is Teensy's own library;
+// EEPROM is emulated in the last sectors of the QSPI flash, changed through
+// FlexSPI IP commands. 3000 writes to one address fill an EEPROM sector
+// (2048 two-byte entries), so the emulation has to erase and compact one.
+{
+  const b = await boot(`#include <Servo.h>
+#include <EEPROM.h>
+IntervalTimer it;
+volatile uint32_t ticks = 0;
+void tick() { ticks++; }
+Servo sv;
+void setup() {
+  ${WAIT}
+  it.begin(tick, 1000);
+  tone(9, 1000);
+  sv.attach(6);
+  sv.write(90);
+  for (int i = 0; i < 3000; i++) EEPROM.write(0, i & 0xff);
+  for (int a = 1; a < 40; a++) EEPROM.write(a, a * 3);
+  bool ok = EEPROM.read(0) == (2999 & 0xff);
+  for (int a = 1; a < 40; a++) ok = ok && EEPROM.read(a) == a * 3;
+  Serial.print("eeprom "); Serial.println(ok ? "ok" : "bad");
+  uint32_t t0 = ticks; delay(500); Serial.print("ticks "); Serial.println(ticks - t0);
+}
+void loop() {}`);
+  if (b) {
+    const edges: number[] = [];
+    const tonePad = pin('D9');
+    b.r.addPinListener((p: number, high: boolean) => {
+      if (p === tonePad && high) edges.push(b.r.timeMs);
+    });
+    run(b.r, 2500, 20);
+    check(/eeprom ok/.test(b.out()), `EEPROM keeps every write, through a sector rollover (${last(b.out(), /(eeprom \w+)/g) ?? 'nothing'})`);
+    const ticks = Number(last(b.out(), /ticks (\d+)/g) ?? 0);
+    check(ticks >= 499 && ticks <= 501, `IntervalTimer at 1 ms fires 500 times in 500 ms (${ticks})`);
+    const recent = edges.slice(-40);
+    const period = recent.length > 2 ? (recent.at(-1)! - recent[0]) / (recent.length - 1) : 0;
+    check(Math.abs(period - 1) < 0.01, `tone(9, 1000) makes a 1 kHz square wave (${period.toFixed(4)} ms period)`);
+    const width = b.r.snapshot().pulseWidthUs[pin('D6')];
+    check(width > 1400 && width < 1600, `Servo.write(90) makes a 1.5 ms pulse on pin 6 (${width?.toFixed(0)} us)`);
+  }
+}
+
+section('EEPROM survives the reset button');
+{
+  const b = await boot(`#include <EEPROM.h>
+void setup() {
+  ${WAIT}
+  int boots = EEPROM.read(100) == 0xff ? 1 : EEPROM.read(100) + 1;
+  EEPROM.write(100, boots);
+  Serial.print("boot "); Serial.println(boots);
+}
+void loop() {}`);
+  if (b) {
+    run(b.r, 800, 20);
+    const first = last(b.out(), /boot (\d+)/g);
+    b.r.reset();
+    run(b.r, 800, 20);
+    const second = last(b.out(), /boot (\d+)/g);
+    check(first === '1' && second === '2', `a value written before the reset is read after it (boot ${first}, then boot ${second})`);
+  }
+}
+
 console.log(`\n--- ${failures} failing, ${skipped} skipped`);
 process.exit(failures ? 1 : 0);

@@ -15,19 +15,23 @@
 //   * FlexPWM1-4 and QuadTimer1-3 driving their pins as analogWrite sets them;
 //   * LPUART6 (Serial1 on pins 0/1), LPI2C1 (Wire on 18/19), LPSPI4 (SPI on
 //     11-13);
-//   * the USB OTG1 device controller (usb.ts), which Serial is.
+//   * the USB OTG1 device controller (usb.ts), which Serial is;
+//   * the PIT (pit.ts), which IntervalTimer and tone() run on;
+//   * FlexSPI's IP commands (flexspi.ts), which program and erase the flash
+//     EEPROM is emulated in.
 //
 // The CPU clock is fixed at the speed the sketch was built for; the PLL and
 // divider settings are accepted and reported but do not change it. Not
-// modelled: the other UARTs, I2C and SPI ports, PIT/GPT timers, DMA, the
-// ethernet MAC, SD card, FlexIO, the external PSRAM and the EEPROM emulation
-// in flash.
+// modelled: the other UARTs, I2C and SPI ports, the GPT timers, DMA, the
+// ethernet MAC, SD card, FlexIO and the external PSRAM.
 
 import { CortexM } from '../armv7m/cortexM';
 import type { MemoryRegion } from '../armv7m/bus';
 import type { ArmMcu, I2cMasterHooks, McuSerial } from '../armv7m/armRunner';
 import { EventQueue, Pads, Periph, PeriphBus, NOT_DRIVEN } from '../armv7m/peripherals';
 import { ImxrtUsb } from './usb';
+import { Pit } from './pit';
+import { FlexSpi } from './flexspi';
 
 /** The speed the CircuitDesk build selects (the core's 60 MHz setting). */
 export const IMXRT_HZ = 60_000_000;
@@ -110,7 +114,7 @@ const PWM_ROUTES: Record<number, PwmRoute> = {
 const ADC1_INPUTS = [27, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26];
 const ADC2_INPUTS = [27, 28, 29, 30, 31, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26];
 
-const IRQ = { LPUART6: 25, LPI2C1: 28, LPSPI4: 35, USB1: 113, GPIO5: 88, GPIO6789: 157 };
+const IRQ = { LPUART6: 25, LPI2C1: 28, LPSPI4: 35, USB1: 113, GPIO5: 88, PIT: 122, GPIO6789: 157 };
 
 /** The fast GPIO blocks 6-9 are 1-4 again, by the IOMUXC_GPR26-29 selection. */
 const GPIO_BASES: [number, number][] = [
@@ -124,6 +128,10 @@ export class Imxrt1062 implements ArmMcu {
   readonly hz = IMXRT_HZ;
   readonly adcReference = 3.3;
   readonly flash = new Uint8Array(FLASH_BYTES).fill(0xff);
+  /** The QSPI flash, where the EEPROM emulation writes (flexspi.ts). */
+  get nonVolatile(): Uint8Array[] {
+    return [this.flash];
+  }
   readonly itcm = new Uint8Array(TCM_BYTES);
   readonly dtcm = new Uint8Array(TCM_BYTES);
   readonly ocram = new Uint8Array(OCRAM_BYTES);
@@ -325,14 +333,17 @@ export class Imxrt1062 implements ArmMcu {
     const ocotp = bus.add(new Periph('OCOTP', 0x401f4000, 0x4000));
     ocotp.init(0x4e0, (0x56a << 20) | (0x4b0 << 8) | 0x5f); // ANA1: room count, hot count, hot temperature
     ocotp.init(0x0, 0); // CTRL: not busy
-    // FlexSPI: IP commands finish at once; nothing answers on FLEXSPI2, so no
+    // FlexSPI: IP commands on FLEXSPI program and erase the QSPI flash, which
+    // is where EEPROM lives (flexspi.ts); nothing answers on FLEXSPI2, so no
     // external PSRAM or flash is detected there.
-    for (const base of [0x402a8000, 0x402a4000]) {
-      const f = bus.add(new Periph('FLEXSPI', base, 0x4000));
-      f.reg(0x00, () => f.peek(0) & ~1); // MCR0: software reset completes
-      f.reg(0x14, () => 0x1 | (f.peek(0x14) & ~1)); // INTR.IPCMDDONE
-      f.reg(0xe4, () => 0x3); // STS0: idle
-    }
+    new FlexSpi(bus.add(new Periph('FLEXSPI', 0x402a8000, 0x4000)), this.flash);
+    new FlexSpi(bus.add(new Periph('FLEXSPI2', 0x402a4000, 0x4000)), null);
+
+    // PIT: IntervalTimer, and tone() on it.
+    new Pit(
+      { hz: this.hz, events: this.events, cycles: () => this.core.cycles, setIrq: (on) => this.core.setIrqLevel(IRQ.PIT, on) },
+      bus.add(new Periph('PIT', 0x40084000, 0x4000)),
+    );
 
     // IOMUXC: the mux and pad control of each Teensy pin.
     const iomuxc = bus.add(new Periph('IOMUXC', 0x401f8000, 0x4000));

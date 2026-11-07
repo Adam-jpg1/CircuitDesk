@@ -247,6 +247,45 @@ async function toolchainOverride(fqbn: string): Promise<string[]> {
   return existsSync(bin) ? ['--build-property', `compiler.path=${bin}${path.sep}`] : [];
 }
 
+/**
+ * Libraries a core bundles that a general-purpose library installed for every
+ * board would otherwise shadow.
+ *
+ * The Teensy package's architecture is called "avr", and the Servo library the
+ * service installs lists "avr" among its architectures, so arduino-cli picked
+ * it over Teensy's own Servo for a Teensy build — and that library stops with
+ * an #error on anything but a real AVR. Naming the core's copy with --library
+ * makes the build use it. The paths are fixed by the installed core; nothing in
+ * a request chooses them.
+ */
+const PLATFORM_LIBRARY_PINS: Record<string, string[]> = {
+  'teensy:avr': ['Servo'],
+};
+
+async function platformLibraryPins(fqbn: string): Promise<string[]> {
+  const core = fqbn.split(':').slice(0, 2).join(':');
+  const names = PLATFORM_LIBRARY_PINS[core];
+  if (!names) return [];
+  const shared = await resolveSharedDataDir();
+  if (!shared) return [];
+  const [packager, architecture] = core.split(':');
+  const hardware = path.join(shared, 'packages', packager, 'hardware', architecture);
+  let versions: string[];
+  try {
+    versions = (await readdir(hardware)).sort();
+  } catch {
+    return [];
+  }
+  const version = versions.at(-1);
+  if (!version) return [];
+  const out: string[] = [];
+  for (const name of names) {
+    const dir = path.join(hardware, version, 'libraries', name);
+    if (existsSync(dir)) out.push('--library', dir);
+  }
+  return out;
+}
+
 /** The Espressif targets, whose builds produce an application image plus bootloader and partitions. */
 function isEspArch(arch: BoardTarget['arch']): boolean {
   return arch === 'esp32' || arch === 'esp32s3' || arch === 'esp32c3' || arch === 'esp32c6';
@@ -275,7 +314,7 @@ export async function cliCompile(
   // is content-keyed instead, which is what keeps one user's sketch objects out
   // of another's while the core archives, which contain nobody's source, are
   // shared.
-  const toolchain = await toolchainOverride(fqbn);
+  const toolchain = [...(await toolchainOverride(fqbn)), ...(await platformLibraryPins(fqbn))];
   const args = syntaxOnly
     ? ['compile', ...jobs, ...skip, ...toolchain, '--fqbn', fqbn, '--warnings', 'default', sketchDir]
     : ['compile', ...jobs, ...skip, ...toolchain, '--fqbn', fqbn, '--warnings', 'default', '--output-dir', outputDir, sketchDir];
