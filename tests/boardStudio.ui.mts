@@ -98,7 +98,7 @@ try {
   {
     await page.click('[data-testid="studio-step-processor"]');
     const body = (await page.textContent('[data-testid="studio-pane-processor"]')) ?? '';
-    check(/never guess/i.test(body), 'the step says outright that CircuitDesk will not guess it');
+    check(/does not guess the chip/i.test(body), 'the step says that CircuitDesk does not guess it');
     check(/PIO/.test(body), 'and each chip is offered with what is NOT modelled about it');
     check(
       /breakout|shield|passive/i.test(body),

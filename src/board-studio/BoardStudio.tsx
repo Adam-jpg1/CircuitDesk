@@ -363,8 +363,8 @@ function ProcessorStep() {
     <div className="studio-step-body">
       <h3>What chip is on it?</h3>
       <p className="studio-muted">
-        CircuitDesk cannot work this out for you. What compiles, what runs and which pads your pins can reach all
-        follow from this answer.
+        CircuitDesk does not guess the chip. What compiles, what runs and which pads your pins can reach all follow
+        from this answer.
       </p>
 
       {suggestions.length > 0 && (
