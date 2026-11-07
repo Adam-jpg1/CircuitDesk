@@ -108,6 +108,10 @@ export class Ra4m1 implements ArmMcu {
   readonly flash = new Uint8Array(RA4M1_FLASH_BYTES).fill(0xff);
   readonly sram = new Uint8Array(SRAM_BYTES);
   readonly dataFlash = new Uint8Array(DATA_FLASH_BYTES).fill(0xff);
+  /** Code and data flash: the EEPROM library keeps its data in the data flash. */
+  get nonVolatile(): Uint8Array[] {
+    return [this.flash, this.dataFlash];
+  }
   readonly regions: MemoryRegion[];
   readonly bus = new PeriphBus();
   readonly pads = new Pads(RA4M1_PAD_COUNT);

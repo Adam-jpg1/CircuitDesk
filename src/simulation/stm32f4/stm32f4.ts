@@ -100,6 +100,10 @@ export class Stm32f4 implements ArmMcu {
   readonly hz = STM32F4_HZ;
   readonly adcReference = 3.3;
   readonly flash = new Uint8Array(STM32F4_FLASH_BYTES).fill(0xff);
+  /** Flash, which the EEPROM library programs. */
+  get nonVolatile(): Uint8Array[] {
+    return [this.flash];
+  }
   readonly sram = new Uint8Array(SRAM_BYTES);
   readonly regions: MemoryRegion[];
   readonly bus = new PeriphBus();

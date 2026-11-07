@@ -62,6 +62,12 @@ export interface ArmMcu extends ArmChip {
   spiTransfer: ((mosi: number, mode: 0 | 1 | 2 | 3) => number) | null;
   /** Loads the stack pointer and entry point, as the chip's reset does. */
   reset(): void;
+  /**
+   * The chip's non-volatile memory: flash the firmware can program (where the
+   * EEPROM library keeps its data). A board reset rebuilds the chip, and these
+   * are carried into the new one, since the reset button does not erase flash.
+   */
+  readonly nonVolatile?: Uint8Array[];
   activeI2cPads?(): { sda?: number; scl?: number } | undefined;
   activeSpiPads?(): { sck?: number; mosi?: number; miso?: number } | undefined;
 }
@@ -108,7 +114,10 @@ export class ArmRunner {
   }
 
   private build(): void {
+    // What the firmware wrote to flash outlives the reset, as on the board.
+    const kept = this.chip?.nonVolatile?.map((a) => a.slice());
     const chip = this.makeChip();
+    if (kept) chip.nonVolatile?.forEach((a, i) => kept[i] && a.length === kept[i].length && a.set(kept[i]));
     this.chip = chip;
     this.trackers = Array.from({ length: chip.pads.count }, () => ({
       lastHigh: false, lastChangeCycle: 0, highCycles: 0, windowStartCycle: 0, pulseRiseCycle: 0, pulseWidthUs: 0, toggles: 0,
