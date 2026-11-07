@@ -154,7 +154,13 @@ class Esp32Spi1 extends Store {
       if (user & (1 << 30)) {
         // A user transaction sends ADDR from its top bit (spi_flash_ll_set_usr_address).
         const bits = ((user1 >>> 26) & 0x3f) + 1;
-        address = bits >= 32 ? addrReg : addrReg >>> (32 - bits);
+        const sent = bits >= 32 ? addrReg : addrReg >>> (32 - bits);
+        // Dual and quad I/O reads (BB, EB) send the continuous-mode bits in the
+        // same phase, after the 24-bit address: ESP-IDF's NVS reads use quad
+        // I/O with a 32-bit phase. Taking all 32 bits as the address read every
+        // NVS page from 256 times too high, so Preferences and EEPROM never
+        // found what they had written.
+        address = bits > 24 ? sent >>> (bits - 24) : sent;
       }
       const mosiLen = user & (1 << 27) ? Math.ceil(((this.readUint32(0x28) & 0xffffff) + 1) / 8) : 0;
       const misoLen = user & (1 << 28) ? Math.ceil(((this.readUint32(0x2c) & 0xffffff) + 1) / 8) : 0;
