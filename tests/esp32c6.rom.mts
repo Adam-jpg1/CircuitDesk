@@ -46,9 +46,13 @@ const c6 = Object.entries(ESP32C6_ROM_ADDRESSES);
   // Nearly all of them move. A handful genuinely do not, which is a fact of
   // the two ROM layouts rather than a mistake, so the assertion is that the
   // overwhelming majority differ — not that none coincides.
+  // software_reset and software_reset_cpu sit at 0x40000090/0x40000094 in
+  // both chips' linker scripts (esp32c3.rom.ld, esp32c6.rom.ld), as does
+  // esp_rom_get_reset_reason's target: those coincidences are real.
+  const KNOWN_SAME = new Set(['software_reset', 'software_reset_cpu', 'esp_rom_get_reset_reason']);
   const identical = shared.filter(([name, address]) => c3ByName.get(name) === address);
   check(
-    identical.length <= 2,
+    identical.filter(([name]) => !KNOWN_SAME.has(name)).length === 0 && identical.length <= 3,
     `all but ${identical.length} of them move between the two chips (${identical.map(([n]) => n).join(', ') || 'none stayed'})`,
   );
   check(
